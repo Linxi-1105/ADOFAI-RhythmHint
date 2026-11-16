@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 开发用：读 Phira（RPE）谱、把谱面对齐到关卡，用来衡量自动排键像不像用户的手法。
+       Mod 不引用这个项目，游戏里不会读任何外部谱面。 -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <RootNamespace>RhythmHint.Reference</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\RhythmHint.Core\RhythmHint.Core.csproj" />
+    <!-- record 需要的编译器标记，和 Core 共用同一个文件 -->
+    <Compile Include="..\RhythmHint.Core\Polyfills.cs" Link="Polyfills.cs" />
+  </ItemGroup>
+</Project>

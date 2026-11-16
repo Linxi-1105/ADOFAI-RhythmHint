@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 纯逻辑：自动排键、节拍线、画面时钟。不引用 Unity 和游戏，可以单独编译和测试。
+       Mod 项目直接把这里的源码编进自己的 DLL，所以游戏里只需要一个 DLL。 -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <RootNamespace>RhythmHint.Core</RootNamespace>
+  </PropertyGroup>
+</Project>

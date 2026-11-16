@@ -1,0 +1,86 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 游戏路径：在仓库根目录的 local.props 里写 GameDir（见 local.props.example），
+       或设环境变量 ADOFAI_DIR。游戏的 DLL 只在本机引用，不进仓库。 -->
+  <Import Project="..\..\local.props" Condition="Exists('..\..\local.props')" />
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>RhythmHint</AssemblyName>
+    <RootNamespace>RhythmHint</RootNamespace>
+    <ModId>RhythmHint</ModId>
+    <GameDir Condition="'$(GameDir)' == ''">$(ADOFAI_DIR)</GameDir>
+    <ManagedDir>$(GameDir)\A Dance of Fire and Ice_Data\Managed</ManagedDir>
+    <ModDeployDir>$(GameDir)\Mods\$(ModId)</ModDeployDir>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Core 的源码直接编进本 DLL，游戏里只需要一个文件 -->
+    <Compile Include="..\RhythmHint.Core\**\*.cs" Exclude="..\RhythmHint.Core\bin\**;..\RhythmHint.Core\obj\**" LinkBase="Core" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies.net48" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- netstandard 也用游戏自带的（2.1）：Unity 6 的模块按 2.1 编译，.NET Framework 参考程序集里只有 2.0。
+         UnityEngine.UI / UIModule：设置窗口底下的透明挡板（InputShield）用 -->
+    <GameReference Include="Assembly-CSharp;RDTools;UnityEngine;UnityEngine.CoreModule;UnityEngine.IMGUIModule;UnityEngine.TextRenderingModule;UnityEngine.InputLegacyModule;UnityEngine.AudioModule;UnityEngine.UIModule;UnityEngine.UI;netstandard" />
+    <Reference Include="@(GameReference)">
+      <HintPath>$(ManagedDir)\%(Identity).dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityModManager">
+      <HintPath>$(ManagedDir)\UnityModManager\UnityModManager.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="CheckGameDir" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="!Exists('$(ManagedDir)\Assembly-CSharp.dll')"
+           Text="找不到游戏文件：$(ManagedDir)\Assembly-CSharp.dll。请复制 local.props.example 为 local.props 并填写 GameDir，或设置环境变量 ADOFAI_DIR。" />
+    <Error Condition="!Exists('$(ManagedDir)\UnityModManager\UnityModManager.dll')"
+           Text="游戏里还没装 Unity Mod Manager（找不到 $(ManagedDir)\UnityModManager\UnityModManager.dll）。" />
+  </Target>
+
+  <!-- UMM 的 Info.json：版本号取自 Directory.Build.props，只有一个来源 -->
+  <Target Name="WriteInfoJson" AfterTargets="Build">
+    <PropertyGroup>
+      <InfoJsonText>{
+  "Id": "$(ModId)",
+  "DisplayName": "全节奏提示 RhythmHint",
+  "Author": "XM",
+  "Version": "$(Version)",
+  "ManagerVersion": "0.27.0",
+  "AssemblyName": "$(AssemblyName).dll",
+  "EntryMethod": "RhythmHint.Main.Load"
+}</InfoJsonText>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(OutDir)Info.json" Lines="$(InfoJsonText)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+  </Target>
+
+  <!-- dotnet build -c Release -p:UmmPackage=true：在仓库根目录 artifacts\ 生成 UMM 可直接安装的 RhythmHint-版本.zip。
+       压缩包里只有 RhythmHint/RhythmHint.dll 和 RhythmHint/Info.json（UMM 识别 Info.json 所在的文件夹）。
+       用 MSBuild 的 ZipDirectory：路径分隔符是标准的「/」。0.9.1 用 Windows PowerShell 5.1 的 Compress-Archive 打包，
+       路径是「RhythmHint\Info.json」，不是标准 zip 路径，安装器可能认不出 -->
+  <Target Name="PackageForUmm" AfterTargets="WriteInfoJson" Condition="'$(UmmPackage)' == 'true'">
+    <PropertyGroup>
+      <ArtifactsDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '..', '..', 'artifacts'))</ArtifactsDir>
+      <PackageStageDir>$(ArtifactsDir)stage\</PackageStageDir>
+      <PackageZip>$(ArtifactsDir)$(ModId)-$(Version).zip</PackageZip>
+    </PropertyGroup>
+    <RemoveDir Directories="$(PackageStageDir)" />
+    <Copy SourceFiles="$(OutDir)$(AssemblyName).dll;$(OutDir)Info.json" DestinationFolder="$(PackageStageDir)$(ModId)" />
+    <ZipDirectory SourceDirectory="$(PackageStageDir)" DestinationFile="$(PackageZip)" Overwrite="true" />
+    <RemoveDir Directories="$(PackageStageDir)" />
+    <Message Importance="high" Text="已打包 $(PackageZip)" />
+  </Target>
+
+  <!-- dotnet build -p:Deploy=true：编译后复制到游戏的 Mods 目录（不碰已有的 Settings.xml） -->
+  <Target Name="DeployToGame" AfterTargets="WriteInfoJson" Condition="'$(Deploy)' == 'true'">
+    <Copy SourceFiles="$(OutDir)$(AssemblyName).dll;$(OutDir)$(AssemblyName).pdb;$(OutDir)Info.json" DestinationFolder="$(ModDeployDir)" />
+    <Message Importance="high" Text="已复制到 $(ModDeployDir)" />
+  </Target>
+</Project>

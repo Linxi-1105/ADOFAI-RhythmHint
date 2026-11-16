@@ -1,0 +1,976 @@
+<title>排键试验台</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* 布局：顶部控制条；左边大画布并排放几列四轨谱（像游戏里一样往下落），右边是结论、录制和参数面板；窄屏时面板落到画布下面 */
+:root {
+  --bg: #0e0f13;
+  --panel: #16171d;
+  --raise: #1e2028;
+  --line: #2b2d37;
+  --fg: #e9e9ef;
+  --muted: #8e909d;
+  --orange: #f5782a;
+  --blue: #3d9ee0;
+  --ok: #4cc38a;
+  --bad: #e2574c;
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+  --font-title: "Segoe UI Variable Display", "Segoe UI", "Microsoft YaHei UI", system-ui, sans-serif;
+  --font-num: "Cascadia Mono", Consolas, "SF Mono", ui-monospace, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 12px;
+}
+h1 { font-family: var(--font-title); font-size: 22px; font-weight: 650; margin: 0; letter-spacing: 0.01em; }
+h2 { font-family: var(--font-title); font-size: 15px; font-weight: 650; margin: 0 0 8px; color: var(--orange); }
+button, select, input, textarea { font: inherit; color: var(--fg); }
+button {
+  background: var(--raise); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer;
+}
+button:hover { border-color: var(--muted); }
+button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--orange); outline-offset: 1px; }
+button.primary { background: var(--orange); border-color: var(--orange); color: #16110c; font-weight: 650; }
+button.rec { border-color: var(--bad); color: #ffb3ac; }
+button:disabled { opacity: 0.45; cursor: default; }
+select, input[type=number], input[type=text], textarea {
+  background: var(--raise); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
+}
+input[type=number] { width: 84px; font-family: var(--font-num); }
+textarea { width: 100%; min-height: 70px; resize: vertical; }
+label { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); }
+.bar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-bottom: 10px; }
+.bar .ctrl { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.file input { max-width: 190px; color: var(--muted); }
+.layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; align-items: start; }
+@media (max-width: 980px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+.stage { min-width: 0; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+.status { color: var(--muted); font-family: var(--font-num); font-size: 13px; }
+.canvas-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: #0a0b0e; }
+canvas { display: block; }
+.note { color: var(--muted); font-size: 12.5px; margin: 6px 2px 0; }
+.side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.choices label { background: var(--raise); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; color: var(--fg); cursor: pointer; }
+.choices input { accent-color: var(--orange); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.small { font-size: 12.5px; color: var(--muted); }
+.recs { display: flex; flex-direction: column; gap: 4px; max-height: 180px; overflow-y: auto; }
+.recs label { color: var(--fg); font-family: var(--font-num); font-size: 12.5px; }
+.param { display: grid; grid-template-columns: 1fr 120px 46px; gap: 8px; align-items: center; color: var(--muted); }
+.param input[type=range] { accent-color: var(--orange); width: 100%; }
+#volume { accent-color: var(--orange); width: 110px; }
+#volumeOut { font-family: var(--font-num); color: var(--fg); min-width: 3.2em; }
+.param output { font-family: var(--font-num); color: var(--fg); text-align: right; }
+.ok { color: var(--ok); }
+.bad { color: var(--bad); }
+kbd { font-family: var(--font-num); background: var(--raise); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+</style>
+
+<header class="bar">
+  <h1>排键试验台</h1>
+  <div class="ctrl">
+    <label>关卡 <select id="level"></select></label>
+    <label class="file">读取 .adofai <input type="file" id="file" accept=".adofai"></label>
+    <label>起点 <input type="number" id="start" step="0.5" min="0" value="0"> 秒</label>
+    <label>长度 <select id="len"><option>4</option><option selected>6</option><option>8</option><option>12</option></select> 秒</label>
+    <button id="prev" type="button">上一段</button>
+    <button id="next" type="button">下一段</button>
+    <label>速度 <select id="speed"><option value="0.5">0.5 倍</option><option value="0.75">0.75 倍</option><option value="1" selected>1 倍</option></select></label>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="stage">
+    <div class="actions">
+      <button id="play" type="button">播放</button>
+      <button id="record" type="button" class="rec">录制下意识手法</button>
+      <label>试打 <select id="tryCol"></select></label>
+      <button id="try" type="button">开始试打</button>
+      <button id="stop" type="button" disabled>停止</button>
+      <label>音量 <input type="range" id="volume" min="0" max="100" step="5" value="30"> <output id="volumeOut">30%</output></label>
+      <span id="status" class="status"></span>
+    </div>
+    <div class="actions">
+      <label class="file">歌曲文件 <input type="file" id="music" accept="audio/*,.ogg,.mp3,.wav"></label>
+      <span id="musicState" class="small"></span>
+      <label><input type="checkbox" id="sMusic" checked> 音乐</label>
+      <label><input type="checkbox" id="sMetro" checked> 节拍器</label>
+      <label><input type="checkbox" id="sHit" checked> 打击音</label>
+    </div>
+    <div class="canvas-wrap" id="wrap"><canvas id="cv" aria-label="几种排键方案并排的四轨谱面"></canvas></div>
+    <p class="note">滚轮或拖动画面可以前后移动时间。点「手排」列某一下的轨道，就把这一下改到那条轨道；按住 Shift 点，改成那只手的双押。</p>
+  </section>
+
+  <aside class="side">
+    <section class="card">
+      <h2>逐段闯关</h2>
+      <p class="small">从当前这一段开始一段一段地打。每段先只看节奏凭本能打一遍，再按勾选的排法各打一遍；每一遍你实际按的键都会录下来。</p>
+      <div class="choices" id="guideVariants"></div>
+      <div class="row"><button id="guide" type="button" class="primary">开始闯关</button><span id="guideState" class="small"></span></div>
+      <p class="small">打完一遍会停下：<kbd>空格</kbd> 继续，<kbd>R</kbd> 重打这一遍，<kbd>Esc</kbd> 结束。</p>
+    </section>
+
+    <section class="card">
+      <h2>录制下意识手法</h2>
+      <p class="small">录制时画面只显示节奏、不显示轨道，免得被提示带偏。按你平时打冰与火的习惯用任意键打，录完会把你的排法画成一列，并自动保存。</p>
+      <label>四条轨道对应的键 <input type="text" id="keys" value="D F J K" maxlength="40" style="width: 120px"></label>
+      <p class="small">其它键也会原样记下来（画在列的右侧）。预备一小节后开始；不准的话调这里：</p>
+      <div class="param"><span>输入偏移（毫秒）</span><input type="range" id="inputOffset" min="-150" max="150" step="5" value="0"><output id="inputOffsetOut">0</output></div>
+      <div class="recs" id="recs"></div>
+    </section>
+
+    <section class="card">
+      <h2>这一段哪种最顺手</h2>
+      <div class="choices" id="best"></div>
+      <textarea id="verdictNote" placeholder="为什么顺手，或者哪里别扭（比如：这里应该换手、这三下想用同一根手指……）"></textarea>
+      <div class="row"><button id="save" type="button" class="primary">保存这一段的结论</button><span id="saveState" class="small"></span></div>
+    </section>
+
+    <section class="card">
+      <h2>「当前 Mod」列的参数</h2>
+      <div class="param"><span>主手重置间隔（毫秒）</span><input type="range" id="pReset" min="100" max="300" step="5" value="165"><output id="pResetOut">165</output></div>
+      <div class="param"><span>双押前后换手（毫秒）</span><input type="range" id="pFocus" min="0" max="800" step="10" value="450"><output id="pFocusOut">450</output></div>
+      <div class="param"><span>同键连按最短（毫秒）</span><input type="range" id="pJack" min="50" max="300" step="5" value="150"><output id="pJackOut">150</output></div>
+      <label><input type="checkbox" id="pRoll" checked> 很快时同手轮指</label>
+      <label><input type="checkbox" id="pOuter" checked> 外侧手指先落（K J D F）</label>
+    </section>
+
+    <section class="card">
+      <h2>导出</h2>
+      <p class="small" id="dbState">正在连接保存功能……</p>
+      <button id="copy" type="button">复制全部结论和录制（JSON）</button>
+    </section>
+  </aside>
+</main>
+
+<script>
+"use strict";
+// ---------- 内置关卡（砖块时间毫秒、长按毫秒、节拍线），由 tools/build-layout-lab.py 注入 ----------
+const BUILTIN = /*LEVELS*/[];
+
+const COLORS = { orange: "#f5782a", blue: "#3d9ee0", line: "#2b2d37", beat: "#1c1e25", measure: "#343744", text: "#e9e9ef", muted: "#8e909d", ok: "#4cc38a", bad: "#e2574c", judge: "#ffffff" };
+const STRATS = [
+  { key: "mine", name: "我的录制" },
+  { key: "mod", name: "当前 Mod" },
+  { key: "trill", name: "纯交互 F J" },
+  { key: "beat", name: "拍点手法（旧）" },
+  { key: "zigzag", name: "折返楼梯" },
+  { key: "manual", name: "手排" },
+];
+const $ = (id) => document.getElementById(id);
+
+// ---------- 状态 ----------
+const S = {
+  levels: [], levelIndex: 0, level: null,
+  moments: [], beats: [],
+  plans: {}, manual: {}, // manual: 关卡 key -> 每个时刻的轨道数组
+  start: 0, len: 6, speed: 1, now: 0,
+  mode: "idle", audio: null, run: null,
+  recordings: [], shownRec: null,
+  db: null,
+};
+
+// ---------- 关卡数据 ----------
+function levelFromExport(e, key) {
+  return {
+    key,
+    name: e.name,
+    song: e.song || "", offset: (e.offset || 0) / 1000, pitch: e.pitch || 100,
+    tiles: e.tiles.map(([i, ms, h]) => ({ i, t: ms / 1000, hold: h / 1000 })),
+    beats: e.beats.map(([ms, m]) => ({ t: ms / 1000, m: !!m })),
+  };
+}
+
+// 把挨得很近的砖（< 35 ms，含伪双押）合成一个「时刻」
+function toMoments(tiles) {
+  const out = [];
+  for (const tile of tiles) {
+    const last = out[out.length - 1];
+    if (last && tile.t - last.t < 0.035) { last.count++; last.tiles.push(tile.i); }
+    else out.push({ t: tile.t, count: 1, tiles: [tile.i], hold: tile.hold });
+  }
+  return out;
+}
+
+function loadLevel(index) {
+  S.levelIndex = index;
+  S.level = S.levels[index];
+  S.moments = toMoments(S.level.tiles);
+  S.beats = S.level.beats.map((b) => b.t);
+  showMusicState();
+  autoLoadMusic(S.level);
+  if (!S.manual[S.level.key]) S.manual[S.level.key] = null;
+  replan();
+  setSegment(Math.max(0, Math.floor(S.moments[0].t)));
+}
+
+// ---------- 读 .adofai（只支持 angleData + SetSpeed + Twirl 的常见关卡，和 tools/Preview.cs 同一套规则） ----------
+function parseAdofai(text) {
+  const clean = text.replace(/^﻿/, "").replace(/,(\s*[\]}])/g, "$1");
+  const j = JSON.parse(clean);
+  const angles = j.angleData;
+  if (!Array.isArray(angles)) throw new Error("只支持带 angleData 的关卡");
+  const bpm = Number(j.settings && j.settings.bpm);
+  if (!(bpm > 0)) throw new Error("关卡没有 bpm");
+  const ev = {};
+  for (const a of j.actions || []) (ev[a.floor] = ev[a.floor] || []).push(a);
+  const tiles = []; const speeds = [];
+  let time = 0, cw = true, cur = bpm, lastDir = 0;
+  for (let k = 0; k < angles.length; k++) {
+    for (const e of ev[k] || []) {
+      if (e.eventType === "Twirl") cw = !cw;
+      else if (e.eventType === "SetSpeed") cur = e.speedType === "Multiplier" ? cur * Number(e.bpmMultiplier) : Number(e.beatsPerMinute);
+    }
+    if (k > 0) tiles.push({ i: k, t: time, hold: 0 });
+    if (!speeds.length || Math.abs(speeds[speeds.length - 1].s - cur / bpm) > 1e-9) speeds.push({ t: time, s: cur / bpm });
+    if (angles[k] === 999) { lastDir = (lastDir + 180) % 360; continue; }
+    const entry = (k > 0 ? lastDir : 0) + 180;
+    const mod = (x) => ((x % 360) + 360) % 360;
+    let swept = cw ? mod(entry - angles[k]) : mod(angles[k] - entry);
+    if (swept < 1e-6) swept = 360;
+    time += swept / 180 * 60 / cur;
+    lastDir = angles[k];
+  }
+  tiles.push({ i: angles.length, t: time, hold: 0 });
+  // 节拍线：×2、×0.5 这类变速只改疏密不改拍子（和 Mod 的 BeatGrid.MusicalTempo 一致）
+  const tempo = []; let factor = 1, density = 1;
+  for (const sp of speeds) {
+    const l2 = Math.log2(sp.s / (factor * density));
+    if (Math.abs(l2 - Math.round(l2)) < 0.01) { density *= 2 ** Math.round(l2); if (tempo.length) continue; }
+    else factor = sp.s / density;
+    tempo.push({ t: sp.t, spb: 60 / bpm / factor });
+  }
+  const beats = []; let seg = 0, t = 0, beat = 0;
+  while (t <= time + 2 && beats.length < 20000) {
+    while (seg + 1 < tempo.length && tempo[seg + 1].t <= t + 1e-6) seg++;
+    beats.push({ t, m: beat % 4 === 0 });
+    let next = t + Math.max(0.01, tempo[seg].spb);
+    if (seg + 1 < tempo.length && next > tempo[seg + 1].t + 1e-6) { next = tempo[seg + 1].t; beat = -1; }
+    t = next; beat++;
+  }
+  const st = j.settings || {};
+  return { tiles, beats, song: st.songFilename || "", offset: (Number(st.offset) || 0) / 1000, pitch: Number(st.pitch) || 100 };
+}
+
+// ---------- 排键方案 ----------
+const P = { reset: 0.165, focus: 0.45, jack: 0.15, roll: true, outer: true };
+const EPS = 1e-6;
+
+function onBeat(t) {
+  const b = S.beats; let lo = 0, hi = b.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (b[mid] < t) lo = mid + 1; else hi = mid; }
+  for (const k of [lo - 1, lo]) {
+    if (k < 0 || k >= b.length) continue;
+    const spb = k + 1 < b.length ? b[k + 1] - b[k] : k > 0 ? b[k] - b[k - 1] : 0;
+    if (spb > 0 && Math.abs(b[k] - t) <= spb * 0.03) return true;
+  }
+  return false;
+}
+
+function hand(l) { return l < 2 ? 0 : 1; }
+function pairOf(h) { return [h * 2, h * 2 + 1]; }
+function blocked(l, t, prev) { return !!prev && prev.lanes.includes(l) && t - prev.t < P.jack - EPS; }
+
+// 当前 Mod（1.0.0）的规则，和 C# NotePlanner 一样：时间重置法（主手重置间隔 R）。
+// 慢（> R）右手食指连点；R/2–R 左右食指轮流；R/2 以内同手轮指；停下回右手；外轮 K J D F；
+// 双押优先右手、只在 0+1 / 2+3；双押前后 focus 以内的单押放另一只手（F D 轮流）；同轨不在 jack 内连按
+function planMod(M) {
+  const out = new Array(M.length); const rolled = new Array(M.length).fill(false);
+  let prev = null, last = -1, lastT = 0, lastRight = -Infinity;
+  const r = P.reset;
+  // 每个单押要给哪个双押让手：只有紧挨着双押、隔得不超过 focus 的（前后都是双押看近的，一样近看后面的）
+  const focus = M.map((m, i) => {
+    if (m.count > 1) return -1;
+    const before = i > 0 && M[i - 1].count > 1 ? m.t - M[i - 1].t : Infinity;
+    const after = i + 1 < M.length && M[i + 1].count > 1 ? M[i + 1].t - m.t : Infinity;
+    return after <= P.focus + EPS && after <= before + EPS ? i + 1 : before <= P.focus + EPS ? i - 1 : -1;
+  });
+  const nextFinger = (t) => {
+    const d = t - lastT;
+    if (last === 2) return d > r + EPS ? [2, false] : d > r / 2 + EPS || !P.roll ? [1, false] : [3, true];
+    if (last === 3) return d > r + EPS ? [2, false] : [1, false];
+    if (last === 1 && P.roll && (d <= r / 2 + EPS || t - lastRight <= r + EPS)) return [0, true];
+    return [2, false];
+  };
+  for (let i = 0; i < M.length; i++) {
+    const m = M[i]; let lanes;
+    if (m.count > 1) {
+      const handBlocked = (h) => pairOf(h).some((l) => blocked(l, m.t, prev));
+      lanes = pairOf(handBlocked(1) && !handBlocked(0) ? 0 : 1);
+    } else {
+      let [lane, roll] = nextFinger(m.t);
+      // 要让手的双押：前面的已经排好看它的手，后面的还没排按右手算
+      const ch = focus[i] < 0 ? -1 : focus[i] < i ? hand(out[focus[i]][0]) : 1;
+      if (ch >= 0) {
+        const index = ch === 1 ? 1 : 2;
+        [lane, roll] = [blocked(index, m.t, prev) ? index ^ 1 : index, false];
+      }
+      // 下一下要让给左手食指、又挨得太近：这一下先用 D（从外向内），不然下一下只能 F→D
+      if (lane === 1 && i + 1 < M.length && focus[i + 1] === i + 2 && M[i + 1].t - m.t < P.jack - EPS && !blocked(0, m.t, prev)) [lane, roll] = [0, false];
+      if (blocked(lane, m.t, prev)) {
+        let best = lane, score = 1e9;
+        for (let c = 0; c < 4; c++) {
+          if (blocked(c, m.t, prev)) continue;
+          const s = Math.min(...prev.lanes.map((p) => Math.abs(p - c))) * 10 + Math.abs(c - lane);
+          if (s < score) { score = s; best = c; }
+        }
+        [lane, roll] = [best, false];
+      }
+      lanes = [lane]; rolled[i] = roll;
+    }
+    out[i] = lanes; prev = { t: m.t, lanes };
+    last = lanes.length > 1 ? (hand(lanes[0]) === 1 ? 3 : 0) : lanes[0];
+    lastT = m.t; if (hand(last) === 1) lastRight = m.t;
+  }
+  if (P.roll && P.outer) {
+    const jacks = (k, lane, t) => out[k].includes(lane) && Math.abs(M[k].t - t) < P.jack - EPS;
+    for (let i = 1; i < M.length; i++) {
+      if (!rolled[i] || out[i - 1].length > 1 || M[i].t - M[i - 1].t > r + EPS) continue;
+      const outer = out[i][0], index = out[i - 1][0];
+      if ((outer ^ 1) !== index) continue;
+      if ((i >= 2 && jacks(i - 2, outer, M[i - 1].t)) || (i + 1 < M.length && jacks(i + 1, index, M[i].t))) {
+        // 换了会连按：改按另一只手的食指，不留「食指→外侧手指」
+        const other = hand(outer) === 1 ? 1 : 2;
+        if (!jacks(i - 1, other, M[i].t) && !(i + 1 < M.length && jacks(i + 1, other, M[i].t))) out[i] = [other];
+        continue;
+      }
+      out[i - 1] = [outer]; out[i] = [index];
+    }
+  }
+  return out;
+}
+
+// 纯交互：一直在 F J 之间交替，双押放在轮到的那只手
+function planTrill(M) {
+  let lane = 2;
+  return M.map((m, k) => {
+    lane = k === 0 ? 1 : lane === 1 ? 2 : 1;
+    return m.count > 1 ? pairOf(hand(lane)) : [lane];
+  });
+}
+
+// 0.2.0–0.4.0 的拍点手法：拍点右手，拍点之间快就换手、慢就左手，很密时四指轮换
+function planBeat(M) {
+  let last = -1, lastT = 0; const lastOfHand = [1, 2], lastTOfHand = [-1e9, -1e9];
+  return M.map((m) => {
+    let lane;
+    if (last < 0) lane = 2;
+    else {
+      const gap = m.t - lastT;
+      if (gap < 0.075) { const h = 1 - hand(last); lane = lastOfHand[h] ^ 1; }
+      else {
+        const h = onBeat(m.t) ? 1 : gap < 0.22 ? 1 - hand(last) : 0;
+        lane = h === 0 ? 1 : 2;
+        if (lane === lastOfHand[h] && m.t - lastTOfHand[h] < 0.15) lane ^= 1;
+      }
+    }
+    last = lane; lastT = m.t; lastOfHand[hand(lane)] = lane; lastTOfHand[hand(lane)] = m.t;
+    return m.count > 1 ? pairOf(hand(lane)) : [lane];
+  });
+}
+
+// 折返楼梯：0 1 2 3 2 1 0 … 一直来回走
+function planZigzag(M) {
+  let lane = 0, dir = 1;
+  return M.map((m, k) => {
+    if (k > 0) { if (lane + dir < 0 || lane + dir > 3) dir = -dir; lane += dir; }
+    return m.count > 1 ? pairOf(hand(lane)) : [lane];
+  });
+}
+
+function replan() {
+  const M = S.moments;
+  S.plans = { mod: planMod(M), trill: planTrill(M), beat: planBeat(M), zigzag: planZigzag(M) };
+  if (!S.manual[S.level.key]) S.manual[S.level.key] = S.plans.mod.map((l) => [...l]);
+  S.plans.manual = S.manual[S.level.key];
+  draw();
+  renderStats();
+}
+
+// ---------- 统计 ----------
+function segRange() {
+  const a = S.start, b = S.start + S.len; const idx = [];
+  S.moments.forEach((m, k) => { if (m.t >= a && m.t < b) idx.push(k); });
+  return idx;
+}
+
+const valid = (a) => Array.isArray(a) && a.length > 0 && a.every((l) => l >= 0);
+
+function stats(plan, idx) {
+  if (!plan) return null;
+  let linked = 0, jumps = 0, lone = 0, middle = 0, total = 0;
+  for (let j = 0; j < idx.length; j++) {
+    const k = idx[j]; const lanes = plan[k]; if (!valid(lanes)) continue;
+    total++; if (lanes.every((l) => l === 1 || l === 2)) middle++;
+    const pk = idx[j - 1], nk = idx[j + 1];
+    const dist = (a, b) => Math.min(...a.flatMap((x) => b.map((y) => Math.abs(x - y))));
+    if (pk !== undefined && valid(plan[pk]) && S.moments[k].t - S.moments[pk].t <= 0.3) {
+      linked++; if (dist(lanes, plan[pk]) >= 2) jumps++;
+      if (nk !== undefined && valid(plan[nk]) && S.moments[nk].t - S.moments[k].t <= 0.3 && dist(lanes, plan[pk]) >= 2 && dist(lanes, plan[nk]) >= 2) lone++;
+    }
+  }
+  return { jumps: linked ? Math.round((jumps / linked) * 100) : 0, lone, middle: total ? Math.round((middle / total) * 100) : 0 };
+}
+
+function agreement(plan, rec, idx) {
+  let n = 0, same = 0, sameHand = 0;
+  for (const k of idx) {
+    const r = rec[k]; const p = plan[k];
+    if (!valid(r) || !valid(p)) continue;
+    n++;
+    const key = (a) => [...a].sort().join(",");
+    if (key(r) === key(p)) same++;
+    const hands = (a) => [...new Set(a.map(hand))].sort().join(",");
+    if (hands(r) === hands(p)) sameHand++;
+  }
+  return n ? { same: Math.round((same / n) * 100), hand: Math.round((sameHand / n) * 100), n } : null;
+}
+
+let STATS = {};
+function renderStats() {
+  const idx = segRange(); STATS = {};
+  const rec = currentRecordingPlan();
+  for (const s of STRATS) {
+    const plan = s.key === "mine" ? rec : S.plans[s.key];
+    STATS[s.key] = { base: stats(plan, idx), agree: rec && s.key !== "mine" ? agreement(plan, rec, idx) : null };
+  }
+  draw();
+}
+
+// ---------- 画面 ----------
+const cv = $("cv"); const ctx = cv.getContext("2d");
+const LANE = 30, COL = LANE * 4, GAP = 26, TOP = 64, PPS = 300;
+let dpr = 1;
+
+function columns() {
+  if (S.mode === "record") return [{ key: "rhythm", name: "节奏（录制中，不显示轨道）" }];
+  if (S.mode === "try" && S.run) return STRATS.filter((x) => x.key === S.run.target);
+  return STRATS.filter((s) => s.key !== "mine" || currentRecordingPlan());
+}
+
+function resize() {
+  const cols = columns();
+  const w = Math.max($("wrap").clientWidth - 2, cols.length * (COL + GAP) + GAP + 40);
+  const h = Math.max(420, Math.min(window.innerHeight - 170, 860));
+  dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  cv.style.width = w + "px"; cv.style.height = h + "px";
+  draw();
+}
+
+function draw() {
+  const W = cv.width / dpr, H = cv.height / dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = "#0a0b0e"; ctx.fillRect(0, 0, W, H);
+  if (!S.level) return;
+  const judgeY = H - 48; const now = S.now;
+  const yOf = (t) => judgeY - (t - now) * PPS;
+  const tMin = now - (H - judgeY) / PPS, tMax = now + (judgeY - TOP) / PPS;
+  const cols = columns();
+  cols.forEach((c, ci) => {
+    const x0 = GAP + ci * (COL + GAP);
+    ctx.fillStyle = "#121318"; ctx.fillRect(x0, TOP, COL, H - TOP);
+    // 段落范围之外调暗
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    const ya = yOf(S.start), yb = yOf(S.start + S.len);
+    if (yb > TOP) ctx.fillRect(x0, TOP, COL, Math.min(yb, H) - TOP);
+    if (ya < H) ctx.fillRect(x0, Math.max(ya, TOP), COL, H - Math.max(ya, TOP));
+    // 节拍线
+    for (const b of S.level.beats) {
+      if (b.t < tMin || b.t > tMax) continue;
+      ctx.fillStyle = b.m ? COLORS.measure : COLORS.beat;
+      ctx.fillRect(x0, yOf(b.t) - (b.m ? 1 : 0.5), COL, b.m ? 2 : 1);
+    }
+    if (c.key !== "rhythm") {
+      ctx.fillStyle = COLORS.line;
+      for (let l = 1; l < 4; l++) ctx.fillRect(x0 + l * LANE, TOP, 1, H - TOP);
+    }
+    // 音符
+    const plan = c.key === "rhythm" ? null : c.key === "mine" ? currentRecordingPlan() : S.plans[c.key];
+    for (let k = 0; k < S.moments.length; k++) {
+      const m = S.moments[k]; if (m.t < tMin - 0.2 || m.t > tMax) continue;
+      const y = yOf(m.t);
+      if (c.key === "rhythm") {
+        ctx.fillStyle = m.count > 1 ? COLORS.blue : "#d8d9e0";
+        ctx.fillRect(x0 + 6, y - 6, COL - 12, 12);
+        continue;
+      }
+      const lanes = plan && plan[k];
+      if (!lanes || !lanes.length) { ctx.strokeStyle = COLORS.muted; ctx.strokeRect(x0 + 4, y - 6, COL - 8, 12); continue; }
+      const chord = lanes.filter((l) => l >= 0).length > 1;
+      for (const l of lanes) {
+        if (l < 0) continue;
+        ctx.fillStyle = chord ? COLORS.blue : COLORS.orange;
+        ctx.fillRect(x0 + l * LANE + 3, y - 6, LANE - 6, 12);
+        ctx.strokeStyle = "rgba(255,255,255,0.75)"; ctx.lineWidth = 1.2;
+        ctx.strokeRect(x0 + l * LANE + 3, y - 6, LANE - 6, 12);
+      }
+      if (c.key === "mine" && S.shownRec && S.shownRec.extra[k]) {
+        ctx.fillStyle = COLORS.muted; ctx.font = "11px " + getComputedStyle(document.body).getPropertyValue("--font-num");
+        ctx.fillText(S.shownRec.extra[k], x0 + COL + 3, y + 4);
+      }
+    }
+    // 判定线和按键框
+    ctx.fillStyle = COLORS.judge; ctx.fillRect(x0, judgeY - 1.5, COL, 3);
+    if (S.run && S.run.flash) {
+      for (let l = 0; l < 4; l++) {
+        const f = S.run.flash[l]; const a = f ? 1 - (performance.now() - f.at) / 180 : 0;
+        if (a > 0 && (c.key === "rhythm" || c.key === S.run.target)) {
+          ctx.fillStyle = (f.ok === false ? "rgba(226,87,76," : f.ok === true ? "rgba(76,195,138," : "rgba(245,120,42,") + (0.5 * a) + ")";
+          if (c.key === "rhythm") ctx.fillRect(x0, judgeY - 60, COL, 60);
+          else ctx.fillRect(x0 + l * LANE, judgeY - 60, LANE, 60);
+        }
+      }
+    }
+    // 列标题和统计
+    ctx.fillStyle = COLORS.text; ctx.font = "600 14px " + getComputedStyle(document.body).getPropertyValue("--font-ui");
+    ctx.fillText(c.name, x0, 20);
+    const st = STATS[c.key];
+    ctx.font = "12px " + getComputedStyle(document.body).getPropertyValue("--font-num");
+    if (st && st.base) {
+      ctx.fillStyle = COLORS.muted;
+      ctx.fillText(`中间两键 ${st.base.middle}%  跳轨 ${st.base.jumps}%`, x0, 38);
+      ctx.fillText(`孤立 ${st.base.lone}`, x0, 54);
+    }
+    if (st && st.agree) {
+      ctx.fillStyle = st.agree.same >= 70 ? COLORS.ok : COLORS.text;
+      ctx.fillText(`和录制同键 ${st.agree.same}% 同手 ${st.agree.hand}%`, x0 + 46, 54);
+    }
+  });
+}
+
+// ---------- 段落 ----------
+function setSegment(start) {
+  const last = S.moments.length ? S.moments[S.moments.length - 1].t : 0;
+  S.start = Math.max(0, Math.min(start, Math.max(0, last - 1)));
+  $("start").value = S.start.toFixed(1);
+  S.now = S.start - 0.2;
+  S.shownRec = null;
+  renderRecordings();
+  loadVerdict();
+  renderStats();
+}
+
+// ---------- 音频 ----------
+function volume() { return Number($("volume").value) / 100; }
+
+function ensureAudio() {
+  if (!S.audio) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    S.audio = new AC();
+    // 所有声音都过这个总音量
+    S.master = S.audio.createGain();
+    S.master.gain.value = volume();
+    S.master.connect(S.audio.destination);
+    S.musicGain = S.audio.createGain();
+    S.musicGain.gain.value = 0.8; // 歌曲比打击音轻一点，两者都受总音量控制
+    S.musicGain.connect(S.master);
+  }
+  if (S.audio.state === "suspended") S.audio.resume().catch(() => { /* 还没点过页面，等第一次点按钮再恢复 */ });
+  return S.audio;
+}
+
+function click(at, freq, gain) {
+  const a = S.audio; const o = a.createOscillator(); const g = a.createGain();
+  o.frequency.value = freq; o.type = "sine";
+  g.gain.setValueAtTime(gain, at); g.gain.exponentialRampToValueAtTime(0.0001, at + 0.05);
+  o.connect(g).connect(S.master); o.start(at); o.stop(at + 0.06);
+}
+
+// 歌曲只在本机浏览器里解码播放，不上传、不保存
+async function loadMusic(file) {
+  const a = ensureAudio();
+  $("musicState").textContent = "正在读取歌曲……";
+  try {
+    const buffer = await a.decodeAudioData(await file.arrayBuffer());
+    S.music = { key: S.level.key, buffer, name: file.name };
+    musicCache[S.level.key] = S.music;
+    showMusicState();
+  } catch (err) {
+    $("musicState").textContent = "读不了这个音频（浏览器不支持这种格式时可以换成 mp3 或 wav）";
+  }
+}
+
+// 和网页一起发布的歌：music/<关卡编号>.ogg。没有就等用户自己选文件
+const musicCache = {};
+async function autoLoadMusic(level) {
+  if (S.music && S.music.key === level.key) return;
+  if (musicCache[level.key]) { S.music = musicCache[level.key]; showMusicState(); return; }
+  try {
+    const resp = await fetch("music/" + level.key + ".ogg");
+    if (!resp.ok) return; // 这一关没有附带歌曲
+    $("musicState").textContent = "正在载入这一关的歌……";
+    const data = await resp.arrayBuffer();
+    const buffer = await ensureAudio().decodeAudioData(data);
+    musicCache[level.key] = { key: level.key, buffer, name: level.song || level.key + ".ogg" };
+    if (S.level && S.level.key === level.key) { S.music = musicCache[level.key]; showMusicState(); }
+  } catch (err) {
+    $("musicState").textContent = "自动载入歌曲失败，可以手动选文件（" + (err.message || err) + "）";
+  }
+}
+
+function showMusicState() {
+  if (!S.level) return;
+  const want = S.level.song ? "这一关的歌：" + S.level.song : "这一关没写歌曲文件名";
+  const have = S.music && S.music.key === S.level.key ? "已载入 " + S.music.name : "还没选歌曲文件";
+  const pitch = S.level.pitch !== 100 ? "（关卡音高 " + S.level.pitch + "%，这里按原速放，可能对不上）" : "";
+  $("musicState").textContent = have + " · " + want + pitch;
+}
+
+// 「听到的」音频时间：getOutputTimestamp 已经算上了输出延迟
+function heardTime(perfMs) {
+  const a = S.audio;
+  if (a.getOutputTimestamp) {
+    const ts = a.getOutputTimestamp();
+    if (ts.performanceTime) return ts.contextTime + ((perfMs ?? performance.now()) - ts.performanceTime) / 1000;
+  }
+  return a.currentTime - (a.outputLatency || a.baseLatency || 0) - (performance.now() - (perfMs ?? performance.now())) / 1000;
+}
+
+// ---------- 播放 / 录制 / 试打 ----------
+function startRun(mode, target) {
+  const a = ensureAudio();
+  stopRun(false);
+  S.mode = mode;
+  const speed = S.speed;
+  const beatsInSeg = S.beats.filter((t) => t >= S.start - 4 && t < S.start);
+  const spb = beatsInSeg.length > 1 ? beatsInSeg[beatsInSeg.length - 1] - beatsInSeg[beatsInSeg.length - 2] : 0.5;
+  const lead = spb * 4; // 预备一小节
+  const songA = S.start - lead, songB = S.start + S.len;
+  const T0 = a.currentTime + 0.15;
+  const atSong = (s) => T0 + (s - songA) / speed;
+  // 节拍器：预备那一小节总是响，之后看开关
+  for (const b of S.level.beats) {
+    if (b.t < songA - 1e-6 || b.t >= songB) continue;
+    if (b.t < S.start || $("sMetro").checked) click(atSong(b.t), b.m ? 1100 : 760, b.t < S.start ? 0.35 : 0.12);
+  }
+  if ($("sHit").checked) for (const k of segRange()) click(atSong(S.moments[k].t), 2000, mode === "record" ? 0.18 : 0.3);
+  // 歌曲：音频时间 = 砖块时间 + 关卡 offset（和游戏一样）；放慢时跟着变调
+  let src = null;
+  if ($("sMusic").checked && S.music && S.music.key === S.level.key) {
+    src = a.createBufferSource(); src.buffer = S.music.buffer; src.playbackRate.value = speed;
+    let when = T0, off = songA + S.level.offset;
+    if (off < 0) { when = T0 + -off / speed; off = 0; }
+    src.connect(S.musicGain);
+    src.start(when, off);
+    src.stop(T0 + (songB - songA) / speed + 0.6);
+  }
+  S.run = { mode, target, songA, songB, T0, speed, presses: [], flash: [null, null, null, null], raf: 0, src };
+  $("stop").disabled = false;
+  $("status").textContent = mode === "record" ? "录制中：预备一小节后开始，用你习惯的键打" : mode === "try" ? "试打中：用 " + keyLabels().join(" ") + " 打" : "播放中";
+  resize();
+  const frame = () => {
+    if (!S.run) return;
+    S.now = S.run.songA + (heardTime() - S.run.T0) * S.run.speed;
+    draw();
+    if (S.now > S.run.songB + 0.4) { finishRun(); return; }
+    S.run.raf = requestAnimationFrame(frame);
+  };
+  S.run.raf = requestAnimationFrame(frame);
+}
+
+function stopRun(redraw = true) {
+  if (S.run) {
+    cancelAnimationFrame(S.run.raf);
+    if (S.run.src) { try { S.run.src.stop(); } catch { /* 已经停了 */ } }
+  }
+  S.run = null; S.mode = "idle"; $("stop").disabled = true;
+  if (redraw) { $("status").textContent = ""; resize(); }
+}
+
+function keyLabels() { return $("keys").value.trim().split(/\s+/).map((k) => k.toUpperCase()).slice(0, 4); }
+
+document.addEventListener("keydown", (e) => {
+  if (S.guide && !S.run && !e.repeat && !(e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName))) {
+    if (e.code === "Space") { e.preventDefault(); S.guide.pos++; runGuideItem(); return; }
+    if (e.code === "KeyR") { e.preventDefault(); runGuideItem(); return; }
+    if (e.code === "Escape") { e.preventDefault(); endGuide(); return; }
+  }
+  if (!S.run || S.run.mode === "play" || e.repeat) return;
+  if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+  e.preventDefault();
+  const name = e.key.length === 1 ? e.key.toUpperCase() : e.code;
+  const lane = keyLabels().indexOf(name);
+  const offset = Number($("inputOffset").value) / 1000;
+  const t = S.run.songA + (heardTime(e.timeStamp) - S.run.T0) * S.run.speed - offset;
+  S.run.presses.push({ t, key: name, lane });
+  let ok;
+  if (S.run.mode === "try") {
+    const k = nearestMoment(t, 0.12);
+    ok = k >= 0 && S.plans[S.run.target] && (S.plans[S.run.target][k] || []).includes(lane);
+  }
+  if (lane >= 0) S.run.flash[lane] = { at: performance.now(), ok };
+});
+
+function nearestMoment(t, win) {
+  let best = -1, d = win;
+  for (const k of segRange()) { const x = Math.abs(S.moments[k].t - t); if (x <= d) { d = x; best = k; } }
+  return best;
+}
+
+// 把按键对到时刻上：每下按键找最近的、还没满的时刻（双押可以收两下）
+function matchPresses(presses) {
+  const idx = segRange(); const lanes = {}; const extra = {}; const used = {};
+  const sorted = [...presses].sort((a, b) => a.t - b.t);
+  for (const p of sorted) {
+    let best = -1, d = 1e9;
+    for (const k of idx) {
+      const m = S.moments[k]; const prevGap = k > 0 ? m.t - S.moments[k - 1].t : 1; const nextGap = k + 1 < S.moments.length ? S.moments[k + 1].t - m.t : 1;
+      const win = Math.min(0.13, Math.max(0.03, Math.min(prevGap, nextGap) * 0.5 + 0.015));
+      const x = Math.abs(m.t - p.t);
+      if (x <= win && x < d && (used[k] || 0) < Math.max(1, m.count)) { d = x; best = k; }
+    }
+    if (best < 0) continue;
+    used[best] = (used[best] || 0) + 1;
+    if (p.lane >= 0) (lanes[best] = lanes[best] || []).push(p.lane);
+    else extra[best] = (extra[best] ? extra[best] + " " : "") + p.key;
+  }
+  const plan = new Array(S.moments.length).fill(null);
+  for (const k of idx) plan[k] = lanes[k] ? [...new Set(lanes[k])] : extra[k] ? [-1] : [];
+  const hit = idx.filter((k) => used[k]).length;
+  return { plan, extra, hit, total: idx.length };
+}
+
+function finishRun() {
+  const run = S.run; stopRun(false);
+  if (run.mode === "play") { $("status").textContent = ""; resize(); renderStats(); return; }
+  const res = matchPresses(run.presses);
+  const shown = run.mode === "record" ? "rhythm" : run.target;
+  const rec = {
+    level: S.level.key, levelName: S.level.name, start: S.start, len: S.len, speed: run.speed, shown,
+    keys: keyLabels(), presses: run.presses.map((p) => Math.round(p.t * 1000) + ":" + p.key),
+    music: !!run.src, createdAt: Date.now(),
+  };
+  saveRecording(rec);
+  if (run.mode === "record") {
+    S.shownRec = { ...rec, ...res, local: true };
+    $("status").textContent = "录完了：" + res.hit + "/" + res.total + " 下对上了节奏";
+  } else {
+    const plan = S.plans[run.target]; let ok = 0;
+    for (const k of segRange()) { const r = res.plan[k]; if (r && plan[k] && [...r].sort().join() === [...plan[k]].sort().join()) ok++; }
+    const name = STRATS.find((x) => x.key === run.target).name;
+    $("status").textContent = "跟着「" + name + "」打：" + ok + "/" + res.total + " 下按的和显示的一样（不一样的地方就是你的本能）";
+  }
+  if (S.guide) { S.guide.waiting = true; updateGuide(); }
+  resize(); renderStats();
+}
+
+// ---------- 逐段闯关 ----------
+const VARIANTS = [{ key: "rhythm", name: "只看节奏（本能）", on: true }, { key: "mod", name: "当前 Mod", on: true }, { key: "trill", name: "纯交互 F J", on: true },
+  { key: "beat", name: "拍点手法", on: false }, { key: "zigzag", name: "折返楼梯", on: false }, { key: "manual", name: "手排", on: false }];
+
+function startGuide() {
+  const chosen = VARIANTS.filter((v) => $("gv-" + v.key).checked).map((v) => v.key);
+  if (!chosen.length) { $("guideState").textContent = "至少勾一种"; return; }
+  const last = S.moments[S.moments.length - 1].t; const queue = [];
+  for (let st = S.start; st < last; st += S.len) for (const v of chosen) queue.push({ start: st, variant: v });
+  S.guide = { queue, pos: 0, waiting: false };
+  runGuideItem();
+}
+
+function runGuideItem() {
+  const it = S.guide && S.guide.queue[S.guide.pos];
+  if (!it) { endGuide("这一关全部打完了"); return; }
+  if (Math.abs(S.start - it.start) > 1e-6) setSegment(it.start);
+  S.guide.waiting = false; updateGuide();
+  startRun(it.variant === "rhythm" ? "record" : "try", it.variant === "rhythm" ? undefined : it.variant);
+}
+
+function endGuide(text) {
+  if (S.run) stopRun();
+  S.guide = null; $("guideState").textContent = text || "已结束"; $("guide").disabled = false;
+}
+
+function updateGuide() {
+  const g = S.guide; if (!g) return;
+  const it = g.queue[g.pos]; const starts = [...new Set(g.queue.map((q) => q.start))];
+  const name = VARIANTS.find((v) => v.key === it.variant).name;
+  $("guide").disabled = true;
+  $("guideState").textContent = "第 " + (starts.indexOf(it.start) + 1) + "/" + starts.length + " 段 · " + name
+    + (g.waiting ? " · 打完了：空格继续，R 重打，Esc 结束" : " · 正在打");
+}
+
+function currentRecordingPlan() {
+  if (!S.shownRec) return null;
+  if (!S.shownRec.plan) {
+    // 存的是 "毫秒:键名" 字符串（存储不一定支持数组套数组）
+    const presses = S.shownRec.presses.map((x) => { const i = x.indexOf(":"); const key = x.slice(i + 1); return { t: Number(x.slice(0, i)) / 1000, key, lane: S.shownRec.keys.indexOf(key) }; });
+    Object.assign(S.shownRec, matchPresses(presses));
+  }
+  return S.shownRec.plan;
+}
+
+// ---------- 手排：点「手排」列改轨道 ----------
+cv.addEventListener("click", (e) => {
+  if (justDragged) { justDragged = false; return; }
+  if (S.mode !== "idle") return;
+  const rect = cv.getBoundingClientRect(); const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  const cols = columns(); const ci = cols.findIndex((c) => c.key === "manual"); if (ci < 0) return;
+  const x0 = GAP + ci * (COL + GAP); if (x < x0 || x >= x0 + COL) return;
+  const judgeY = cv.height / dpr - 48; const t = S.now + (judgeY - y) / PPS;
+  let best = -1, d = 0.06;
+  S.moments.forEach((m, k) => { const dd = Math.abs(m.t - t); if (dd < d) { d = dd; best = k; } });
+  if (best < 0) return;
+  const lane = Math.floor((x - x0) / LANE);
+  S.plans.manual[best] = e.shiftKey ? pairOf(hand(lane)) : [lane];
+  renderStats();
+});
+
+// ---------- 滚动时间 ----------
+cv.addEventListener("wheel", (e) => { if (S.mode !== "idle") return; e.preventDefault(); S.now += (-e.deltaY / PPS) * 0.8; draw(); }, { passive: false });
+let drag = null; let justDragged = false;
+cv.addEventListener("pointerdown", (e) => { if (S.mode === "idle") drag = { y: e.clientY, now: S.now, moved: false }; });
+window.addEventListener("pointermove", (e) => { if (!drag) return; const dy = e.clientY - drag.y; if (Math.abs(dy) > 3) drag.moved = true; S.now = drag.now + dy / PPS; draw(); });
+window.addEventListener("pointerup", () => { justDragged = !!(drag && drag.moved); drag = null; });
+
+// ---------- 保存（db） ----------
+function segId() { return `${S.level.key}_${Math.round(S.start * 1000)}`; }
+
+async function saveRecording(rec) {
+  if (!S.db) { $("saveState").textContent = "这里存不了，录制只在本页保留，可以用「复制」导出"; S.recordings.push({ id: "local" + Date.now(), ...rec }); renderRecordings(); return; }
+  try { await S.db.collection("recordings").add(rec); }
+  catch (err) { $("status").textContent = "录制没存上：" + (err.message || err.code); S.recordings.push({ id: "local" + Date.now(), ...rec }); renderRecordings(); }
+}
+
+async function loadVerdict() {
+  $("verdictNote").value = ""; setBest(""); $("saveState").textContent = "";
+  if (!S.db || !S.level) return;
+  try {
+    const snap = await S.db.doc("verdicts/" + segId()).get();
+    if (!snap.exists) return;
+    const v = snap.data();
+    $("verdictNote").value = v.note || ""; setBest(v.best || "");
+    if (Array.isArray(v.manual)) {
+      const idx = segRange();
+      v.manual.forEach((lanes, j) => { if (idx[j] !== undefined && typeof lanes === "string" && lanes) S.plans.manual[idx[j]] = lanes.split(",").map(Number); });
+      renderStats();
+    }
+    $("saveState").textContent = "已读入上次保存的结论";
+  } catch (err) { $("saveState").textContent = "读取结论失败：" + (err.message || err.code); }
+}
+
+$("save").addEventListener("click", async () => {
+  const best = (document.querySelector('input[name="best"]:checked') || {}).value || "";
+  const v = { level: S.level.key, levelName: S.level.name, start: S.start, len: S.len, best, note: $("verdictNote").value,
+    manual: segRange().map((k) => (S.plans.manual[k] || []).join(",")), params: { ...P }, updatedAt: Date.now() };
+  if (!S.db) { $("saveState").textContent = "这里存不了，请用「复制」导出"; return; }
+  $("saveState").textContent = "正在保存……";
+  try { await S.db.doc("verdicts/" + segId()).set(v); $("saveState").textContent = "已保存"; }
+  catch (err) { $("saveState").textContent = "没存上：" + (err.message || err.code); }
+});
+
+function setBest(key) { document.querySelectorAll('input[name="best"]').forEach((r) => { r.checked = r.value === key; }); }
+
+function renderRecordings() {
+  const box = $("recs"); box.textContent = "";
+  if (!S.level) return;
+  const list = S.recordings.filter((r) => r.level === S.level.key && Math.abs(r.start - S.start) < 0.01).sort((a, b) => b.createdAt - a.createdAt);
+  if (!list.length) { const p = document.createElement("p"); p.className = "small"; p.textContent = "这一段还没有录制。点「录制下意识手法」开始。"; box.append(p); return; }
+  for (const r of list) {
+    const label = document.createElement("label");
+    const input = document.createElement("input"); input.type = "radio"; input.name = "rec"; input.checked = S.shownRec && S.shownRec.createdAt === r.createdAt;
+    input.addEventListener("change", () => { S.shownRec = { ...r }; renderStats(); resize(); });
+    const shownName = !r.shown || r.shown === "rhythm" ? "本能" : "跟「" + (STRATS.find((x) => x.key === r.shown) || { name: r.shown }).name + "」";
+    label.append(input, " " + new Date(r.createdAt).toLocaleTimeString() + " · " + shownName + " · " + r.speed + " 倍 · " + r.presses.length + " 下");
+    box.append(label);
+  }
+  if (!S.shownRec && list.length) { S.shownRec = { ...(list.find((r) => !r.shown || r.shown === "rhythm") || list[0]) }; }
+}
+
+$("copy").addEventListener("click", async () => {
+  let verdicts = [];
+  if (S.db) { try { const q = await S.db.collection("verdicts").get(); verdicts = q.docs.map((d) => d.data()); } catch (err) { /* 读不到就只导出录制 */ } }
+  const text = JSON.stringify({ verdicts, recordings: S.recordings }, null, 1);
+  try { await navigator.clipboard.writeText(text); $("dbState").textContent = "已复制到剪贴板"; }
+  catch { const ta = document.createElement("textarea"); ta.value = text; document.body.append(ta); ta.select(); $("dbState").textContent = "复制不了，已选中文字，请手动复制"; }
+});
+
+async function connectDb() {
+  const db = window.claude && window.claude.use ? await window.claude.use("db") : null;
+  if (!db) { $("dbState").textContent = "这里不能在线保存：结论和录制只在本页保留，关掉前用下面的按钮复制出来。"; return; }
+  S.db = db; $("dbState").textContent = "结论和录制会自动保存，Claude 能读到。";
+  const timer = setTimeout(() => { $("dbState").textContent = "保存功能暂时连不上，录制先留在本页。"; }, 10000);
+  db.collection("recordings").onSnapshot((snap) => {
+    clearTimeout(timer);
+    const local = S.recordings.filter((r) => String(r.id).startsWith("local"));
+    S.recordings = snap.docs.map((d) => ({ id: d.id, ...d.data() })).concat(local);
+    renderRecordings(); renderStats();
+  }, (err) => { clearTimeout(timer); $("dbState").textContent = "保存功能出错：" + (err.message || err.code); });
+  loadVerdict();
+}
+
+// ---------- 控件 ----------
+function bindParam(id, key, scale) {
+  const input = $(id), out = $(id + "Out");
+  input.addEventListener("input", () => { out.textContent = input.value; P[key] = Number(input.value) * scale; replan(); });
+}
+
+function init() {
+  S.levels = BUILTIN.map((e, i) => levelFromExport(e, e.key || "lv" + i));
+  const sel = $("level");
+  const fillLevels = () => { sel.textContent = ""; S.levels.forEach((l, i) => { const o = document.createElement("option"); o.value = i; o.textContent = l.name; sel.append(o); }); sel.value = S.levelIndex; };
+  fillLevels();
+  sel.addEventListener("change", () => loadLevel(Number(sel.value)));
+  $("file").addEventListener("change", async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      const r = parseAdofai(await f.text());
+      let h = 0; for (const ch of f.name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+      S.levels.push({ key: "up" + h.toString(36), name: f.name.replace(/\.adofai$/i, ""), tiles: r.tiles, beats: r.beats, song: r.song, offset: r.offset, pitch: r.pitch });
+      S.levelIndex = S.levels.length - 1; fillLevels(); loadLevel(S.levelIndex);
+    } catch (err) { $("status").textContent = "读不了这个关卡：" + err.message; }
+  });
+  $("start").addEventListener("change", () => setSegment(Number($("start").value) || 0));
+  $("len").addEventListener("change", () => { S.len = Number($("len").value); setSegment(S.start); });
+  $("speed").addEventListener("change", () => { S.speed = Number($("speed").value); });
+  $("prev").addEventListener("click", () => setSegment(S.start - S.len));
+  $("next").addEventListener("click", () => setSegment(S.start + S.len));
+  $("play").addEventListener("click", () => startRun("play"));
+  $("record").addEventListener("click", () => startRun("record"));
+  $("try").addEventListener("click", () => startRun("try", $("tryCol").value));
+  $("stop").addEventListener("click", () => { if (S.guide) endGuide(); else if (S.run && S.run.mode === "record") finishRun(); else stopRun(); });
+  $("guide").addEventListener("click", startGuide);
+  VARIANTS.forEach((v) => {
+    const label = document.createElement("label"); const input = document.createElement("input");
+    input.type = "checkbox"; input.id = "gv-" + v.key; input.checked = v.on;
+    label.append(input, " " + v.name); $("guideVariants").append(label);
+  });
+  $("music").addEventListener("change", (e) => { const f = e.target.files[0]; if (f && S.level) loadMusic(f); });
+  $("inputOffset").addEventListener("input", () => { $("inputOffsetOut").textContent = $("inputOffset").value; });
+  // 音量：默认 30%，记在本机浏览器里（存不了就每次从 30% 开始）
+  try { const v = localStorage.getItem("layoutLabVolume"); if (v !== null && v !== "") $("volume").value = v; } catch { /* 浏览器不让存就用默认值 */ }
+  $("volumeOut").textContent = $("volume").value + "%";
+  $("volume").addEventListener("input", () => {
+    $("volumeOut").textContent = $("volume").value + "%";
+    if (S.master) S.master.gain.value = volume();
+    try { localStorage.setItem("layoutLabVolume", $("volume").value); } catch { /* 存不了不影响使用 */ }
+  });
+  STRATS.filter((s) => s.key !== "mine").forEach((s) => { const o = document.createElement("option"); o.value = s.key; o.textContent = s.name; $("tryCol").append(o); });
+  const best = $("best");
+  STRATS.forEach((s) => {
+    const label = document.createElement("label"); const input = document.createElement("input");
+    input.type = "radio"; input.name = "best"; input.value = s.key; input.id = "best-" + s.key;
+    label.append(input, " " + s.name); best.append(label);
+  });
+  bindParam("pReset", "reset", 0.001); bindParam("pFocus", "focus", 0.001); bindParam("pJack", "jack", 0.001);
+  $("pRoll").addEventListener("change", () => { P.roll = $("pRoll").checked; replan(); });
+  $("pOuter").addEventListener("change", () => { P.outer = $("pOuter").checked; replan(); });
+  window.addEventListener("resize", resize);
+  if (S.levels.length) loadLevel(0);
+  else $("status").textContent = "没有内置关卡：用上面的「读取 .adofai」打开一个关卡。";
+  resize();
+  connectDb();
+}
+init();
+</script>

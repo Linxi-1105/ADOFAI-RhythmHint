@@ -1,0 +1,6 @@
+<Project>
+  <!-- 复制为 local.props（已在 .gitignore 里），填自己电脑上的游戏目录 -->
+  <PropertyGroup>
+    <GameDir>E:\Program Files\Steam\steamapps\common\A Dance of Fire and Ice</GameDir>
+  </PropertyGroup>
+</Project>

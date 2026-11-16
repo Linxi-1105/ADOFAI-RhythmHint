@@ -1,0 +1,29 @@
+# 编译产物
+bin/
+obj/
+artifacts/
+*.user
+.vs/
+.idea/
+
+# 本机配置（游戏路径等）
+local.props
+
+# 谱面、音频、关卡：版权属于原作者或属于私人数据，不进仓库
+*.pez
+*.adofai
+*.mp3
+*.ogg
+Charts/
+
+# 测试结果
+TestResults/
+
+# Python
+__pycache__/
+*.pyc
+
+# 规划文件（本地用）
+task_plan.md
+findings.md
+progress.md

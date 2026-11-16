@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/RhythmHint.Core/RhythmHint.Core.csproj" />
+    <Project Path="src/RhythmHint.Mod/RhythmHint.Mod.csproj" />
+    <Project Path="src/RhythmHint.Reference/RhythmHint.Reference.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/RhythmHint.Core.Tests/RhythmHint.Core.Tests.csproj" />
+  </Folder>
+</Solution>
