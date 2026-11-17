@@ -66,6 +66,16 @@ internal sealed class OverlayFrame
         _lastSeq = seq;
     }
 
+    /// <summary>
+    /// 音符离判定还有多少秒，画位置用。伪双押的第一块砖已经按到、还在等约 25 ms 后的第二块时算 0：
+    /// 停在判定处，不越过去（越过看起来像漏按了）。
+    /// </summary>
+    public double TimeTo(PlannedNote note)
+    {
+        var dt = note.Time - Now;
+        return dt < 0 && note.TileIndex <= _lastSeq ? 0 : dt;
+    }
+
     private int FirstPending(int seq)
     {
         int lo = 0, hi = Notes.Count;

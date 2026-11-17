@@ -110,7 +110,7 @@ internal static class LaneView
         for (var i = f.NextNote; i < f.Notes.Count; i++)
         {
             var note = f.Notes[i];
-            var dt = note.Time - f.Now;
+            var dt = f.TimeTo(note);
             if (dt > lookAhead)
             {
                 break;
