@@ -21,6 +21,10 @@ public sealed class Settings : UnityModManager.ModSettings
     public bool ShrinkGameView = true;
 
     public bool ShowLanes = true;
+
+    /// <summary>四轨的音符画成和顶部太鼓条一样的圆球，按键框换成判定圈；关掉是横条和方形按键框。</summary>
+    public bool RoundNotes;
+
     public bool ShowTaiko = true;
     public bool ShowBpm = true;
 
@@ -108,6 +112,7 @@ public sealed class Settings : UnityModManager.ModSettings
     {
         var d = new Settings();
         ShowLanes = d.ShowLanes;
+        RoundNotes = d.RoundNotes;
         ShowTaiko = d.ShowTaiko;
         ShowBpm = d.ShowBpm;
         ShrinkGameView = d.ShrinkGameView;

@@ -8,6 +8,7 @@ internal static class Painter
     private static readonly GUIContent Content = new();
     private static GUIStyle? _text;
     private static Texture2D? _fadeUp;
+    private static Texture2D? _glow;
 
     public static readonly Color Orange = new(0.96f, 0.47f, 0.16f);
     public static readonly Color Blue = new(0.24f, 0.62f, 0.88f);
@@ -31,6 +32,13 @@ internal static class Painter
     public static void FadeUp(Rect r, Color c)
     {
         GUI.DrawTexture(r, FadeUpTexture(), ScaleMode.StretchToFill, true, 0f, Fade(c), 0f, 0f);
+    }
+
+    /// <summary>圆形柔光：中心最亮、往外按平方曲线淡出（圆形判定圈的命中光晕）。</summary>
+    public static void Glow(Vector2 center, float radius, Color c)
+    {
+        var r = new Rect(center.x - radius, center.y - radius, radius * 2, radius * 2);
+        GUI.DrawTexture(r, GlowTexture(), ScaleMode.StretchToFill, true, 0f, Fade(c), 0f, 0f);
     }
 
     public static void Circle(Vector2 center, float radius, Color c)
@@ -75,6 +83,30 @@ internal static class Painter
         _text.fontSize = Mathf.Max(1, size);
         _text.fontStyle = bold ? FontStyle.Bold : FontStyle.Normal;
         return _text;
+    }
+
+    /// <summary>64×64 的圆形渐变贴图：圆心不透明，到边缘按平方曲线透明。</summary>
+    private static Texture2D GlowTexture()
+    {
+        if (_glow != null)
+        {
+            return _glow;
+        }
+
+        const int size = 64;
+        const float half = (size - 1) / 2f;
+        _glow = new Texture2D(size, size, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear };
+        for (var y = 0; y < size; y++)
+        {
+            for (var x = 0; x < size; x++)
+            {
+                var a = 1f - Mathf.Clamp01(new Vector2(x - half, y - half).magnitude / half);
+                _glow.SetPixel(x, y, new Color(1, 1, 1, a * a));
+            }
+        }
+
+        _glow.Apply();
+        return _glow;
     }
 
     /// <summary>1×64 的竖向渐变贴图：底部不透明，往上按平方曲线淡出。Unity 贴图第 0 行在底部。</summary>

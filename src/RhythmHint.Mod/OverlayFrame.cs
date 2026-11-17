@@ -76,6 +76,18 @@ internal sealed class OverlayFrame
         return dt < 0 && note.TileIndex <= _lastSeq ? 0 : dt;
     }
 
+    /// <summary>从 NextNote 往后，到达时间在 lookAhead 秒以内的音符到哪里为止（不含）。从远往近画时用。</summary>
+    public int VisibleEnd(double lookAhead)
+    {
+        var end = NextNote;
+        while (end < Notes.Count && Notes[end].Time - Now <= lookAhead)
+        {
+            end++;
+        }
+
+        return end;
+    }
+
     private int FirstPending(int seq)
     {
         int lo = 0, hi = Notes.Count;
@@ -125,4 +137,6 @@ internal readonly struct OverlayLayout
     public float JudgeY { get; }
 
     public float LaneX(int lane) => Padding + (lane * LaneWidth);
+
+    public float LaneCenter(int lane) => LaneX(lane) + (LaneWidth / 2);
 }

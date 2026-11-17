@@ -13,6 +13,7 @@ internal sealed class SettingsWindow
     private static readonly string[] Tabs = { "预览与校准", "显示", "排键", "状态" };
     private static readonly string[] HotkeyPresets = { "F8", "F9", "F7", "F6", "Home", "Insert" };
     private static readonly string[] HandPresets = { "右手", "左手" };
+    private static readonly string[] NoteShapes = { "横条", "圆形" };
 
     private readonly KeyPicker _keyPicker = new();
     private Rect _rect = new(0, 0, 780, 760);
@@ -189,6 +190,8 @@ internal sealed class SettingsWindow
         s.ShowBpm = WindowSkin.Check("BPM 与剩余时间", s.ShowBpm);
         s.ShrinkGameView = WindowSkin.Check("自适应游戏画幅", s.ShrinkGameView);
         WindowSkin.Hint("提示面板显示时，游戏画面与界面文字（连击数、判定、暂停菜单等）缩放至面板以外的区域，面板收起时恢复原样。由 IMGUI 绘制的其他 Mod 文字不受此项影响。");
+        s.RoundNotes = WindowSkin.Choice("四轨音符样式", s.RoundNotes ? NoteShapes[1] : NoteShapes[0], NoteShapes) == NoteShapes[1];
+        WindowSkin.Hint("圆形与顶部太鼓条的音符一致，按键框随之改为判定圈，音符圆心到达判定圈圆心时按下。");
 
         WindowSkin.SectionTitle("尺寸与速度");
         s.UiScale = WindowSkin.Slider("面板缩放", s.UiScale, 0.5f, 2f, "0.00", 0.05f);

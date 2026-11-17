@@ -4,11 +4,23 @@ using UnityEngine;
 
 namespace RhythmHint;
 
-/// <summary>左侧四轨下落面板：不透明底色、节拍线、橙色单押 / 蓝色双押横条、判定线和按键框。</summary>
+/// <summary>
+/// 左侧四轨下落面板：不透明底色、节拍线、橙色单押 / 蓝色双押音符，判定线和按键框。
+/// 音符有两种样式：横条（配方形按键框），或圆形（和顶部太鼓条一样的球，配判定圈，判定点在判定圈圆心）。
+/// </summary>
 internal static class LaneView
 {
     private const float BaseSpeed = 1100f;
     private const float FlashSeconds = 0.18f;
+
+    // 圆形样式的尺寸（1080p 像素）：轨道宽 68，判定圈比球大一圈，和太鼓条一样
+    private const float BallRadius = 25f;
+    private const float JudgeRadius = 29f;
+    private const float BallRim = 3f;
+    private const float JudgeBottomGap = 18f; // 判定圈下沿到面板底边
+    private const float HoldBreath = 6f;      // 圆形长按按住时光晕一呼一吸的角速度（约 1 次/秒），不用横条那种快闪
+
+    private static readonly Color JudgeLine = new(0.28f, 0.28f, 0.32f);
 
     public static void Draw(OverlayFrame f, OverlayLayout l, Settings s)
     {
@@ -17,29 +29,43 @@ internal static class LaneView
 
         GUI.BeginGroup(panel);
         var judgeY = l.JudgeY - l.TopHeight;
+        var bottom = panel.height;
+
+        // 音符到达的位置：横条是判定线；圆形是判定圈圆心，判定圈下面离面板底边留一点空
+        var hitY = s.RoundNotes ? bottom - ((JudgeRadius + JudgeBottomGap) * l.Scale) : judgeY;
         var speed = BaseSpeed * Mathf.Max(0.2f, s.LaneSpeed) * l.Scale;
-        var lookAhead = (judgeY + (20 * l.Scale)) / speed;
+        var lookAhead = (hitY + (40 * l.Scale)) / speed;
 
         var holds = Holds.Active(f.Notes, f.NextNote, f.Now);
-        DrawLaneBackground(l, judgeY);
-        DrawBeats(f, l, judgeY, speed, lookAhead);
-        DrawFlashes(f, l, judgeY);
-        DrawActiveHolds(holds, l, judgeY, speed);
-        DrawNotes(f, l, judgeY, speed, lookAhead);
-        DrawJudgeAndKeys(f, l, judgeY, holds);
+        DrawLaneBackground(l, s.RoundNotes ? bottom : judgeY); // 圆形：轨道一直通到底，判定圈落在轨道里
+        DrawBeats(f, l, hitY, speed, lookAhead);
+        if (s.RoundNotes)
+        {
+            DrawJudgeCircles(f, l, hitY, holds);
+            DrawBallHolds(holds, l, hitY, speed);
+            DrawBallNotes(f, l, hitY, speed, lookAhead);
+        }
+        else
+        {
+            DrawFlashes(f, l, judgeY);
+            DrawActiveHolds(holds, l, judgeY, speed);
+            DrawNotes(f, l, judgeY, speed, lookAhead);
+            DrawJudgeAndKeys(f, l, judgeY, holds);
+        }
+
         GUI.EndGroup();
     }
 
-    private static void DrawLaneBackground(OverlayLayout l, float judgeY)
+    private static void DrawLaneBackground(OverlayLayout l, float height)
     {
         var sep = new Color(0.2f, 0.2f, 0.22f);
         for (var i = 0; i <= Lanes.Count; i++)
         {
-            Painter.Rect(new Rect(l.LaneX(i) - l.Scale, 0, 2 * l.Scale, judgeY), sep);
+            Painter.Rect(new Rect(l.LaneX(i) - l.Scale, 0, 2 * l.Scale, height), sep);
         }
     }
 
-    private static void DrawBeats(OverlayFrame f, OverlayLayout l, float judgeY, float speed, double lookAhead)
+    private static void DrawBeats(OverlayFrame f, OverlayLayout l, float hitY, float speed, double lookAhead)
     {
         var width = l.LaneWidth * Lanes.Count;
         for (var i = BeatGrid.FirstAtOrAfter(f.Beats, f.Now); i < f.Beats.Count; i++)
@@ -51,7 +77,7 @@ internal static class LaneView
                 break;
             }
 
-            var y = judgeY - (float)(dt * speed);
+            var y = hitY - (float)(dt * speed);
             var h = (beat.IsMeasure ? 2f : 1f) * l.Scale;
             var c = beat.IsMeasure ? new Color(0.36f, 0.36f, 0.4f) : new Color(0.2f, 0.2f, 0.23f);
             Painter.Rect(new Rect(l.Padding, y - (h / 2), width, h), c);
@@ -171,6 +197,92 @@ internal static class LaneView
             if (i < f.KeyLabels.Length)
             {
                 Painter.FitText(box, f.KeyLabels[i], Mathf.RoundToInt(22 * l.Scale), new Color(0.85f, 0.85f, 0.9f), true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 圆形样式的判定区（代替判定线和按键框）：一条细线串起四个判定圈；命中、长按时判定圈周围亮一圈柔光（不用横条那种往上的光柱）；
+    /// 判定圈按下对应键时变亮，命中时闪一下，圈里写键名。
+    /// </summary>
+    private static void DrawJudgeCircles(OverlayFrame f, OverlayLayout l, float hitY, List<ActiveHold> holds)
+    {
+        var r = JudgeRadius * l.Scale;
+        var rim = BallRim * l.Scale;
+        Painter.Rect(new Rect(l.Padding, hitY - l.Scale, l.LaneWidth * Lanes.Count, 2 * l.Scale), JudgeLine);
+
+        // 光晕先全部画完再画判定圈，免得后一条轨道的光盖住前一个判定圈
+        var breath = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * HoldBreath));
+        foreach (var h in holds)
+        {
+            var color = h.Note.IsChord ? Painter.Blue : Painter.Orange;
+            Painter.Glow(new Vector2(l.LaneCenter(h.Lane), hitY), r * 2, color.WithAlpha(0.3f + (0.2f * breath)));
+        }
+
+        foreach (var kv in f.Flash)
+        {
+            var a = 1f - ((Time.unscaledTime - kv.Value.Time) / FlashSeconds);
+            if (a > 0)
+            {
+                var color = kv.Value.Chord ? Painter.Blue : Painter.Orange;
+                Painter.Glow(new Vector2(l.LaneCenter(kv.Key), hitY), r * 2.2f, color.WithAlpha(0.7f * a));
+            }
+        }
+
+        for (var i = 0; i < Lanes.Count; i++)
+        {
+            var c = new Vector2(l.LaneCenter(i), hitY);
+            var flash = f.Flash.TryGetValue(i, out var hit) ? 1f - ((Time.unscaledTime - hit.Time) / FlashSeconds) : 0f;
+            BallSkin.Judge(c, r, rim, f.KeysDown[i], flash, hit.Chord ? Painter.Blue : Painter.Orange);
+            if (i < f.KeyLabels.Length)
+            {
+                var label = new Rect(c.x - (r * 0.8f), c.y - (r * 0.8f), r * 1.6f, r * 1.6f);
+                Painter.FitText(label, f.KeyLabels[i], Mathf.RoundToInt(20 * l.Scale), new Color(0.85f, 0.85f, 0.9f), true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 圆形样式按住中的长按：胶囊下端钉在判定圈上、上端随时间往下缩，松开时消失；
+    /// 球停在判定圈上、稳定地亮一档（不闪），表示正按着。按下前后胶囊颜色不变，不会突然一跳。
+    /// </summary>
+    private static void DrawBallHolds(List<ActiveHold> holds, OverlayLayout l, float hitY, float speed)
+    {
+        var r = BallRadius * l.Scale;
+        var rim = BallRim * l.Scale;
+        foreach (var h in holds)
+        {
+            var color = h.Note.IsChord ? Painter.Blue : Painter.Orange;
+            var x = l.LaneCenter(h.Lane);
+            BallSkin.HoldBody(x, hitY, hitY - (float)(h.Remaining * speed), r, color, rim);
+            BallSkin.Note(new Vector2(x, hitY), r, Color.Lerp(color, Color.white, 0.3f), rim);
+        }
+    }
+
+    /// <summary>圆形样式的音符（同太鼓条）：从远到近画，近的压在上面；长按是和球一样宽的胶囊。</summary>
+    private static void DrawBallNotes(OverlayFrame f, OverlayLayout l, float hitY, float speed, double lookAhead)
+    {
+        var r = BallRadius * l.Scale;
+        for (var i = f.VisibleEnd(lookAhead) - 1; i >= f.NextNote; i--)
+        {
+            var note = f.Notes[i];
+            var dt = f.TimeTo(note);
+            if (dt < -0.15)
+            {
+                continue; // 已经晚了很多还没按到（例如在等检查点），不再往判定圈里画
+            }
+
+            var y = hitY - (float)(dt * speed);
+            var color = note.IsChord ? Painter.Blue : Painter.Orange;
+            foreach (var kv in note.Lanes)
+            {
+                var x = l.LaneCenter(kv.Key);
+                if (kv.Value > 0)
+                {
+                    BallSkin.HoldBody(x, y, y - (float)(kv.Value * speed), r, color, BallRim * l.Scale);
+                }
+
+                BallSkin.Note(new Vector2(x, y), r, color, BallRim * l.Scale);
             }
         }
     }

@@ -84,16 +84,8 @@ internal static class TopBarView
 
     private static void DrawJudgeCircle(OverlayFrame f, OverlayLayout l, Vector2 c)
     {
-        Painter.Circle(c, 46 * l.Scale, new Color(0.16f, 0.16f, 0.18f));
-        Painter.Ring(c, 46 * l.Scale, new Color(0.5f, 0.5f, 0.55f), 4 * l.Scale);
-        Painter.Ring(c, 36 * l.Scale, new Color(0.32f, 0.32f, 0.36f), 3 * l.Scale);
         var a = 1f - ((Time.unscaledTime - f.TaikoFlash.Time) / FlashSeconds);
-        if (a > 0)
-        {
-            var color = f.TaikoFlash.Chord ? Painter.Blue : Painter.Orange;
-            Painter.Circle(c, 46 * l.Scale, color.WithAlpha(0.55f * a));
-            Painter.Ring(c, (46 + (14 * (1 - a))) * l.Scale, color.WithAlpha(a), 4 * l.Scale);
-        }
+        BallSkin.Judge(c, 46 * l.Scale, 4 * l.Scale, false, a, f.TaikoFlash.Chord ? Painter.Blue : Painter.Orange);
     }
 
     /// <summary>按住中的长按：圆停在判定圈上脉动，尾巴从右往左缩短，松开时消失。</summary>
@@ -112,24 +104,15 @@ internal static class TopBarView
             var r = (h.Note.IsChord ? 40 : 34) * l.Scale;
             var color = h.Note.IsChord ? Painter.Blue : Painter.Orange;
             var len = (float)(h.Remaining * speed);
-            Painter.Rect(new Rect(judgeX, cy - (r * 0.55f), len, r * 1.1f), color.WithAlpha(0.8f), r * 0.55f);
-            var center = new Vector2(judgeX, cy);
-            Painter.Circle(center, r + (2 * l.Scale), new Color(0, 0, 0, 0.75f));
-            Painter.Circle(center, r, Color.Lerp(color, Color.white, 0.35f * pulse));
-            Painter.Ring(center, r, Color.white, 4 * l.Scale);
+            BallSkin.Tail(new Rect(judgeX, cy - (r * 0.55f), len, r * 1.1f), color.WithAlpha(0.8f));
+            BallSkin.HoldHead(new Vector2(judgeX, cy), r, color, 4 * l.Scale, pulse);
         }
     }
 
     private static void DrawNotes(OverlayFrame f, OverlayLayout l, float judgeX, float cy, float speed, double lookAhead)
     {
         // 先找出可见范围，再从远到近画，近的音符压在上面
-        var last = f.NextNote;
-        while (last < f.Notes.Count && f.Notes[last].Time - f.Now <= lookAhead)
-        {
-            last++;
-        }
-
-        for (var i = last - 1; i >= f.NextNote; i--)
+        for (var i = f.VisibleEnd(lookAhead) - 1; i >= f.NextNote; i--)
         {
             var note = f.Notes[i];
             var dt = f.TimeTo(note);
@@ -150,13 +133,10 @@ internal static class TopBarView
             if (hold > 0)
             {
                 var len = (float)(hold * speed);
-                Painter.Rect(new Rect(x, cy - (r * 0.55f), len, r * 1.1f), color.WithAlpha(0.6f), r * 0.55f);
+                BallSkin.Tail(new Rect(x, cy - (r * 0.55f), len, r * 1.1f), color.WithAlpha(0.6f));
             }
 
-            var center = new Vector2(x, cy);
-            Painter.Circle(center, r + (2 * l.Scale), new Color(0, 0, 0, 0.75f));
-            Painter.Circle(center, r, color);
-            Painter.Ring(center, r, Color.white, 4 * l.Scale);
+            BallSkin.Note(new Vector2(x, cy), r, color, 4 * l.Scale);
         }
     }
 }
