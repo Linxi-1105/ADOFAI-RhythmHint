@@ -45,25 +45,23 @@ internal sealed class KeyPicker
         var custom = _custom || Array.IndexOf(Presets, s.KeyLabels) < 0;
         var slot = custom ? _slot : -1;
 
-        GUILayout.BeginHorizontal();
-        GUILayout.Label("键位", WindowSkin.Label, GUILayout.Width(WindowSkin.LabelWidth));
+        WindowSkin.BeginRow("键位");
         foreach (var preset in Presets)
         {
-            if (GUILayout.Button(preset, !custom && preset == s.KeyLabels ? WindowSkin.TabActive : WindowSkin.Button, GUILayout.MinWidth(56)))
+            if (GUILayout.Button(preset, !custom && preset == s.KeyLabels ? WindowSkin.Selected : WindowSkin.Button, GUILayout.MinWidth(56)))
             {
                 s.KeyLabels = preset;
                 Close();
             }
         }
 
-        if (GUILayout.Button("自定义", custom ? WindowSkin.TabActive : WindowSkin.Button, GUILayout.MinWidth(56)) && !custom)
+        if (GUILayout.Button("自定义", custom ? WindowSkin.Selected : WindowSkin.Button, GUILayout.MinWidth(56)) && !custom)
         {
             _custom = true;
             _slot = 0; // 直接从第 1 个键开始点
         }
 
-        GUILayout.FlexibleSpace();
-        GUILayout.EndHorizontal();
+        WindowSkin.EndRow();
 
         if (custom)
         {
@@ -74,27 +72,25 @@ internal sealed class KeyPicker
     private void DrawCustom(Settings s, int slot)
     {
         var keys = KeyBindings.Split(s.KeyLabels);
-        GUILayout.BeginHorizontal();
-        GUILayout.Label("自定义键位", WindowSkin.Label, GUILayout.Width(WindowSkin.LabelWidth));
+        WindowSkin.BeginRow("自定义键位");
         for (var i = 0; i < keys.Length; i++)
         {
             var shown = KeyBindings.Display(keys[i]);
-            if (GUILayout.Button(shown.Length > 0 ? shown : "—", i == slot ? WindowSkin.TabActive : WindowSkin.Button, GUILayout.Width(78)))
+            if (GUILayout.Button(shown.Length > 0 ? shown : "—", i == slot ? WindowSkin.Selected : WindowSkin.Button, GUILayout.Width(78)))
             {
                 _slot = i == slot ? -1 : i;
             }
         }
 
-        GUILayout.FlexibleSpace();
-        GUILayout.EndHorizontal();
+        WindowSkin.EndRow();
 
         if (slot < 0)
         {
-            WindowSkin.Hint("点击上方任一按键框，即可为其重新指定按键。");
+            WindowSkin.Hint("点击按键框可重新指定按键。");
             return;
         }
 
-        WindowSkin.Hint($"请在下方键盘中为第 {slot + 1} 个按键框选择按键，选择后自动跳到下一个；所选按键已被其他按键框使用时，两者互换。");
+        WindowSkin.Hint($"为第 {slot + 1} 个按键框选择按键；已被占用的键会互换。");
         string? picked = null;
         foreach (var (indent, row) in Rows)
         {
@@ -102,7 +98,7 @@ internal sealed class KeyPicker
             GUILayout.Space(indent);
             foreach (var key in row)
             {
-                var style = KeyBindings.Same(key, keys[slot]) ? WindowSkin.TabActive
+                var style = KeyBindings.Same(key, keys[slot]) ? WindowSkin.Selected
                     : Array.Exists(keys, k => KeyBindings.Same(k, key)) ? WindowSkin.KeyInUse
                     : WindowSkin.Button;
                 var shown = KeyBindings.Display(key);

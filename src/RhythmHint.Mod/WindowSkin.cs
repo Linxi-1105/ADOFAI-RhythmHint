@@ -3,16 +3,27 @@ using UnityEngine;
 
 namespace RhythmHint;
 
-/// <summary>独立设置窗口的样式和常用控件（IMGUI）。深色底、橙色强调，和叠加层的配色一致。只能在 OnGUI 里用。</summary>
+/// <summary>
+/// 独立设置窗口的样式和常用控件（IMGUI）。深色底、橙色强调，和叠加层的配色一致。只能在 OnGUI 里用。
+/// 排版：每项一行，左边固定宽度的名字，右边控件；每行一样高、控件上下居中，行与行之间留空。
+/// </summary>
 internal static class WindowSkin
 {
-    public const float LabelWidth = 300;
+    /// <summary>名字一栏的宽度（约 14 个汉字），超出会被后面的控件盖住：名字写短，解释放在下面一行。</summary>
+    public const float LabelWidth = 250;
+
+    private const float RowHeight = 36;
+    private const float RowGap = 6;
+    private const float ControlHeight = 30;
+    private const float SwitchWidth = 50;
+    private const float SwitchHeight = 26;
 
     private static readonly Color Background = new(0.09f, 0.09f, 0.11f, 0.97f);
     private static readonly Color Surface = new(0.15f, 0.15f, 0.18f, 1f);
     private static readonly Color SurfaceHover = new(0.22f, 0.22f, 0.26f, 1f);
     private static readonly Color Text = new(0.9f, 0.9f, 0.93f);
     private static readonly Color Muted = new(0.6f, 0.6f, 0.66f);
+    private static readonly Color SwitchOff = new(0.3f, 0.3f, 0.34f);
 
     private static bool _ready;
 
@@ -34,10 +45,11 @@ internal static class WindowSkin
 
     public static GUIStyle Button { get; private set; } = null!;
 
+    /// <summary>选中的选项（橙底黑字），和普通按钮一样大。</summary>
+    public static GUIStyle Selected { get; private set; } = null!;
+
     /// <summary>屏幕键盘上已经分给别的按键框的键：普通底色、橙色字。</summary>
     public static GUIStyle KeyInUse { get; private set; } = null!;
-
-    public static GUIStyle Toggle { get; private set; } = null!;
 
     /// <summary>第一次用时创建样式（要在 OnGUI 里，GUI.skin 才可用）。</summary>
     public static void Ensure()
@@ -48,63 +60,104 @@ internal static class WindowSkin
         }
 
         _ready = true;
-        Window = new GUIStyle(GUI.skin.box) { padding = new RectOffset(20, 20, 16, 16) };
+        Window = new GUIStyle(GUI.skin.box) { padding = new RectOffset(24, 24, 18, 16) };
         Window.normal.background = Solid(Background);
         Window.onNormal.background = Window.normal.background;
 
         Title = TextStyle(24, FontStyle.Bold, Text);
         Section = TextStyle(19, FontStyle.Bold, Painter.Orange);
-        Section.margin = new RectOffset(0, 0, 14, 6);
+        Section.margin = new RectOffset(0, 0, 22, 8);
         Label = TextStyle(17, FontStyle.Normal, Text);
+        Label.alignment = TextAnchor.MiddleLeft;
+        Label.margin = new RectOffset(0, 8, 0, 0);
         Note = TextStyle(15, FontStyle.Normal, Muted);
         Note.wordWrap = true;
+        Note.margin = new RectOffset(0, 0, 0, 8);
         Value = TextStyle(17, FontStyle.Bold, Text);
         Value.alignment = TextAnchor.MiddleRight;
+        Value.margin = new RectOffset(8, 0, 0, 0);
 
-        Button = Boxy(GUI.skin.button, 16, Surface, SurfaceHover, Text);
-        KeyInUse = Boxy(GUI.skin.button, 16, Surface, SurfaceHover, Painter.Orange);
         Tab = Boxy(GUI.skin.button, 18, Surface, SurfaceHover, Muted);
         TabActive = Boxy(GUI.skin.button, 18, Painter.Orange, Painter.Orange, Color.black);
         TabActive.fontStyle = FontStyle.Bold;
 
-        Toggle = new GUIStyle(GUI.skin.toggle) { fontSize = 17 };
-        Toggle.normal.textColor = Text;
-        Toggle.onNormal.textColor = Painter.Orange;
-        Toggle.hover.textColor = Text;
-        Toggle.onHover.textColor = Painter.Orange;
+        // 行里的按钮固定高度、上下留出相同的边，正好在一行的正中
+        Button = RowControl(Boxy(GUI.skin.button, 16, Surface, SurfaceHover, Text));
+        Selected = RowControl(Boxy(GUI.skin.button, 16, Painter.Orange, Painter.Orange, Color.black));
+        Selected.fontStyle = FontStyle.Bold;
+        KeyInUse = RowControl(Boxy(GUI.skin.button, 16, Surface, SurfaceHover, Painter.Orange));
     }
 
     public static void SectionTitle(string text) => GUILayout.Label(text, Section);
 
     public static void Hint(string text) => GUILayout.Label(text, Note);
 
-    public static bool Check(string text, bool value) => GUILayout.Toggle(value, "  " + text, Toggle);
+    /// <summary>开始一行：左边是名字。和 <see cref="EndRow"/> 配对。</summary>
+    public static void BeginRow(string label)
+    {
+        GUILayout.BeginHorizontal();
+        GUILayout.Label(label, Label, GUILayout.Width(LabelWidth), GUILayout.Height(RowHeight));
+    }
+
+    /// <summary>结束一行，控件靠左，下面留一点空。</summary>
+    public static void EndRow()
+    {
+        GUILayout.FlexibleSpace();
+        GUILayout.EndHorizontal();
+        GUILayout.Space(RowGap);
+    }
+
+    /// <summary>一行：名字和开关（橙色、圆点在右为开）。点名字也能切换。</summary>
+    public static bool Switch(string label, bool value)
+    {
+        GUILayout.BeginHorizontal();
+        var clicked = GUILayout.Button(label, Label, GUILayout.Width(LabelWidth), GUILayout.Height(RowHeight));
+        var cell = GUILayoutUtility.GetRect(SwitchWidth, RowHeight, GUILayout.Width(SwitchWidth), GUILayout.Height(RowHeight));
+        var track = new Rect(cell.x, cell.y + ((RowHeight - SwitchHeight) / 2), SwitchWidth, SwitchHeight);
+        clicked |= GUI.Button(track, GUIContent.none, GUIStyle.none);
+        if (Event.current.type == EventType.Repaint)
+        {
+            Fill(track, value ? Painter.Orange : SwitchOff, SwitchHeight / 2);
+            var size = SwitchHeight - 6;
+            var knob = new Rect(value ? track.xMax - size - 3 : track.x + 3, track.y + 3, size, size);
+            Fill(knob, Color.white, size / 2);
+        }
+
+        EndRow();
+        return clicked ? !value : value;
+    }
 
     /// <summary>一行：名字、滑块、数值，可选的微调按钮（每次加减 step）。</summary>
     public static float Slider(string label, float value, float min, float max, string format, float step = 0)
     {
         GUILayout.BeginHorizontal();
-        GUILayout.Label(label, Label, GUILayout.Width(LabelWidth));
+        GUILayout.Label(label, Label, GUILayout.Width(LabelWidth), GUILayout.Height(RowHeight));
         if (step > 0 && GUILayout.Button("−", Button, GUILayout.Width(34)))
         {
             value -= step;
         }
 
-        value = GUILayout.HorizontalSlider(value, min, max, GUILayout.ExpandWidth(true), GUILayout.MinWidth(140));
+        // 滑块本身很矮，放进一行高的竖直组里上下居中
+        GUILayout.BeginVertical(GUILayout.Height(RowHeight), GUILayout.ExpandWidth(true), GUILayout.MinWidth(140));
+        GUILayout.FlexibleSpace();
+        value = GUILayout.HorizontalSlider(value, min, max);
+        GUILayout.FlexibleSpace();
+        GUILayout.EndVertical();
         if (step > 0 && GUILayout.Button("+", Button, GUILayout.Width(34)))
         {
             value += step;
         }
 
-        GUILayout.Label(value.ToString(format), Value, GUILayout.Width(70));
+        GUILayout.Label(value.ToString(format), Value, GUILayout.Width(64), GUILayout.Height(RowHeight));
         GUILayout.EndHorizontal();
+        GUILayout.Space(RowGap);
         return Mathf.Clamp(value, min, max);
     }
 
     public static int Slider(string label, int value, int min, int max, int step = 0) =>
         Mathf.RoundToInt(Slider(label, (float)value, min, max, "0", step));
 
-    /// <summary>一排按钮，返回被点的那个的下标，没点为 -1。</summary>
+    /// <summary>一排按钮（和控件一栏对齐），返回被点的那个的下标，没点为 -1。</summary>
     public static int Buttons(params string[] labels)
     {
         var clicked = -1;
@@ -119,6 +172,7 @@ internal static class WindowSkin
         }
 
         GUILayout.EndHorizontal();
+        GUILayout.Space(RowGap);
         return clicked;
     }
 
@@ -127,23 +181,21 @@ internal static class WindowSkin
     /// </summary>
     public static string Choice(string label, string value, string[] options)
     {
-        GUILayout.BeginHorizontal();
-        GUILayout.Label(label, Label, GUILayout.Width(LabelWidth));
-        if (System.Array.IndexOf(options, value) < 0)
+        BeginRow(label);
+        if (Array.IndexOf(options, value) < 0)
         {
-            GUILayout.Button(value, TabActive, GUILayout.MinWidth(56));
+            GUILayout.Button(value, Selected, GUILayout.MinWidth(56));
         }
 
         foreach (var option in options)
         {
-            if (GUILayout.Button(option, option == value ? TabActive : Button, GUILayout.MinWidth(56)))
+            if (GUILayout.Button(option, option == value ? Selected : Button, GUILayout.MinWidth(56)))
             {
                 value = option;
             }
         }
 
-        GUILayout.FlexibleSpace();
-        GUILayout.EndHorizontal();
+        EndRow();
         return value;
     }
 
@@ -165,6 +217,19 @@ internal static class WindowSkin
         s.active.textColor = text;
         return s;
     }
+
+    /// <summary>行里的按钮：固定高度，上下边距让它落在一行正中。</summary>
+    private static GUIStyle RowControl(GUIStyle s)
+    {
+        var edge = Mathf.RoundToInt((RowHeight - ControlHeight) / 2);
+        s.fixedHeight = ControlHeight;
+        s.padding = new RectOffset(12, 12, 4, 4);
+        s.margin = new RectOffset(3, 3, edge, edge);
+        return s;
+    }
+
+    private static void Fill(Rect r, Color c, float radius) =>
+        GUI.DrawTexture(r, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0f, c, 0f, radius);
 
     private static Texture2D Solid(Color c)
     {

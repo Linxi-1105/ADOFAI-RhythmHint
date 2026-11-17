@@ -16,7 +16,7 @@ internal sealed class SettingsWindow
     private static readonly string[] NoteShapes = { "横条", "圆形" };
 
     private readonly KeyPicker _keyPicker = new();
-    private Rect _rect = new(0, 0, 780, 760);
+    private Rect _rect = new(0, 0, 780, 840);
     private bool _placed;
     private int _tab;
     private Vector2 _scroll;
@@ -110,25 +110,23 @@ internal sealed class SettingsWindow
         {
             case 0:
                 PreviewTab(s);
-                ResetRow(s.ResetPreview, "恢复演示、提示音和画面偏移的默认值。");
+                ResetRow(s.ResetPreview);
                 break;
             case 1:
                 DisplayTab(s);
-                ResetRow(
-                    () =>
-                    {
-                        s.ResetDisplay();
-                        _keyPicker.Close();
-                    },
-                    "恢复显示内容、自适应游戏画幅、尺寸与速度和按键框的默认值。");
+                ResetRow(() =>
+                {
+                    s.ResetDisplay();
+                    _keyPicker.Close();
+                });
                 break;
             case 2:
                 LayoutTab(s, overlay);
-                ResetRow(s.ResetFingering, "恢复排键参数的默认值，惯用手保持不变。");
+                ResetRow(s.ResetFingering, "惯用手保持不变。");
                 break;
             default:
                 StatusTab(s, overlay);
-                ResetRow(s.ResetHotkey, "恢复快捷键的默认值（F8）。");
+                ResetRow(s.ResetHotkey);
                 break;
         }
 
@@ -140,7 +138,7 @@ internal sealed class SettingsWindow
     /// <summary>
     /// 每页底部的「恢复本页默认值」。点一次先变成确认按钮，3 秒内再点才恢复，免得误点把调好的设置清掉。
     /// </summary>
-    private void ResetRow(Action reset, string hint)
+    private void ResetRow(Action reset, string? note = null)
     {
         WindowSkin.SectionTitle("默认值");
         var confirming = _confirmResetTab == _tab && Time.unscaledTime < _confirmResetUntil;
@@ -158,19 +156,23 @@ internal sealed class SettingsWindow
             }
         }
 
-        WindowSkin.Hint(confirming ? "3 秒内再次点击即恢复，此操作无法撤销。" : hint);
+        var hint = confirming ? "3 秒内再次点击即恢复，无法撤销。" : note;
+        if (hint != null)
+        {
+            WindowSkin.Hint(hint);
+        }
     }
+
+    // 排版：每项都是「左边名字、右边控件」，开关、选项、滑块左右对齐；说明只在名字说不清时写一句，放在控件下面
 
     private static void PreviewTab(Settings s)
     {
         WindowSkin.SectionTitle("演示预览");
-        s.ShowPreview = WindowSkin.Check("设置窗口打开时播放演示（仅在关卡外）", s.ShowPreview);
-        WindowSkin.Hint("在主菜单或选关界面中，演示与当前音乐的节拍同步；无音乐时使用内置的 160 BPM 节拍，并在每个音符处播放提示音。");
-        s.PreviewSound = WindowSkin.Check("无音乐时播放音符提示音", s.PreviewSound);
+        s.ShowPreview = WindowSkin.Switch("关卡外播放演示", s.ShowPreview);
+        s.PreviewSound = WindowSkin.Switch("无音乐时播放提示音", s.PreviewSound);
         s.PreviewVolume = WindowSkin.Slider("提示音音量", s.PreviewVolume, 0f, 1f, "0.00", 0.05f);
 
         WindowSkin.SectionTitle("画面偏移校准");
-        WindowSkin.Hint("观察演示：音符到达判定线的时刻应与节拍或提示音一致。音符偏晚时调高数值，偏早时调低数值。此项仅影响显示，不影响判定。");
         s.VisualOffsetMs = WindowSkin.Slider("画面偏移（毫秒）", s.VisualOffsetMs, -200, 200, 1);
         switch (WindowSkin.Buttons("−10", "−1", "+1", "+10", "归零"))
         {
@@ -180,18 +182,21 @@ internal sealed class SettingsWindow
             case 3: s.VisualOffsetMs += 10; break;
             case 4: s.VisualOffsetMs = 0; break;
         }
+
+        WindowSkin.Hint("对照演示的节拍：音符偏晚时调高，偏早时调低。仅影响显示。");
     }
 
     private void DisplayTab(Settings s)
     {
         WindowSkin.SectionTitle("显示内容");
-        s.ShowLanes = WindowSkin.Check("左侧四轨下落面板", s.ShowLanes);
-        s.ShowTaiko = WindowSkin.Check("顶部太鼓节奏条", s.ShowTaiko);
-        s.ShowBpm = WindowSkin.Check("BPM 与剩余时间", s.ShowBpm);
-        s.ShrinkGameView = WindowSkin.Check("自适应游戏画幅", s.ShrinkGameView);
-        WindowSkin.Hint("提示面板显示时，游戏画面与界面文字（连击数、判定、暂停菜单等）缩放至面板以外的区域，面板收起时恢复原样。由 IMGUI 绘制的其他 Mod 文字不受此项影响。");
-        s.RoundNotes = WindowSkin.Choice("四轨音符样式", s.RoundNotes ? NoteShapes[1] : NoteShapes[0], NoteShapes) == NoteShapes[1];
-        WindowSkin.Hint("圆形与顶部太鼓条的音符一致，按键框随之改为判定圈，音符圆心到达判定圈圆心时按下。");
+        s.ShowLanes = WindowSkin.Switch("四轨下落面板", s.ShowLanes);
+        s.ShowTaiko = WindowSkin.Switch("顶部太鼓条", s.ShowTaiko);
+        s.ShowBpm = WindowSkin.Switch("BPM 与剩余时间", s.ShowBpm);
+
+        WindowSkin.SectionTitle("四轨面板");
+        s.RoundNotes = WindowSkin.Choice("音符样式", s.RoundNotes ? NoteShapes[1] : NoteShapes[0], NoteShapes) == NoteShapes[1];
+        _keyPicker.Draw(s);
+        s.LightKeysOnPress = WindowSkin.Switch("按下时点亮按键框", s.LightKeysOnPress);
 
         WindowSkin.SectionTitle("尺寸与速度");
         s.UiScale = WindowSkin.Slider("面板缩放", s.UiScale, 0.5f, 2f, "0.00", 0.05f);
@@ -199,36 +204,37 @@ internal sealed class SettingsWindow
         s.TaikoSpeed = WindowSkin.Slider("太鼓条滚动速度", s.TaikoSpeed, 0.3f, 3f, "0.00", 0.05f);
         s.PanelOpacity = WindowSkin.Slider("面板底色不透明度", s.PanelOpacity, 0.3f, 1f, "0.00", 0.05f);
 
-        WindowSkin.SectionTitle("按键框");
-        _keyPicker.Draw(s);
-        s.LightKeysOnPress = WindowSkin.Check("按下对应按键时点亮按键框（仅显示，不影响判定）", s.LightKeysOnPress);
+        WindowSkin.SectionTitle("游戏画面");
+        s.ShrinkGameView = WindowSkin.Switch("自适应游戏画幅", s.ShrinkGameView);
+        WindowSkin.Hint("面板显示时，游戏画面和界面文字缩到面板以外的区域。");
     }
 
     private static void LayoutTab(Settings s, Overlay overlay)
     {
-        WindowSkin.Hint("排键仅依据当前关卡的砖块间隔计算。修改后立即重新排键，可在演示中查看效果。");
-
         WindowSkin.SectionTitle("排键规则");
         s.LeftHanded = WindowSkin.Choice("惯用手", s.LeftHanded ? HandPresets[1] : HandPresets[0], HandPresets) == HandPresets[1];
 
         // 左撇子是整套排法左右镜像，说明文字里的手和键位跟着换
-        var (main, other) = s.LeftHanded ? ("左手", "右手") : ("右手", "左手");
-        var chordKeys = s.LeftHanded ? "D F" : "J K";
+        var main = s.LeftHanded ? "左手" : "右手";
         var (outerRoll, innerRoll) = s.LeftHanded ? ("D F K J", "F D J K") : ("K J D F", "J K F D");
-        WindowSkin.Hint($"间隔较长时由{main}食指连击；间隔较短时左右食指交替；间隔极短时同一只手两指轮指；停顿后从{main}重新开始。双押优先分配给{main}（{chordKeys}），与双押相邻的单押分配给{other}；同一只手不会出现由食指到外侧手指的顺序（F→D、J→K）。");
-        // 滑块名字一栏宽 LabelWidth（约 13 个汉字），超出会被后面的按钮盖住：名字写短，解释放在下面一行
+        WindowSkin.Hint($"只看本关的砖块间隔：慢时{main}食指单点，稍快时左右食指交替，极快时同手轮指；双押优先{main}。");
+
+        WindowSkin.SectionTitle("节奏分界");
         s.ResetWindowMs = WindowSkin.Slider("主手重置间隔（毫秒）", s.ResetWindowMs, 100, 300, 5);
-        WindowSkin.Hint($"两次按键的间隔大于此值时，由{main}食指单指连击。当前 {s.ResetWindowMs} 毫秒，相当于 {StraightBpm(s.ResetWindowMs)} BPM 的直线：比它慢由{main}食指单点。");
-        s.UseRoll = WindowSkin.Check("极快段落启用同手轮指（关闭后仅使用 F、J）", s.UseRoll);
-        s.OuterRoll = WindowSkin.Check($"轮指时外侧手指先按（{outerRoll}；关闭后为 {innerRoll}）", s.OuterRoll);
+        WindowSkin.Hint($"间隔更长时{main}食指单点；当前相当于 {StraightBpm(s.ResetWindowMs)} BPM 的直线。");
         s.ChordFocusMs = WindowSkin.Slider("双押换手范围（毫秒）", s.ChordFocusMs, 0, 800, 10);
-        WindowSkin.Hint("与双押相隔不超过此值的单押改由另一只手按下；设为 0 则不换手。");
+        WindowSkin.Hint("与双押相隔在此范围内的单押改用另一只手；0 为不换手。");
+
+        WindowSkin.SectionTitle("轮指");
+        s.UseRoll = WindowSkin.Switch("极快时同手轮指", s.UseRoll);
+        s.OuterRoll = WindowSkin.Switch("外侧手指先按", s.OuterRoll);
+        WindowSkin.Hint(s.UseRoll ? $"开启为 {outerRoll}，关闭为 {innerRoll}。" : "轮指关闭时只用 F、J。");
 
         WindowSkin.SectionTitle("其他参数");
         s.JackWindowMs = WindowSkin.Slider("同键连按最小间隔（毫秒）", s.JackWindowMs, 50, 300, 5);
-        WindowSkin.Hint($"同一个键连按两下至少间隔此值。当前 {s.JackWindowMs} 毫秒，相当于 {StraightBpm(s.JackWindowMs)} BPM 的直线：比它快不会同键连按。");
+        WindowSkin.Hint($"当前相当于 {StraightBpm(s.JackWindowMs)} BPM 的直线，更快时不连按同一个键。");
         s.PseudoChordWindowMs = WindowSkin.Slider("双押合并阈值（毫秒）", s.PseudoChordWindowMs, 0, 45, 1);
-        WindowSkin.Hint("间隔小于此值的两次按键显示为双押，相隔约 25 毫秒的伪双押同样合并；双押始终由同一只手完成（D+F 或 J+K）。");
+        WindowSkin.Hint("间隔小于此值的两下合成一个双押（含约 25 毫秒的伪双押）。");
         if (WindowSkin.Buttons("重新排键") == 0)
         {
             overlay.RequestRebuild();
@@ -245,10 +251,9 @@ internal sealed class SettingsWindow
 
         WindowSkin.SectionTitle("快捷键");
         s.SettingsHotkey = WindowSkin.Choice("打开 / 关闭设置窗口", s.SettingsHotkey, HotkeyPresets);
-        WindowSkin.Hint("也可在 Unity Mod Manager 页面（Ctrl+F10）中打开。如需使用其他按键，请修改 Settings.xml 中的 SettingsHotkey（填写 Unity 按键名）。");
+        WindowSkin.Hint("也可在 Unity Mod Manager（Ctrl+F10）中打开；其他按键请修改 Settings.xml。");
 
         WindowSkin.SectionTitle("关于");
-        GUILayout.Label($"版本 {Main.Mod.Info.Version}", WindowSkin.Note);
-        WindowSkin.Hint("本 Mod 仅提供视觉提示，不修改判定。运行日志位于 Unity Mod Manager 的 Log.txt，每次显示或隐藏均会记录原因。");
+        GUILayout.Label($"版本 {Main.Mod.Info.Version}。仅提供视觉提示，不修改判定；运行日志见 UMM 的 Log.txt。", WindowSkin.Note);
     }
 }
