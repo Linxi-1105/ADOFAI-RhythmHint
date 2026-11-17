@@ -5,7 +5,7 @@ using UnityEngine;
 namespace RhythmHint;
 
 /// <summary>
-/// 设置窗口「按键框」的键位：四套常用键位，或「自定义」用屏幕键盘点选任意四个键。
+/// 设置窗口「按键框」的键位：默认的 D F J K，或「自定义」用屏幕键盘点选任意四个键。
 /// 全部用鼠标点，不放输入框、也不录按键：在窗口里按键盘会被游戏当成击打。
 /// </summary>
 internal sealed class KeyPicker
@@ -14,7 +14,8 @@ internal sealed class KeyPicker
     private const float WideKeyWidth = 84;
     private const float SpaceWidth = 160;
 
-    private static readonly string[] Presets = { "D F J K", "S D K L", "A S K L", "E R U I" };
+    /// <summary>只留默认键位，其他组合都走自定义（用户：能自定义了就不用这么多预设）。</summary>
+    private static readonly string[] Presets = { "D F J K" };
 
     /// <summary>屏幕键盘：每行开头的缩进和按键。按键名存进设置，要能被 <see cref="KeyCodes.Parse"/> 认出来。</summary>
     private static readonly (float Indent, string[] Keys)[] Rows =
