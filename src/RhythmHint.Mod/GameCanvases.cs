@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 namespace RhythmHint;
@@ -14,6 +15,11 @@ namespace RhythmHint;
 /// 于是贴顶 / 贴底 / 铺满的元素照样贴着区域的边、铺满区域，不会因为屏幕比例和区域比例不同而上下或左右留空。
 /// 点击走这台摄像机换算，位置也对得上。
 /// </para>
+/// <para>
+/// 排序相同的覆盖模式画布，谁画在上面、谁先接到点击，看 Unity 的渲染顺序（renderOrder）；改成世界空间后这个依据没了，
+/// 改看离摄像机的远近，全在同一个平面上就只剩注册顺序。编辑器右下角的自动播放按钮（ottoCanvas，排序 0）播放中点不动，
+/// 同为排序 0 的还有 tipCanvas、Error Meter。转换时按原来的渲染顺序给每块画布一个前后距离（后画的离摄像机近）后，用户复测能点了。
+/// </para>
 /// 只动根画布的 renderMode / worldCamera、根节点的位置、大小、缩放，和 CanvasScaler 的 dynamicPixelsPerUnit；
 /// 面板收起时改回覆盖模式（覆盖模式会重新接管根节点），dynamicPixelsPerUnit 改回原值。
 /// 游戏期间自己改过模式或摄像机的画布保持游戏的值。IMGUI 画的文字（部分 Mod 用）不是画布，管不到。
@@ -23,13 +29,22 @@ internal sealed class GameCanvases
     /// <summary>界面搬到的地方：远离场景，游戏的摄像机拍不到。</summary>
     private static readonly Vector3 Origin = new(0, -100000, 0);
 
+    /// <summary>相邻两块画布的前后间距。摄像机在 Origin 前 10、近裁面 1，最多排 MaxLayers 块，最近的也在近裁面后面。</summary>
+    private const float LayerGap = 0.05f;
+
+    private const int MaxLayers = 150;
+
     private readonly Transform _own;
     private readonly Dictionary<Canvas, Converted> _converted = new();
     private readonly List<Canvas> _drop = new();
+    private readonly List<Canvas> _fresh = new();
+    private readonly List<RaycastResult> _hits = new();
     private readonly HashSet<string> _logged = new(); // 记过日志的画布名，同名的只记一次
+    private readonly HashSet<string> _loggedHits = new(); // 记过日志的点击目标
     private Camera? _camera;
     private Vector2Int _screen;
     private Vector2 _virtual; // 虚拟屏幕大小（像素）
+    private int _nextLayer;   // 下一块转换的画布排在第几层（越大离摄像机越近）
 
     /// <param name="own">自己的对象（挡板画布等），它下面的画布不动。</param>
     public GameCanvases(Transform own) => _own = own;
@@ -77,12 +92,13 @@ internal sealed class GameCanvases
             {
                 if (kv.Key)
                 {
-                    Place(kv.Key, kv.Value.Scale);
+                    Place(kv.Key, kv.Value);
                 }
             }
         }
 
         Scan(cam);
+        LogClickTarget();
     }
 
     public void Restore()
@@ -107,6 +123,7 @@ internal sealed class GameCanvases
 
         _converted.Clear();
         _virtual = Vector2.zero;
+        _nextLayer = 0;
         if (_camera)
         {
             _camera!.enabled = false;
@@ -130,6 +147,7 @@ internal sealed class GameCanvases
             _converted.Remove(canvas);
         }
 
+        _fresh.Clear();
         foreach (var canvas in Object.FindObjectsByType<Canvas>(FindObjectsSortMode.None))
         {
             if (!_converted.ContainsKey(canvas)
@@ -137,8 +155,15 @@ internal sealed class GameCanvases
                 && canvas.renderMode == RenderMode.ScreenSpaceOverlay
                 && !canvas.transform.IsChildOf(_own))
             {
-                Convert(canvas, cam);
+                _fresh.Add(canvas);
             }
+        }
+
+        // 按覆盖模式下的渲染顺序依次排层；这次新出现的排在已转换的前面（离摄像机更近）
+        _fresh.Sort((a, b) => a.renderOrder.CompareTo(b.renderOrder));
+        foreach (var canvas in _fresh)
+        {
+            Convert(canvas, cam, Mathf.Min(_nextLayer++, MaxLayers));
         }
 
         var mask = 0;
@@ -150,7 +175,7 @@ internal sealed class GameCanvases
         cam.cullingMask = mask;
     }
 
-    private void Convert(Canvas canvas, Camera cam)
+    private void Convert(Canvas canvas, Camera cam, int layer)
     {
         // 覆盖模式下根节点的缩放就是画布缩放，宽高乘缩放等于屏幕宽高。
         // 位置不从根节点读：覆盖模式要到画画面时才摆好它，刚还原或刚出现的画布读到的可能是旧值
@@ -176,26 +201,29 @@ internal sealed class GameCanvases
         }
 
         canvas.scaleFactor = scale; // CanvasScaler 下一帧才更新，这一帧先手动设好
-        _converted[canvas] = new Converted(scale, scaler ? scaler : null, original);
-        Place(canvas, scale);
+        var converted = new Converted(scale, scaler ? scaler : null, original, layer);
+        _converted[canvas] = converted;
+        Place(canvas, converted);
 
         // 诊断：每种界面记一次，显示不对时对照日志查
         if (_logged.Add(canvas.name))
         {
-            Main.Mod.Logger.Log($"自适应游戏画幅：缩放界面「{canvas.name}」（层 {canvas.gameObject.layer}，排序 {canvas.sortingLayerName}/{canvas.sortingOrder}，缩放 {scale:0.###}）");
+            Main.Mod.Logger.Log($"自适应游戏画幅：缩放界面「{canvas.name}」（层 {canvas.gameObject.layer}，排序 {canvas.sortingLayerName}/{canvas.sortingOrder}，第 {layer} 层，缩放 {scale:0.###}）");
         }
     }
 
-    /// <summary>把根节点摆成铺满虚拟屏幕：世界坐标 = 虚拟屏幕像素，搬到 Origin 那边。</summary>
-    private void Place(Canvas canvas, float scale)
+    /// <summary>把根节点摆成铺满虚拟屏幕：世界坐标 = 虚拟屏幕像素，搬到 Origin 那边，按层往摄像机挪一点。</summary>
+    private void Place(Canvas canvas, Converted converted)
     {
         var rt = (RectTransform)canvas.transform;
+        var scale = converted.Scale;
 
         // 根画布可能挂在别的对象下面：世界空间里父节点的缩放会乘上去，要除掉
         var parentScale = rt.parent ? rt.parent.lossyScale.x : 1f;
         var local = parentScale > 0 ? scale / parentScale : scale;
 
-        rt.SetPositionAndRotation(Origin + (Vector3)(_virtual / 2), Quaternion.identity);
+        var position = Origin + (Vector3)(_virtual / 2) + new Vector3(0, 0, -converted.Layer * LayerGap);
+        rt.SetPositionAndRotation(position, Quaternion.identity);
         rt.localScale = new Vector3(local, local, local);
         rt.sizeDelta = _virtual / scale;
     }
@@ -203,7 +231,35 @@ internal sealed class GameCanvases
     /// <param name="Scale">画布在覆盖模式下的缩放。</param>
     /// <param name="Scaler">画布上的 CanvasScaler（没有就是 null）。</param>
     /// <param name="OriginalDynamicPixels">CanvasScaler 原来的 dynamicPixelsPerUnit，还原用。</param>
-    private readonly record struct Converted(float Scale, CanvasScaler? Scaler, float OriginalDynamicPixels);
+    /// <param name="Layer">排在第几层，越大离摄像机越近（画在上面、先接点击）。</param>
+    private readonly record struct Converted(float Scale, CanvasScaler? Scaler, float OriginalDynamicPixels, int Layer);
+
+    /// <summary>
+    /// 诊断：界面缩着时按下鼠标，记下点到的最上层界面元素（每个只记一次）。按钮点不动时对照日志查是谁挡在上面。
+    /// </summary>
+    private void LogClickTarget()
+    {
+        var events = EventSystem.current;
+        if (!events || !Input.GetMouseButtonDown(0))
+        {
+            return;
+        }
+
+        _hits.Clear();
+        events.RaycastAll(new PointerEventData(events) { position = Input.mousePosition }, _hits);
+        if (_hits.Count == 0)
+        {
+            return;
+        }
+
+        var hit = _hits[0].gameObject;
+        var canvas = hit.GetComponentInParent<Canvas>();
+        var target = $"{(canvas ? canvas.rootCanvas.name : "?")}/{hit.name}";
+        if (_loggedHits.Add(target))
+        {
+            Main.Mod.Logger.Log($"自适应游戏画幅：点击落在「{target}」");
+        }
+    }
 
     /// <summary>画布还在，而且还是我们改的样子（Unity 里已销毁的对象转成 bool 是 false）。</summary>
     private static bool StillOurs(Canvas canvas, Camera? cam) =>
