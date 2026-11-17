@@ -11,10 +11,10 @@ internal sealed class SettingsWindow
 {
     private const int WindowId = 0x52484D57; // "RHMW"
     private static readonly string[] Tabs = { "预览与校准", "显示", "排键", "状态" };
-    private static readonly string[] KeyLabelPresets = { "D F J K", "S D K L", "A S K L", "E R U I" };
     private static readonly string[] HotkeyPresets = { "F8", "F9", "F7", "F6", "Home", "Insert" };
     private static readonly string[] HandPresets = { "右手", "左手" };
 
+    private readonly KeyPicker _keyPicker = new();
     private Rect _rect = new(0, 0, 780, 760);
     private bool _placed;
     private int _tab;
@@ -97,6 +97,7 @@ internal sealed class SettingsWindow
                 _tab = i;
                 _scroll = Vector2.zero;
                 _confirmResetTab = -1;
+                _keyPicker.Close();
             }
         }
 
@@ -112,7 +113,13 @@ internal sealed class SettingsWindow
                 break;
             case 1:
                 DisplayTab(s);
-                ResetRow(s.ResetDisplay, "恢复显示内容、自适应游戏画幅、尺寸与速度和按键框的默认值。");
+                ResetRow(
+                    () =>
+                    {
+                        s.ResetDisplay();
+                        _keyPicker.Close();
+                    },
+                    "恢复显示内容、自适应游戏画幅、尺寸与速度和按键框的默认值。");
                 break;
             case 2:
                 LayoutTab(s, overlay);
@@ -174,7 +181,7 @@ internal sealed class SettingsWindow
         }
     }
 
-    private static void DisplayTab(Settings s)
+    private void DisplayTab(Settings s)
     {
         WindowSkin.SectionTitle("显示内容");
         s.ShowLanes = WindowSkin.Check("左侧四轨下落面板", s.ShowLanes);
@@ -189,9 +196,8 @@ internal sealed class SettingsWindow
         s.TaikoSpeed = WindowSkin.Slider("太鼓条滚动速度", s.TaikoSpeed, 0.3f, 3f, "0.00", 0.05f);
         s.PanelOpacity = WindowSkin.Slider("面板底色不透明度", s.PanelOpacity, 0.3f, 1f, "0.00", 0.05f);
 
-        // 不放输入框：在窗口里打字会被游戏当成击打。其他组合可以直接改 Settings.xml 的 KeyLabels
         WindowSkin.SectionTitle("按键框");
-        s.KeyLabels = WindowSkin.Choice("键位", s.KeyLabels, KeyLabelPresets);
+        _keyPicker.Draw(s);
         s.LightKeysOnPress = WindowSkin.Check("按下对应按键时点亮按键框（仅显示，不影响判定）", s.LightKeysOnPress);
     }
 

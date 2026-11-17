@@ -170,7 +170,7 @@ internal static class LaneView
             Painter.Border(box, f.KeysDown[i] || held >= 0 ? Color.white : new Color(0.35f, 0.35f, 0.4f), 2 * l.Scale, 6 * l.Scale);
             if (i < f.KeyLabels.Length)
             {
-                Painter.Text(box, f.KeyLabels[i], Mathf.RoundToInt(22 * l.Scale), new Color(0.85f, 0.85f, 0.9f), TextAnchor.MiddleCenter, true);
+                Painter.FitText(box, f.KeyLabels[i], Mathf.RoundToInt(22 * l.Scale), new Color(0.85f, 0.85f, 0.9f), true);
             }
         }
     }

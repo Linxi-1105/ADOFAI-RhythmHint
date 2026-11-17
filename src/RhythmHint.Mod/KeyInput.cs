@@ -16,12 +16,9 @@ internal sealed class KeyInput
         if (settings.KeyLabels != _parsedLabels)
         {
             _parsedLabels = settings.KeyLabels;
-            frame.KeyLabels = settings.KeyLabels.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-            _keys = new KeyCode[Lanes.Count];
-            for (var i = 0; i < _keys.Length && i < frame.KeyLabels.Length; i++)
-            {
-                _keys[i] = KeyCodes.Parse(frame.KeyLabels[i]);
-            }
+            var keys = KeyBindings.Split(settings.KeyLabels);
+            frame.KeyLabels = Array.ConvertAll(keys, KeyBindings.Display);
+            _keys = Array.ConvertAll(keys, KeyCodes.Parse);
         }
 
         if (!settings.LightKeysOnPress || _broken)

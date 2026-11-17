@@ -34,6 +34,9 @@ internal static class WindowSkin
 
     public static GUIStyle Button { get; private set; } = null!;
 
+    /// <summary>屏幕键盘上已经分给别的按键框的键：普通底色、橙色字。</summary>
+    public static GUIStyle KeyInUse { get; private set; } = null!;
+
     public static GUIStyle Toggle { get; private set; } = null!;
 
     /// <summary>第一次用时创建样式（要在 OnGUI 里，GUI.skin 才可用）。</summary>
@@ -59,6 +62,7 @@ internal static class WindowSkin
         Value.alignment = TextAnchor.MiddleRight;
 
         Button = Boxy(GUI.skin.button, 16, Surface, SurfaceHover, Text);
+        KeyInUse = Boxy(GUI.skin.button, 16, Surface, SurfaceHover, Painter.Orange);
         Tab = Boxy(GUI.skin.button, 18, Surface, SurfaceHover, Muted);
         TabActive = Boxy(GUI.skin.button, 18, Painter.Orange, Painter.Orange, Color.black);
         TabActive.fontStyle = FontStyle.Bold;

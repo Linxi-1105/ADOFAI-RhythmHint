@@ -5,6 +5,7 @@ namespace RhythmHint;
 /// <summary>IMGUI 画图的小工具：圆角矩形、圆、描边、渐变、文字。只能在 OnGUI 里调用。</summary>
 internal static class Painter
 {
+    private static readonly GUIContent Content = new();
     private static GUIStyle? _text;
     private static Texture2D? _fadeUp;
 
@@ -44,17 +45,37 @@ internal static class Painter
 
     public static void Text(Rect r, string text, int size, Color c, TextAnchor anchor = TextAnchor.MiddleCenter, bool bold = false)
     {
-        _text ??= new GUIStyle(GUI.skin.label) { wordWrap = false, clipping = TextClipping.Overflow };
-        _text.fontSize = Mathf.Max(1, size);
-        _text.alignment = anchor;
-        _text.fontStyle = bold ? FontStyle.Bold : FontStyle.Normal;
-        _text.normal.textColor = Fade(c);
-        GUI.Label(r, text, _text);
+        var style = TextStyle(size, bold);
+        style.alignment = anchor;
+        style.normal.textColor = Fade(c);
+        GUI.Label(r, text, style);
+    }
+
+    /// <summary>居中的一行字，太宽时缩小字号放进 r（按键框里的 LShift、Space 这类长名字）。</summary>
+    public static void FitText(Rect r, string text, int size, Color c, bool bold = false)
+    {
+        Content.text = text;
+        var width = TextStyle(size, bold).CalcSize(Content).x;
+        var room = r.width * 0.9f;
+        if (width > room)
+        {
+            size = Mathf.FloorToInt(size * room / width);
+        }
+
+        Text(r, text, size, c, TextAnchor.MiddleCenter, bold);
     }
 
     public static Color WithAlpha(this Color c, float a) => new(c.r, c.g, c.b, a);
 
     private static Color Fade(Color c) => new(c.r, c.g, c.b, c.a * Alpha);
+
+    private static GUIStyle TextStyle(int size, bool bold)
+    {
+        _text ??= new GUIStyle(GUI.skin.label) { wordWrap = false, clipping = TextClipping.Overflow };
+        _text.fontSize = Mathf.Max(1, size);
+        _text.fontStyle = bold ? FontStyle.Bold : FontStyle.Normal;
+        return _text;
+    }
 
     /// <summary>1×64 的竖向渐变贴图：底部不透明，往上按平方曲线淡出。Unity 贴图第 0 行在底部。</summary>
     private static Texture2D FadeUpTexture()

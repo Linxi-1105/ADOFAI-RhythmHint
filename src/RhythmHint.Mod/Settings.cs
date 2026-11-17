@@ -39,7 +39,10 @@ public sealed class Settings : UnityModManager.ModSettings
     /// <summary>画面整体提前（正数）或推后（负数），毫秒。只影响显示，不影响判定。</summary>
     public int VisualOffsetMs;
 
-    /// <summary>四个按键框上显示的字，用空格隔开；也用来点亮按键框。</summary>
+    /// <summary>
+    /// 四个按键框对应的键，用空格隔开：Unity 按键名或符号本身（如 D、;、LeftShift、Space），没指定的写 None。
+    /// 按键框上显示它（长名字缩写），按下时点亮。设置窗口里可选预设，或用屏幕键盘自定义。
+    /// </summary>
     public string KeyLabels = "D F J K";
 
     public bool LightKeysOnPress = true;
