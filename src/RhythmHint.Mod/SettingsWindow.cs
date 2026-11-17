@@ -218,7 +218,7 @@ internal sealed class SettingsWindow
         WindowSkin.Hint($"间隔较长时由{main}食指连击；间隔较短时左右食指交替；间隔极短时同一只手两指轮指；停顿后从{main}重新开始。双押优先分配给{main}（{chordKeys}），与双押相邻的单押分配给{other}；同一只手不会出现由食指到外侧手指的顺序（F→D、J→K）。");
         // 滑块名字一栏宽 LabelWidth（约 13 个汉字），超出会被后面的按钮盖住：名字写短，解释放在下面一行
         s.ResetWindowMs = WindowSkin.Slider("主手重置间隔（毫秒）", s.ResetWindowMs, 100, 300, 5);
-        WindowSkin.Hint($"两次按键的间隔大于此值时，由{main}食指单指连击。");
+        WindowSkin.Hint($"两次按键的间隔大于此值时，由{main}食指单指连击。当前 {s.ResetWindowMs} 毫秒，相当于 {StraightBpm(s.ResetWindowMs)} BPM 的直线：比它慢由{main}食指单点。");
         s.UseRoll = WindowSkin.Check("极快段落启用同手轮指（关闭后仅使用 F、J）", s.UseRoll);
         s.OuterRoll = WindowSkin.Check($"轮指时外侧手指先按（{outerRoll}；关闭后为 {innerRoll}）", s.OuterRoll);
         s.ChordFocusMs = WindowSkin.Slider("双押换手范围（毫秒）", s.ChordFocusMs, 0, 800, 10);
@@ -226,6 +226,7 @@ internal sealed class SettingsWindow
 
         WindowSkin.SectionTitle("其他参数");
         s.JackWindowMs = WindowSkin.Slider("同键连按最小间隔（毫秒）", s.JackWindowMs, 50, 300, 5);
+        WindowSkin.Hint($"同一个键连按两下至少间隔此值。当前 {s.JackWindowMs} 毫秒，相当于 {StraightBpm(s.JackWindowMs)} BPM 的直线：比它快不会同键连按。");
         s.PseudoChordWindowMs = WindowSkin.Slider("双押合并阈值（毫秒）", s.PseudoChordWindowMs, 0, 45, 1);
         WindowSkin.Hint("间隔小于此值的两次按键显示为双押，相隔约 25 毫秒的伪双押同样合并；双押始终由同一只手完成（D+F 或 J+K）。");
         if (WindowSkin.Buttons("重新排键") == 0)
@@ -233,6 +234,9 @@ internal sealed class SettingsWindow
             overlay.RequestRebuild();
         }
     }
+
+    /// <summary>间隔（毫秒）相当于多少 BPM 的直线：180° 直线每块砖一拍，BPM = 60000 / 毫秒。</summary>
+    private static int StraightBpm(int ms) => Mathf.RoundToInt(60000f / Mathf.Max(1, ms));
 
     private static void StatusTab(Settings s, Overlay overlay)
     {
