@@ -4,7 +4,7 @@
 
 What changed in each version, newest first.
 
-## Unreleased
+## 1.2.0 · 2026-11-17
 
 - Interface in Simplified Chinese, Traditional Chinese, English, Korean and Japanese; follows the game language by default, or pick one on F8 → Status
 - Triple and quad chords are detected by the angle between tiles, so very fast streams are no longer taken as doubles; triples and quads are purple
