@@ -25,9 +25,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- 翻译表（键是中文原文）编进 DLL，安装包还是只有 DLL 和 Info.json -->
+    <EmbeddedResource Include="Languages\*.json" LogicalName="RhythmHint.Languages.%(Filename).json" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- netstandard 也用游戏自带的（2.1）：Unity 6 的模块按 2.1 编译，.NET Framework 参考程序集里只有 2.0。
-         UnityEngine.UI / UIModule：设置窗口底下的透明挡板（InputShield）用 -->
-    <GameReference Include="Assembly-CSharp;RDTools;UnityEngine;UnityEngine.CoreModule;UnityEngine.IMGUIModule;UnityEngine.TextRenderingModule;UnityEngine.InputLegacyModule;UnityEngine.AudioModule;UnityEngine.UIModule;UnityEngine.UI;netstandard" />
+         UnityEngine.UI / UIModule：设置窗口底下的透明挡板（InputShield）用；Newtonsoft.Json：读翻译表 -->
+    <GameReference Include="Assembly-CSharp;RDTools;UnityEngine;UnityEngine.CoreModule;UnityEngine.IMGUIModule;UnityEngine.TextRenderingModule;UnityEngine.InputLegacyModule;UnityEngine.AudioModule;UnityEngine.UIModule;UnityEngine.UI;Newtonsoft.Json;netstandard" />
     <Reference Include="@(GameReference)">
       <HintPath>$(ManagedDir)\%(Identity).dll</HintPath>
       <Private>false</Private>

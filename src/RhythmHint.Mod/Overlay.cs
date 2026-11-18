@@ -33,13 +33,14 @@ internal sealed class Overlay : MonoBehaviour
     private string _builtFingering = string.Empty;
     private bool _failed;
     private float _previewUntil;
-    private string _screenState = string.Empty;
-    private string _levelStatus = "尚未进入关卡";
+    private Message _screenState = Message.Empty;
+    private string _screenStateText = string.Empty; // 原文，用来判断画面状态变没变
+    private Message _levelStatus = Lang.M("尚未进入关卡");
 
     internal OverlayFrame Frame { get; } = new();
 
-    /// <summary>给设置页显示的当前状态。</summary>
-    internal string Status => _failed ? _levelStatus : $"{_levelStatus}\n画面：{_screenState}";
+    /// <summary>给设置页显示的当前状态（按当前界面语言）。</summary>
+    internal string Status => _failed ? Lang.T(_levelStatus) : Lang.T("{0}\n画面：{1}", _levelStatus, _screenState);
 
     internal void RequestRebuild() => _rebuildRequested = true;
 
@@ -77,6 +78,7 @@ internal sealed class Overlay : MonoBehaviour
 
         try
         {
+            Lang.Update(Main.Settings);
             ReadHotkey();
             if (_window.Visible)
             {
@@ -96,7 +98,7 @@ internal sealed class Overlay : MonoBehaviour
             _viewport.Restore();
             _shield.Cover(null);
             Frame.Presence = 0;
-            _levelStatus = $"发生错误，已停用：{ex.Message}（详见 Unity Mod Manager 日志）";
+            _levelStatus = Lang.M("发生错误，已停用：{0}（详见 Unity Mod Manager 日志）", ex.Message);
             Main.Mod.Logger.LogException(ex);
         }
     }
@@ -167,15 +169,15 @@ internal sealed class Overlay : MonoBehaviour
         // 离开关卡后面板还在滑出时也继续跟着，滑完为止
         _uiFollowing = levelShown || (_uiFollowing && Frame.Presence > 0);
         _viewport.Apply(Frame.Presence, settings, _uiFollowing);
-        Report(pausedHide ? "已暂停，面板收起"
-            : levelShown ? $"显示关卡（{level.StateName}）"
-            : preview ? $"显示演示（{_demo.Mode}）"
-            : $"隐藏（{reason}）");
+        Report(pausedHide ? Lang.M("已暂停，面板收起")
+            : levelShown ? Lang.M("显示关卡（{0}）", level.StateName)
+            : preview ? Lang.M("显示演示（{0}）", _demo.Mode)
+            : Lang.M("隐藏（{0}）", reason));
         _keys.Read(settings, Frame);
     }
 
     /// <returns>这一帧关卡是否应该显示；不显示时 reason 写明原因。</returns>
-    private bool TickLevel(LevelState level, Settings settings, out string reason)
+    private bool TickLevel(LevelState level, Settings settings, out Message reason)
     {
         // 编辑器每次开始播放时记下当时的游戏状态：编辑器不会清掉上一次留下的「通关 / 失败」，
         // 只有这次播放中状态真的变了才算通关或死亡（否则第二次播放一开始就被当成「本关结束」）
@@ -192,13 +194,13 @@ internal sealed class Overlay : MonoBehaviour
 
         if (!level.ShouldDraw)
         {
-            reason = $"游戏状态：{level.StateName}";
+            reason = Lang.M("游戏状态：{0}", level.StateName);
             return false;
         }
 
         if (level.Floors[level.Floors.Count - 1].entryTime <= 0)
         {
-            reason = "砖块时间尚未计算完成";
+            reason = Lang.M("砖块时间尚未计算完成");
             return false;
         }
 
@@ -213,7 +215,7 @@ internal sealed class Overlay : MonoBehaviour
         if (_hitCount == 0)
         {
             // 一块要按的砖都没有：不显示（否则一出来就判成「本关结束」），各类砖的数量已在 Rebuild 里写进日志
-            reason = "本关没有需要按键的砖块";
+            reason = Lang.M("本关没有需要按键的砖块");
             return false;
         }
 
@@ -224,11 +226,11 @@ internal sealed class Overlay : MonoBehaviour
 
         if (won || (!failed && Frame.NextNote >= Frame.Notes.Count && Frame.Now > Frame.EndTime + ExitAfterLastNote))
         {
-            reason = "本关结束";
+            reason = Lang.M("本关结束");
             return false; // 出场动画
         }
 
-        reason = string.Empty;
+        reason = Message.Empty;
         return true;
     }
 
@@ -245,7 +247,7 @@ internal sealed class Overlay : MonoBehaviour
         _builtFingering = Main.Settings.FingeringKey;
         var notes = NotePlanner.Plan(hits, Main.Settings.ToFingering());
         Frame.Load(notes, beats, end);
-        Frame.Caption = string.Empty;
+        Frame.Caption = Message.Empty;
 
         var chords = new int[Lanes.Count + 1]; // 按几个键：双押、三押、四押各几个
         var laneUse = new int[Lanes.Count];
@@ -259,22 +261,24 @@ internal sealed class Overlay : MonoBehaviour
         }
 
         var byAngle = hits.Exists(h => !double.IsNaN(h.Angle));
-        _levelStatus = $"本关共 {hits.Count} 次按键，生成 {notes.Count} 个提示（双押 {chords[2]}、三押 {chords[3]}、四押 {chords[4]} 个，"
-            + $"{(byAngle ? "按转角判断" : "按时间判断")}），各轨道音符数 [{string.Join(", ", laneUse)}]"
-            + (hits.Count == 0 ? $"；{GameReader.DescribeFloors(level)}" : string.Empty);
-        Main.Mod.Logger.Log(_levelStatus);
+        _levelStatus = Lang.M("本关共 {0} 次按键，生成 {1} 个提示（双押 {2}、三押 {3}、四押 {4} 个，{5}），各轨道音符数 [{6}]{7}",
+            hits.Count, notes.Count, chords[2], chords[3], chords[4], byAngle ? Lang.M("按转角判断") : Lang.M("按时间判断"),
+            string.Join(", ", laneUse), hits.Count == 0 ? Lang.M("；{0}", GameReader.DescribeFloors(level)) : Message.Empty);
+        Main.Mod.Logger.Log(_levelStatus.ToString());
     }
 
     /// <summary>画面状态（显示什么 / 为什么隐藏）变化时记一行日志，方便查「为什么没显示」。</summary>
-    private void Report(string state)
+    private void Report(Message state)
     {
-        if (state == _screenState)
+        var text = state.ToString();
+        if (text == _screenStateText)
         {
             return;
         }
 
         _screenState = state;
-        Main.Mod.Logger.Log($"画面：{state}");
+        _screenStateText = text;
+        Main.Mod.Logger.Log($"画面：{text}");
     }
 
     private void OnGUI()

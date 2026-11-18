@@ -7,7 +7,7 @@ namespace RhythmHint;
 /// <summary>当前关卡的一份快照，Overlay 只通过它读游戏。</summary>
 internal readonly struct LevelState
 {
-    public LevelState(scrController controller, scrConductor conductor, List<scrFloor> floors, string floorSource)
+    public LevelState(scrController controller, scrConductor conductor, List<scrFloor> floors, Message floorSource)
     {
         Controller = controller;
         Conductor = conductor;
@@ -22,7 +22,7 @@ internal readonly struct LevelState
     public List<scrFloor> Floors { get; }
 
     /// <summary>砖块列表是从哪里读的（诊断用）。</summary>
-    public string FloorSource { get; }
+    public Message FloorSource { get; }
 
     /// <summary>玩家失败（死亡）后的状态。</summary>
     public bool Failed => Controller.currentState is States.Fail or States.Fail2;
@@ -42,48 +42,49 @@ internal readonly struct LevelState
         : Controller.currentState is States.Countdown or States.Checkpoint
             or States.PlayerControl or States.Fail or States.Fail2 or States.Won;
 
-    public string StateName => ADOBase.isLevelEditor
-        ? $"{Controller.currentState}，编辑器{(EditorPlaying ? "播放中" : "编辑中")}"
-        : Controller.currentState.ToString();
+    /// <summary>游戏状态（英文状态名不翻译），编辑器里再写明是播放中还是编辑中。</summary>
+    public Message StateName => ADOBase.isLevelEditor
+        ? Lang.M("{0}，编辑器{1}", Controller.currentState, EditorPlaying ? Lang.M("播放中") : Lang.M("编辑中"))
+        : new Message(Controller.currentState.ToString());
 }
 
 /// <summary>读 ADOFAI 的游戏对象。接口来自反编译 Assembly-CSharp（游戏 Unity 6000.3），游戏大更新后可能要改。</summary>
 internal static class GameReader
 {
-    /// <param name="reason">读不到关卡时的原因，写进诊断日志。</param>
-    public static bool TryGetLevel(out LevelState level, out string reason)
+    /// <param name="reason">读不到关卡时的原因，显示在状态页、写进诊断日志。</param>
+    public static bool TryGetLevel(out LevelState level, out Message reason)
     {
         level = default;
         var controller = ADOBase.controller;
         if (controller == null)
         {
-            reason = "未找到游戏控制器（位于主菜单或正在载入）";
+            reason = Lang.M("未找到游戏控制器（位于主菜单或正在载入）");
             return false;
         }
 
         if (ADOBase.isLevelSelect || ADOBase.isCLS)
         {
-            reason = "位于选关界面";
+            reason = Lang.M("位于选关界面");
             return false;
         }
 
         var conductor = ADOBase.conductor;
         if (conductor == null)
         {
-            reason = "未找到节拍器（scrConductor）";
+            reason = Lang.M("未找到节拍器（scrConductor）");
             return false;
         }
 
         var floors = FloorList(out var source);
         if (floors == null || floors.Count < 2 || floors[floors.Count - 1] == null)
         {
-            reason = $"砖块列表为空（{floors?.Count ?? 0} 块，来源：{source}）";
+            reason = Lang.M("砖块列表为空（{0} 块，来源：{1}）", floors?.Count ?? 0, source);
             return false;
         }
 
         // 不再要求 controller.gameworld：自由移动段等情况下游戏会把它设成 false
         level = new LevelState(controller, conductor, floors, source);
-        reason = string.Empty;
+        reason = Message.Empty;
         return true;
     }
 
@@ -93,24 +94,24 @@ internal static class GameReader
     /// 读出来一块要按的砖都没有、之后也不再变，编辑器自动播放就一直不显示。
     /// 其余场景用 ADOBase.lm，取不到再用 customLevel.levelMaker。都用 Unity 的 == 判断对象是否已销毁（?. 判断不了）。
     /// </summary>
-    private static List<scrFloor>? FloorList(out string source)
+    private static List<scrFloor>? FloorList(out Message source)
     {
         var game = ADOBase.customLevel;
         var fromGame = game != null && game.levelMaker != null ? game.levelMaker.listFloors : null;
         if (ADOBase.isLevelEditor && fromGame is { Count: >= 2 })
         {
-            source = "编辑器砖块列表";
+            source = Lang.M("编辑器砖块列表");
             return fromGame;
         }
 
         var lm = ADOBase.lm;
         if (lm != null && lm.listFloors is { Count: >= 2 } fromLm)
         {
-            source = "scrLevelMaker.instance";
+            source = new Message("scrLevelMaker.instance");
             return fromLm;
         }
 
-        source = fromGame != null ? "customLevel.levelMaker" : "未找到砖块列表";
+        source = fromGame != null ? new Message("customLevel.levelMaker") : Lang.M("未找到砖块列表");
         return fromGame;
     }
 
@@ -122,7 +123,7 @@ internal static class GameReader
     }
 
     /// <summary>一块要按的砖都没有时，说明各类砖各有几块，写进日志查原因。</summary>
-    public static string DescribeFloors(LevelState level)
+    public static Message DescribeFloors(LevelState level)
     {
         int missing = 0, auto = 0, midSpin = 0, fake = 0, hold = 0;
         foreach (var f in level.Floors)
@@ -140,7 +141,8 @@ internal static class GameReader
         }
 
         var last = level.Floors[level.Floors.Count - 1];
-        return $"{level.FloorSource}共 {level.Floors.Count} 块：已销毁 {missing}，自动 {auto}，中旋 {midSpin}，假砖 {fake}，长按 {hold}；最后一块时间 {(last != null ? last.entryTime : 0):F2} 秒";
+        return Lang.M("{0}共 {1} 块：已销毁 {2}，自动 {3}，中旋 {4}，假砖 {5}，长按 {6}；最后一块时间 {7:F2} 秒",
+            level.FloorSource, level.Floors.Count, missing, auto, midSpin, fake, hold, last != null ? last.entryTime : 0);
     }
 
     /// <summary>

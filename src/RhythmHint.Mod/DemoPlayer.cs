@@ -45,7 +45,9 @@ internal sealed class DemoPlayer
     }
 
     /// <summary>当前是否跟着主菜单音乐（日志和状态显示用）。</summary>
-    public string Mode => _followingMusic ? $"跟随菜单音乐，{60 / _demo.SecondsPerBeat:0.#} BPM" : $"内置节拍，{FallbackBpm:0} BPM";
+    public Message Mode => _followingMusic
+        ? Lang.M("跟随菜单音乐，{0:0.#} BPM", 60 / _demo.SecondsPerBeat)
+        : Lang.M("内置节拍，{0:0} BPM", FallbackBpm);
 
     /// <param name="sound">是否放嗒声（演示正在滑出时不放）。</param>
     public void Tick(OverlayFrame frame, Settings settings, bool sound)
@@ -138,8 +140,8 @@ internal sealed class DemoPlayer
         frame.Load(notes, beats, _demo.LoopSeconds * Loops);
         frame.Bpm = (float)bpm;
         frame.Caption = _followingMusic
-            ? $"演示 · 跟随当前音乐 {bpm:0.#} BPM · 每轮前 4 拍逐拍出现音符，音符到达判定线时应与节拍一致，如有偏差请调整「画面偏移」"
-            : $"演示 · {bpm:0} BPM · 请对照提示音调整「画面偏移」";
+            ? Lang.M("演示 · 跟随当前音乐 {0:0.#} BPM · 每轮前 4 拍逐拍出现音符，音符到达判定线时应与节拍一致，如有偏差请调整「画面偏移」", bpm)
+            : Lang.M("演示 · {0:0} BPM · 请对照提示音调整「画面偏移」", bpm);
         _clickIndex = 0;
         _clickLoop = 0;
     }

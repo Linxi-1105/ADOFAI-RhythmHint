@@ -9,8 +9,9 @@ namespace RhythmHint;
 /// </summary>
 internal static class WindowSkin
 {
-    /// <summary>名字一栏的宽度（约 14 个汉字），超出会被后面的控件盖住：名字写短，解释放在下面一行。</summary>
-    public const float LabelWidth = 250;
+    /// <summary>名字一栏最窄（约 14 个汉字）和最宽的宽度。名字写短，解释放在下面一行。</summary>
+    private const float MinLabelWidth = 250;
+    private const float MaxLabelWidth = 380;
 
     private const float RowHeight = 36;
     private const float RowGap = 6;
@@ -25,7 +26,15 @@ internal static class WindowSkin
     private static readonly Color Muted = new(0.6f, 0.6f, 0.66f);
     private static readonly Color SwitchOff = new(0.3f, 0.3f, 0.34f);
 
+    private static readonly GUIContent Measured = new();
     private static bool _ready;
+    private static float _widest;
+
+    /// <summary>
+    /// 名字一栏的宽度：英文、韩文的名字常比中文长，按上一帧量到的最长名字加宽（在最窄和最宽之间），控件一栏跟着右移。
+    /// 只在 Layout 事件里改（<see cref="BeginFrame"/>），同一帧的布局和绘制用同一个宽度。
+    /// </summary>
+    public static float LabelWidth { get; private set; } = MinLabelWidth;
 
     public static GUIStyle Window { get; private set; } = null!;
 
@@ -88,6 +97,18 @@ internal static class WindowSkin
         KeyInUse = RowControl(Boxy(GUI.skin.button, 16, Surface, SurfaceHover, Painter.Orange));
     }
 
+    /// <summary>窗口每帧开头调用：用上一轮量到的最长名字定这一帧的名字栏宽度（换了界面语言后下一帧就对上）。</summary>
+    public static void BeginFrame()
+    {
+        if (Event.current.type != EventType.Layout)
+        {
+            return;
+        }
+
+        LabelWidth = Mathf.Clamp(Mathf.Ceil(_widest) + 12, MinLabelWidth, MaxLabelWidth);
+        _widest = 0;
+    }
+
     public static void SectionTitle(string text) => GUILayout.Label(text, Section);
 
     public static void Hint(string text) => GUILayout.Label(text, Note);
@@ -96,7 +117,21 @@ internal static class WindowSkin
     public static void BeginRow(string label)
     {
         GUILayout.BeginHorizontal();
+        NameCell(label);
+    }
+
+    /// <summary>一行左边的名字，顺便量它有多宽。</summary>
+    private static void NameCell(string label)
+    {
+        Measure(label);
         GUILayout.Label(label, Label, GUILayout.Width(LabelWidth), GUILayout.Height(RowHeight));
+    }
+
+    /// <summary>记下这一帧最长的名字有多宽（下一帧的名字栏宽度按它定）。</summary>
+    private static void Measure(string label)
+    {
+        Measured.text = label;
+        _widest = Mathf.Max(_widest, Label.CalcSize(Measured).x);
     }
 
     /// <summary>结束一行，控件靠左，下面留一点空。</summary>
@@ -111,6 +146,7 @@ internal static class WindowSkin
     public static bool Switch(string label, bool value)
     {
         GUILayout.BeginHorizontal();
+        Measure(label);
         var clicked = GUILayout.Button(label, Label, GUILayout.Width(LabelWidth), GUILayout.Height(RowHeight));
         var cell = GUILayoutUtility.GetRect(SwitchWidth, RowHeight, GUILayout.Width(SwitchWidth), GUILayout.Height(RowHeight));
         var track = new Rect(cell.x, cell.y + ((RowHeight - SwitchHeight) / 2), SwitchWidth, SwitchHeight);
@@ -131,7 +167,7 @@ internal static class WindowSkin
     public static float Slider(string label, float value, float min, float max, string format, float step = 0)
     {
         GUILayout.BeginHorizontal();
-        GUILayout.Label(label, Label, GUILayout.Width(LabelWidth), GUILayout.Height(RowHeight));
+        NameCell(label);
         if (step > 0 && GUILayout.Button("−", Button, GUILayout.Width(34)))
         {
             value -= step;
@@ -178,8 +214,9 @@ internal static class WindowSkin
 
     /// <summary>
     /// 一排选项按钮，当前值高亮；返回新的值。当前值不在选项里（例如手改了设置文件）时也显示出来，保持不变。
+    /// 选项多时每 perRow 个换一行，下一行和控件一栏对齐。
     /// </summary>
-    public static string Choice(string label, string value, string[] options)
+    public static string Choice(string label, string value, string[] options, int perRow = int.MaxValue)
     {
         BeginRow(label);
         if (Array.IndexOf(options, value) < 0)
@@ -187,11 +224,18 @@ internal static class WindowSkin
             GUILayout.Button(value, Selected, GUILayout.MinWidth(56));
         }
 
-        foreach (var option in options)
+        for (var i = 0; i < options.Length; i++)
         {
-            if (GUILayout.Button(option, option == value ? Selected : Button, GUILayout.MinWidth(56)))
+            if (i > 0 && i % perRow == 0)
             {
-                value = option;
+                EndRow();
+                GUILayout.BeginHorizontal();
+                GUILayout.Space(LabelWidth);
+            }
+
+            if (GUILayout.Button(options[i], options[i] == value ? Selected : Button, GUILayout.MinWidth(56)))
+            {
+                value = options[i];
             }
         }
 

@@ -16,8 +16,8 @@ internal sealed class OverlayFrame
     /// <summary>入场 / 出场动画进度，0..1。</summary>
     public float Presence;
 
-    /// <summary>顶部条右侧的小字说明（演示模式用），空表示不显示。</summary>
-    public string Caption = string.Empty;
+    /// <summary>顶部条右侧的小字说明（演示模式用），画的时候按当前界面语言翻译；空表示不显示。</summary>
+    public Message Caption = Message.Empty;
 
     public IReadOnlyList<PlannedNote> Notes = Array.Empty<PlannedNote>();
     public IReadOnlyList<BeatLine> Beats = Array.Empty<BeatLine>();

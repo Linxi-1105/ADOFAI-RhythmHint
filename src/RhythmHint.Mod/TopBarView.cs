@@ -26,10 +26,13 @@ internal static class TopBarView
         }
 
         Painter.Rect(new Rect(0, l.TopHeight - (2 * l.Scale), Screen.width, 2 * l.Scale), new Color(0.3f, 0.3f, 0.34f));
-        if (!string.IsNullOrEmpty(f.Caption))
+        if (f.Caption.Source.Length > 0)
         {
-            Painter.Text(new Rect(0, l.TopHeight + (6 * l.Scale), Screen.width - (16 * l.Scale), 24 * l.Scale), f.Caption,
-                Mathf.RoundToInt(18 * l.Scale), new Color(1f, 0.85f, 0.4f), TextAnchor.MiddleRight, true);
+            // 说明在太鼓条下面、和四轨面板同一高度：只占面板右边的空间，放不下就缩小字号。
+            // 复现（用户录屏）：英文、韩文、日文的说明比中文长得多，原来从屏幕左边画起，前半句压在四轨面板底下
+            var left = (s.ShowLanes ? l.PanelWidth : 0) + (16 * l.Scale);
+            Painter.FitText(new Rect(left, l.TopHeight + (6 * l.Scale), Screen.width - (16 * l.Scale) - left, 24 * l.Scale), Lang.T(f.Caption),
+                Mathf.RoundToInt(18 * l.Scale), new Color(1f, 0.85f, 0.4f), true, TextAnchor.MiddleRight);
         }
     }
 

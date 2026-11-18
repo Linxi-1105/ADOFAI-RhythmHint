@@ -66,8 +66,11 @@ internal static class Painter
         GUI.Label(r, text, style);
     }
 
-    /// <summary>居中的一行字，太宽时缩小字号放进 r（按键框里的 LShift、Space 这类长名字）。</summary>
-    public static void FitText(Rect r, string text, int size, Color c, bool bold = false)
+    /// <summary>
+    /// 一行字，太宽时缩小字号放进 r：按键框里的 LShift、Space 这类长名字（居中），
+    /// 演示说明换成英文、韩文后比中文长得多（靠右）。
+    /// </summary>
+    public static void FitText(Rect r, string text, int size, Color c, bool bold = false, TextAnchor anchor = TextAnchor.MiddleCenter)
     {
         Content.text = text;
         var width = TextStyle(size, bold).CalcSize(Content).x;
@@ -77,7 +80,7 @@ internal static class Painter
             size = Mathf.FloorToInt(size * room / width);
         }
 
-        Text(r, text, size, c, TextAnchor.MiddleCenter, bold);
+        Text(r, text, size, c, anchor, bold);
     }
 
     public static Color WithAlpha(this Color c, float a) => new(c.r, c.g, c.b, a);

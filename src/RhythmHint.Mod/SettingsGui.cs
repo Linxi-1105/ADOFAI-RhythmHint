@@ -9,19 +9,20 @@ internal static class SettingsGui
 {
     public static void Draw(Settings s, Overlay? overlay)
     {
-        GUILayout.Label($"状态：{overlay?.Status ?? "Mod 未启用"}");
+        Lang.Update(s); // Mod 没启用时 Overlay 不跑，这里也要跟上游戏语言
+        GUILayout.Label(Lang.T("状态：{0}", overlay?.Status ?? Lang.T("Mod 未启用")));
         GUILayout.Space(6);
         if (overlay == null)
         {
-            GUILayout.Label("请先启用 Mod，再打开设置窗口。");
+            GUILayout.Label(Lang.T("请先启用 Mod，再打开设置窗口。"));
             return;
         }
 
-        if (GUILayout.Button($"打开设置窗口（游戏中按 {s.SettingsHotkey}）", GUILayout.Width(360)))
+        if (GUILayout.Button(Lang.T("打开设置窗口（游戏中按 {0}）", s.SettingsHotkey), GUILayout.Width(360)))
         {
             overlay.OpenSettings();
         }
 
-        GUILayout.Label("设置窗口打开时会播放演示，修改即时生效。");
+        GUILayout.Label(Lang.T("设置窗口打开时会播放演示，修改即时生效。"));
     }
 }

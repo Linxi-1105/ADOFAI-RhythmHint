@@ -45,7 +45,7 @@ internal sealed class KeyPicker
         var custom = _custom || Array.IndexOf(Presets, s.KeyLabels) < 0;
         var slot = custom ? _slot : -1;
 
-        WindowSkin.BeginRow("键位");
+        WindowSkin.BeginRow(Lang.T("键位"));
         foreach (var preset in Presets)
         {
             if (GUILayout.Button(preset, !custom && preset == s.KeyLabels ? WindowSkin.Selected : WindowSkin.Button, GUILayout.MinWidth(56)))
@@ -55,7 +55,7 @@ internal sealed class KeyPicker
             }
         }
 
-        if (GUILayout.Button("自定义", custom ? WindowSkin.Selected : WindowSkin.Button, GUILayout.MinWidth(56)) && !custom)
+        if (GUILayout.Button(Lang.T("自定义"), custom ? WindowSkin.Selected : WindowSkin.Button, GUILayout.MinWidth(56)) && !custom)
         {
             _custom = true;
             _slot = 0; // 直接从第 1 个键开始点
@@ -72,7 +72,7 @@ internal sealed class KeyPicker
     private void DrawCustom(Settings s, int slot)
     {
         var keys = KeyBindings.Split(s.KeyLabels);
-        WindowSkin.BeginRow("自定义键位");
+        WindowSkin.BeginRow(Lang.T("自定义键位"));
         for (var i = 0; i < keys.Length; i++)
         {
             var shown = KeyBindings.Display(keys[i]);
@@ -86,11 +86,11 @@ internal sealed class KeyPicker
 
         if (slot < 0)
         {
-            WindowSkin.Hint("点击按键框可重新指定按键。");
+            WindowSkin.Hint(Lang.T("点击按键框可重新指定按键。"));
             return;
         }
 
-        WindowSkin.Hint($"为第 {slot + 1} 个按键框选择按键；已被占用的键会互换。");
+        WindowSkin.Hint(Lang.T("为第 {0} 个按键框选择按键；已被占用的键会互换。", slot + 1));
         string? picked = null;
         foreach (var (indent, row) in Rows)
         {
