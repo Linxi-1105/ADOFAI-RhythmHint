@@ -111,8 +111,8 @@ internal static class TopBarView
 
     private static void DrawNotes(OverlayFrame f, OverlayLayout l, float judgeX, float cy, float speed, double lookAhead)
     {
-        // 先找出可见范围，再从远到近画，近的音符压在上面
-        for (var i = f.VisibleEnd(lookAhead) - 1; i >= f.NextNote; i--)
+        // 从近到远画，后面的音符压在前面的上面（用户要求；原来近的压在上面）
+        for (var i = f.NextNote; i < f.VisibleEnd(lookAhead); i++)
         {
             var note = f.Notes[i];
             var dt = f.TimeTo(note);
