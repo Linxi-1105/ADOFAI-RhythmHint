@@ -4,6 +4,10 @@
 
 What changed in each version, newest first.
 
+## Unreleased
+
+- Fixed: with Fit game view beside panel on, only the top edge of the autoplay button in the editor's bottom-right corner could be clicked during playback
+
 ## 1.2.0 · 2026-11-17
 
 - Interface in Simplified Chinese, Traditional Chinese, English, Korean and Japanese; follows the game language by default, or pick one on F8 → Status

@@ -16,9 +16,17 @@ namespace RhythmHint;
 /// 点击走这台摄像机换算，位置也对得上。
 /// </para>
 /// <para>
-/// 排序相同的覆盖模式画布，谁画在上面、谁先接到点击，看 Unity 的渲染顺序（renderOrder）；改成世界空间后这个依据没了，
-/// 改看离摄像机的远近，全在同一个平面上就只剩注册顺序。编辑器右下角的自动播放按钮（ottoCanvas，排序 0）播放中点不动，
-/// 同为排序 0 的还有 tipCanvas、Error Meter。转换时按原来的渲染顺序给每块画布一个前后距离（后画的离摄像机近）后，用户复测能点了。
+/// 点击谁先接到，要和原来一样（EventSystem 的排法：两边都有事件摄像机时先比摄像机 depth，
+/// 再看覆盖模式画布的排序，非覆盖模式的一律排在覆盖模式后面，然后才比 sortingLayer、sortingOrder、远近）：
+/// <list type="bullet">
+/// <item>排序相同的覆盖模式画布看 Unity 的渲染顺序（renderOrder）；改成世界空间后改看离摄像机的远近。
+/// 转换时按原来的渲染顺序给每块画布一个前后距离（后画的离摄像机近）。编辑器右下角的自动播放按钮（ottoCanvas，排序 0）
+/// 播放中点不动，同为排序 0 的还有 tipCanvas、Error Meter，这样排后用户复测能点了。</item>
+/// <item>覆盖模式的画布原本排在所有非覆盖模式的画布前面；改成世界空间后，要靠摄像机的 depth 比过别的画布的事件摄像机。
+/// 所以 depth 不光高过所有开着的摄像机，也高过没转换的画布指定的摄像机（哪怕那台没开、不在 Camera.allCameras 里）。
+/// 用户日志（1.2.0）：编辑器播放中 OverlayCanvas 上看不见的 NeoCosmosDLC 盖住全屏右下角 160×80，自动播放按钮只剩上沿（兔耳朵中间）点得到；
+/// OverlayCanvas 不是覆盖模式、指定的摄像机不在 allCameras 里，这样算 depth 后整个按钮都能点了。</item>
+/// </list>
 /// </para>
 /// 只动根画布的 renderMode / worldCamera、根节点的位置、大小、缩放，和 CanvasScaler 的 dynamicPixelsPerUnit；
 /// 面板收起时改回覆盖模式（覆盖模式会重新接管根节点），dynamicPixelsPerUnit 改回原值。
@@ -75,15 +83,6 @@ internal sealed class GameCanvases
         cam.orthographicSize = size.y / 2;
         cam.transform.position = Origin + new Vector3(size.x / 2, size.y / 2, -10);
 
-        // 和覆盖模式一样在所有摄像机之后画，压在它们画的内容上面
-        var depth = 0f;
-        foreach (var other in gameCameras)
-        {
-            depth = Mathf.Max(depth, other.depth + 1);
-        }
-
-        cam.depth = depth;
-
         if (size != _virtual)
         {
             // 面板滑入 / 滑出时每帧都变；停下来以后不再改，免得界面每帧重新排版
@@ -97,7 +96,16 @@ internal sealed class GameCanvases
             }
         }
 
-        Scan(cam);
+        var otherEventDepth = Scan(cam);
+
+        // 和覆盖模式一样在所有摄像机之后画，压在它们画的内容上面；点击也排在别的画布前面
+        var depth = otherEventDepth + 1;
+        foreach (var other in gameCameras)
+        {
+            depth = Mathf.Max(depth, other.depth + 1);
+        }
+
+        cam.depth = Mathf.Max(depth, 0f);
         LogClickTarget();
     }
 
@@ -130,8 +138,11 @@ internal sealed class GameCanvases
         }
     }
 
-    /// <summary>每帧找一次：暂停菜单这类界面是按下按键时才显示的，晚一帧就会先全屏闪一下。</summary>
-    private void Scan(Camera cam)
+    /// <summary>
+    /// 每帧找一次：暂停菜单这类界面是按下按键时才显示的，晚一帧就会先全屏闪一下。
+    /// 返回没转换的画布指定的摄像机里最高的 depth（没有时很小），自己的摄像机要高过它。
+    /// </summary>
+    private float Scan(Camera cam)
     {
         _drop.Clear();
         foreach (var canvas in _converted.Keys)
@@ -148,14 +159,21 @@ internal sealed class GameCanvases
         }
 
         _fresh.Clear();
+        var otherEventDepth = float.MinValue;
         foreach (var canvas in Object.FindObjectsByType<Canvas>(FindObjectsSortMode.None))
         {
-            if (!_converted.ContainsKey(canvas)
-                && canvas.isRootCanvas
-                && canvas.renderMode == RenderMode.ScreenSpaceOverlay
-                && !canvas.transform.IsChildOf(_own))
+            if (_converted.ContainsKey(canvas) || !canvas.isRootCanvas || canvas.transform.IsChildOf(_own))
+            {
+                continue;
+            }
+
+            if (canvas.renderMode == RenderMode.ScreenSpaceOverlay)
             {
                 _fresh.Add(canvas);
+            }
+            else if (canvas.worldCamera && canvas.worldCamera != cam)
+            {
+                otherEventDepth = Mathf.Max(otherEventDepth, canvas.worldCamera.depth);
             }
         }
 
@@ -173,6 +191,7 @@ internal sealed class GameCanvases
         }
 
         cam.cullingMask = mask;
+        return otherEventDepth;
     }
 
     private void Convert(Canvas canvas, Camera cam, int layer)
@@ -235,7 +254,9 @@ internal sealed class GameCanvases
     private readonly record struct Converted(float Scale, CanvasScaler? Scaler, float OriginalDynamicPixels, int Layer);
 
     /// <summary>
-    /// 诊断：界面缩着时按下鼠标，记下点到的最上层界面元素（每个只记一次）。按钮点不动时对照日志查是谁挡在上面。
+    /// 诊断：界面缩着时按下鼠标，记下点到的最上层界面元素、它所在的画布、最终响应这次点击的对象、两者在屏幕上的范围，
+    /// 以及游戏输入模块记的鼠标位置（同一组「点到 → 响应」只记一次）。
+    /// 按钮点不动、或要点偏一点才有反应时，对照日志看是被挡住了，还是点击范围 / 坐标对不上。
     /// </summary>
     private void LogClickTarget()
     {
@@ -245,20 +266,74 @@ internal sealed class GameCanvases
             return;
         }
 
+        var mouse = (Vector2)Input.mousePosition;
         _hits.Clear();
-        events.RaycastAll(new PointerEventData(events) { position = Input.mousePosition }, _hits);
+        events.RaycastAll(new PointerEventData(events) { position = mouse }, _hits);
         if (_hits.Count == 0)
         {
             return;
         }
 
         var hit = _hits[0].gameObject;
-        var canvas = hit.GetComponentInParent<Canvas>();
-        var target = $"{(canvas ? canvas.rootCanvas.name : "?")}/{hit.name}";
-        if (_loggedHits.Add(target))
+        var handler = ExecuteEvents.GetEventHandler<IPointerClickHandler>(hit);
+        if (!_loggedHits.Add($"{PathOf(hit)}→{PathOf(handler)}"))
         {
-            Main.Mod.Logger.Log($"自适应游戏画幅：点击落在「{target}」");
+            return;
         }
+
+        var module = events.currentInputModule;
+        var pointer = module is CustomStandaloneInputModule standalone ? standalone.GetPointerData() : null;
+        Main.Mod.Logger.Log(
+            $"自适应游戏画幅：点击 {mouse}，落在「{PathOf(hit)}」（屏幕范围 {ScreenRectOf(hit)}，画布 {CanvasOf(hit)}），"
+            + $"响应点击的是「{PathOf(handler)}」（屏幕范围 {ScreenRectOf(handler)}）；"
+            + $"输入模块 {(module ? module.GetType().Name : "-")}，它记的鼠标位置 {(pointer != null ? pointer.position.ToString() : "?")}");
+    }
+
+    /// <summary>诊断用：「根画布/父对象/对象」，没有时是 -（只写日志，不翻译）。</summary>
+    private static string PathOf(GameObject? go)
+    {
+        if (!go)
+        {
+            return "-";
+        }
+
+        var canvas = go!.GetComponentInParent<Canvas>();
+        var root = canvas ? canvas.rootCanvas.transform : null;
+        var parent = go.transform.parent;
+        var middle = parent && parent != root ? $"{parent!.name}/" : string.Empty;
+        return $"{(root ? root!.name : "?")}/{middle}{go.name}";
+    }
+
+    /// <summary>诊断用：对象所在根画布的模式、事件摄像机（名字和 depth）、排序（只写日志，不翻译）。</summary>
+    private static string CanvasOf(GameObject go)
+    {
+        var canvas = go.GetComponentInParent<Canvas>();
+        if (!canvas)
+        {
+            return "-";
+        }
+
+        var root = canvas.rootCanvas;
+        var cam = root.worldCamera;
+        return $"[{root.renderMode}, camera {(cam ? $"{cam!.name} depth {cam.depth}{(cam.enabled ? string.Empty : " off")}" : "-")}, "
+            + $"order {root.sortingLayerName}/{root.sortingOrder}]";
+    }
+
+    /// <summary>诊断用：对象在屏幕上的范围 [x 左-右, y 下-上]（像素，左下角为原点），按它所在画布的摄像机换算。</summary>
+    private static string ScreenRectOf(GameObject? go)
+    {
+        if (!go || go!.transform is not RectTransform rt)
+        {
+            return string.Empty;
+        }
+
+        var corners = new Vector3[4];
+        rt.GetWorldCorners(corners);
+        var canvas = go.GetComponentInParent<Canvas>();
+        var cam = canvas && canvas.rootCanvas.renderMode != RenderMode.ScreenSpaceOverlay ? canvas.rootCanvas.worldCamera : null;
+        Vector2 min = cam ? cam!.WorldToScreenPoint(corners[0]) : corners[0];
+        Vector2 max = cam ? cam!.WorldToScreenPoint(corners[2]) : corners[2];
+        return $"[x {min.x:0}-{max.x:0}, y {min.y:0}-{max.y:0}]";
     }
 
     /// <summary>画布还在，而且还是我们改的样子（Unity 里已销毁的对象转成 bool 是 false）。</summary>
