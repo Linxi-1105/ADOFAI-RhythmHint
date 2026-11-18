@@ -13,6 +13,7 @@ internal sealed class SettingsWindow
     private static readonly string[] Tabs = { "预览与校准", "显示", "排键", "状态" };
     private static readonly string[] HotkeyPresets = { "F8", "F9", "F7", "F6", "Home", "Insert" };
     private static readonly string[] HandPresets = { "右手", "左手" };
+    private static readonly string[] ChordHandPresets = { "同惯用手", "另一只手" };
     private static readonly string[] NoteShapes = { "横条", "圆形" };
 
     private readonly KeyPicker _keyPicker = new();
@@ -122,7 +123,7 @@ internal sealed class SettingsWindow
                 break;
             case 2:
                 LayoutTab(s, overlay);
-                ResetRow(s.ResetFingering, "惯用手保持不变。");
+                ResetRow(s.ResetFingering, "惯用手和双押用手保持不变。");
                 break;
             default:
                 StatusTab(s, overlay);
@@ -213,11 +214,14 @@ internal sealed class SettingsWindow
     {
         WindowSkin.SectionTitle("排键规则");
         s.LeftHanded = WindowSkin.Choice("惯用手", s.LeftHanded ? HandPresets[1] : HandPresets[0], HandPresets) == HandPresets[1];
+        s.ChordsOnOtherHand = WindowSkin.Choice("双押用手",
+            s.ChordsOnOtherHand ? ChordHandPresets[1] : ChordHandPresets[0], ChordHandPresets) == ChordHandPresets[1];
 
-        // 左撇子是整套排法左右镜像，说明文字里的手和键位跟着换
+        // 左撇子是整套排法左右镜像，说明文字里的手和键位跟着换；双押用手是相对惯用手的
         var main = s.LeftHanded ? "左手" : "右手";
+        var (chordHand, chordKeys) = s.LeftHanded != s.ChordsOnOtherHand ? ("左手", "D F") : ("右手", "J K");
         var (outerRoll, innerRoll) = s.LeftHanded ? ("D F K J", "F D J K") : ("K J D F", "J K F D");
-        WindowSkin.Hint($"只看本关的砖块间隔：慢时{main}食指单点，稍快时左右食指交替，极快时同手轮指；双押优先{main}。");
+        WindowSkin.Hint($"只看本关的砖块间隔：慢时{main}食指单点，稍快时左右食指交替，极快时同手轮指；双押优先{chordHand}（{chordKeys}）。");
 
         WindowSkin.SectionTitle("节奏分界");
         s.ResetWindowMs = WindowSkin.Slider("主手重置间隔（毫秒）", s.ResetWindowMs, 100, 300, 5);

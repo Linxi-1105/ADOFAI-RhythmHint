@@ -17,7 +17,7 @@ public sealed class FingeringOptions
     public double ResetWindow { get; set; } = 0.165;
 
     /// <summary>
-    /// 紧挨着双押（前一下或后一下就是双押）、隔得不超过它的单押放另一只手（双押在右手时放左手），让按双押的手专心按双押。
+    /// 紧挨着双押（前一下或后一下就是双押）、隔得不超过它的单押放另一只手（双押在右手时放左手，在左手时放右手），让按双押的手专心按双押。
     /// 用户：右手单押接右手双押，食指、中指配合不过来。默认 450 ms：本机关卡里单押和双押共用一个键的地方多在 167–375 ms。
     /// </summary>
     public double ChordFocusWindow { get; set; } = 0.45;
@@ -36,4 +36,10 @@ public sealed class FingeringOptions
     /// 轮指 D F K J；双押同手、不出现食指→外侧手指这些约束镜像后照样成立。
     /// </summary>
     public bool LeftHanded { get; set; }
+
+    /// <summary>
+    /// 双押优先另一只手（玩家反馈：双押用手和惯用手分开设置）。右手为主手时双押优先左手 D+F，
+    /// 紧挨着双押的单押改由主手按；左撇子时整体镜像，双押优先右手 J+K。双押同手这条照样成立。
+    /// </summary>
+    public bool ChordsOnOtherHand { get; set; }
 }

@@ -78,6 +78,12 @@ public sealed class Settings : UnityModManager.ModSettings
     /// <summary>左撇子：以左手为主手，整套排法左右镜像（D↔K、F↔J）。</summary>
     public bool LeftHanded;
 
+    /// <summary>
+    /// 双押优先另一只手（玩家反馈：双押用手和惯用手分开设置）。存的是相对惯用手的选择：默认跟惯用手，
+    /// 老设置文件读进来不变；换惯用手时双押跟着换边。
+    /// </summary>
+    public bool ChordsOnOtherHand;
+
     public override void Save(UnityModManager.ModEntry modEntry) => Save(this, modEntry);
 
     public FingeringOptions ToFingering() => new()
@@ -89,11 +95,12 @@ public sealed class Settings : UnityModManager.ModSettings
         UseRoll = UseRoll,
         OuterRoll = OuterRoll,
         LeftHanded = LeftHanded,
+        ChordsOnOtherHand = ChordsOnOtherHand,
     };
 
     /// <summary>排键相关设置的指纹，变了就要重排。</summary>
     public string FingeringKey =>
-        $"{PseudoChordWindowMs}/{ResetWindowMs}/{ChordFocusMs}/{JackWindowMs}/{UseRoll}{OuterRoll}{LeftHanded}";
+        $"{PseudoChordWindowMs}/{ResetWindowMs}/{ChordFocusMs}/{JackWindowMs}/{UseRoll}{OuterRoll}{LeftHanded}{ChordsOnOtherHand}";
 
     // 设置窗口每一页的「恢复本页默认值」：默认值只写在上面的字段初始值里，这里从一个新实例抄回来
 
@@ -124,7 +131,7 @@ public sealed class Settings : UnityModManager.ModSettings
         LightKeysOnPress = d.LightKeysOnPress;
     }
 
-    /// <summary>「排键」页的参数。惯用手不动：那是玩家自己的习惯，不是调出来的参数。</summary>
+    /// <summary>「排键」页的参数。惯用手和双押用手不动：那是玩家自己的习惯，不是调出来的参数。</summary>
     public void ResetFingering()
     {
         var d = new Settings();

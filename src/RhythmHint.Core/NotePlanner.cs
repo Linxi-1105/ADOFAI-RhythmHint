@@ -12,10 +12,10 @@ namespace RhythmHint.Core;
 /// <item>每个单押只看和前面几下的间隔（R = ResetWindow）：慢（&gt; R）右手食指连点；R/2–R 两只手食指轮流；
 /// R/2 以内同一只手两根手指轮指；停下来（&gt; R）总是回到右手食指</item>
 /// <item>轮指默认外侧手指先落：K J D F（用户习惯的 4312）</item>
-/// <item>双押优先右手（J K）；右手刚按过来不及才放左手</item>
+/// <item>双押优先右手（J K），ChordsOnOtherHand 时优先左手（D F）；那只手刚按过来不及才放另一只手</item>
 /// <item>紧挨着双押、隔得不超过 ChordFocusWindow 的单押放另一只手，让按双押的手专心按双押</item>
 /// <item>同一只手不出现「食指→外侧手指」（F→D、J→K，用户说的 21 式）：外轮换不了顺序时改按另一只手的食指，
-/// 下一下要让给左手食指时这一下先用 D</item>
+/// 下一下要让给某根食指时这一下先用同一只手的外侧手指（D→F 或 K→J）</item>
 /// <item>同一条轨道不在 JackWindow 内连续按两下</item>
 /// </list>
 /// 规则是确定的：同一张图每次排出来都一样，节奏相同的地方形状也相同。
@@ -40,6 +40,10 @@ public static class NotePlanner
         var rolled = new List<bool>(moments.Count);
         var hands = new HandState();
         var focus = FocusChords(moments, options);
+        var preferredChordHand = options.ChordsOnOtherHand ? 0 : 1;
+        // 后面的双押还没排，先按偏好的手算：紧挨着它的单押要让给另一只手的食指
+        var yieldIndex = Lanes.IndexLane(1 - preferredChordHand);
+        var yieldOuter = Lanes.Partner(yieldIndex);
         for (var i = 0; i < moments.Count; i++)
         {
             var moment = moments[i];
@@ -47,7 +51,7 @@ public static class NotePlanner
             var last = notes.Count > 0 ? notes[notes.Count - 1] : null;
             if (moment.Count > 1)
             {
-                notes.Add(BuildChord(moment, ChordHand(time, last, options)));
+                notes.Add(BuildChord(moment, ChordHand(preferredChordHand, time, last, options)));
                 rolled.Add(false);
             }
             else
@@ -55,18 +59,18 @@ public static class NotePlanner
                 var (lane, roll) = hands.Next(time, options);
                 if (focus[i] >= 0)
                 {
-                    // 前面的双押已经排好（一个时刻一个音符，序号相同）；后面的还没排，按「双押优先右手」算右手
-                    var chordHand = focus[i] < i ? Lanes.HandOf(notes[focus[i]].Lanes.Keys.First()) : 1;
+                    // 前面的双押已经排好（一个时刻一个音符，序号相同）；后面的还没排，按偏好的手算
+                    var chordHand = focus[i] < i ? Lanes.HandOf(notes[focus[i]].Lanes.Keys.First()) : preferredChordHand;
                     // 用户：右手单押接右手双押，食指、中指配合不过来。双押附近的单押放另一只手，让那只手专心按双押
                     (lane, roll) = (FocusLane(1 - chordHand, time, last, options), false);
                 }
 
-                if (lane == LeftIndex && i + 1 < moments.Count && focus[i + 1] == i + 2
-                    && moments[i + 1][0].Time - time < options.JackWindow - Epsilon && !Blocked(LeftOuter, time, last, options))
+                if (lane == yieldIndex && i + 1 < moments.Count && focus[i + 1] == i + 2
+                    && moments[i + 1][0].Time - time < options.JackWindow - Epsilon && !Blocked(yieldOuter, time, last, options))
                 {
-                    // 下一下要让给左手食指、又挨得太近：这一下先用外侧 D，下一下再按 F（从外向内），
-                    // 不然下一下只能 F→D（用户：不要有 21 式）
-                    (lane, roll) = (LeftOuter, false);
+                    // 下一下要让给这根食指、又挨得太近：这一下先用同一只手的外侧手指，下一下再按食指（从外向内）。
+                    // 双押在右手时是 D→F，在左手时是 K→J；不然下一下只能 F→D 或 J→K（用户：不要有 21 式）
+                    (lane, roll) = (yieldOuter, false);
                 }
 
                 if (Blocked(lane, time, last, options))
@@ -208,11 +212,13 @@ public static class NotePlanner
         return moments;
     }
 
-    /// <summary>用户：双押优先右手（J K）。右手上一下刚按过、同一只手来不及时才放左手。</summary>
-    private static int ChordHand(double time, PlannedNote? last, FingeringOptions o)
+    /// <summary>
+    /// 用户：双押优先右手（J K）；双押选了另一只手时优先左手（D F）。偏好的手上一下刚按过、来不及时才放另一只手。
+    /// </summary>
+    private static int ChordHand(int preferred, double time, PlannedNote? last, FingeringOptions o)
     {
         bool HandBlocked(int hand) => Blocked(hand * 2, time, last, o) || Blocked((hand * 2) + 1, time, last, o);
-        return HandBlocked(1) && !HandBlocked(0) ? 0 : 1;
+        return HandBlocked(preferred) && !HandBlocked(1 - preferred) ? 1 - preferred : preferred;
     }
 
     /// <summary>双押只能是同一只手的两根手指：轨道 0+1 或 2+3，绝不跨手。三块以上同时到的砖也只画成一只手的双押。</summary>

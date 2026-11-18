@@ -6,7 +6,7 @@
 // 离线预览：不开游戏，用文字画出某一关的排键结果（和 Mod 用同一套规则，只看关卡自己的砖块）。
 // 可选再给一张自己手排的参考谱：只用来对照「自动排键像不像自己的手法」，不会改变排键结果。
 // 用法：dotnet run tools/Preview.cs -- <关卡.adofai> [参考谱.pez/.json] [--from 秒] [--seconds 秒]
-//       [--reset 毫秒] [--focus 毫秒] [--jack 毫秒] [--chord 毫秒] [--no-roll] [--inner-roll] [--left-handed]   临时试排键参数
+//       [--reset 毫秒] [--focus 毫秒] [--jack 毫秒] [--chord 毫秒] [--no-roll] [--inner-roll] [--left-handed] [--chord-other-hand]   临时试排键参数
 //       [--export 文件.json]   导出砖块时间和节拍线，给 tools/layout-lab 网页用
 // 只支持常见的 angleData + SetSpeed + Twirl 关卡，用来大致验证；游戏里以游戏算出的时间为准。
 
@@ -20,7 +20,7 @@ var files = args.Where((a, i) => !a.StartsWith("--", StringComparison.Ordinal)
 double from = ReadOption("--from", 0), span = ReadOption("--seconds", 6);
 if (files.Count == 0)
 {
-    Console.Error.WriteLine("用法：dotnet run tools/Preview.cs -- <关卡.adofai> [参考谱] [--from 秒] [--seconds 秒] [--reset|--focus|--jack|--chord 毫秒] [--no-roll] [--inner-roll] [--left-handed]");
+    Console.Error.WriteLine("用法：dotnet run tools/Preview.cs -- <关卡.adofai> [参考谱] [--from 秒] [--seconds 秒] [--reset|--focus|--jack|--chord 毫秒] [--no-roll] [--inner-roll] [--left-handed] [--chord-other-hand]");
     return 2;
 }
 
@@ -30,6 +30,7 @@ options.ChordFocusWindow = ReadOption("--focus", options.ChordFocusWindow * 1000
 options.UseRoll = !args.Contains("--no-roll");
 options.OuterRoll = !args.Contains("--inner-roll");
 options.LeftHanded = args.Contains("--left-handed");
+options.ChordsOnOtherHand = args.Contains("--chord-other-hand");
 options.JackWindow = ReadOption("--jack", options.JackWindow * 1000) / 1000;
 options.ChordWindow = ReadOption("--chord", options.ChordWindow * 1000) / 1000;
 

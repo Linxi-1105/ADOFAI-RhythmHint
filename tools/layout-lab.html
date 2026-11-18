@@ -144,6 +144,7 @@ kbd { font-family: var(--font-num); background: var(--raise); border: 1px solid 
       <div class="param"><span>同键连按最短（毫秒）</span><input type="range" id="pJack" min="50" max="300" step="5" value="150"><output id="pJackOut">150</output></div>
       <label><input type="checkbox" id="pRoll" checked> 很快时同手轮指</label>
       <label><input type="checkbox" id="pOuter" checked> 外侧手指先落（K J D F）</label>
+      <label><input type="checkbox" id="pChordOther"> 双押用另一只手（左手 D F）</label>
     </section>
 
     <section class="card">
@@ -264,7 +265,7 @@ function parseAdofai(text) {
 }
 
 // ---------- 排键方案 ----------
-const P = { reset: 0.165, focus: 0.45, jack: 0.15, roll: true, outer: true };
+const P = { reset: 0.165, focus: 0.45, jack: 0.15, roll: true, outer: true, chordOther: false };
 const EPS = 1e-6;
 
 function onBeat(t) {
@@ -284,11 +285,13 @@ function blocked(l, t, prev) { return !!prev && prev.lanes.includes(l) && t - pr
 
 // 当前 Mod（1.0.0）的规则，和 C# NotePlanner 一样：时间重置法（主手重置间隔 R）。
 // 慢（> R）右手食指连点；R/2–R 左右食指轮流；R/2 以内同手轮指；停下回右手；外轮 K J D F；
-// 双押优先右手、只在 0+1 / 2+3；双押前后 focus 以内的单押放另一只手（F D 轮流）；同轨不在 jack 内连按
+// 双押优先右手（勾了「双押用另一只手」优先左手）、只在 0+1 / 2+3；双押前后 focus 以内的单押放另一只手；同轨不在 jack 内连按
 function planMod(M) {
   const out = new Array(M.length); const rolled = new Array(M.length).fill(false);
   let prev = null, last = -1, lastT = 0, lastRight = -Infinity;
   const r = P.reset;
+  const pref = P.chordOther ? 0 : 1;
+  const yieldIndex = pref === 1 ? 1 : 2, yieldOuter = yieldIndex ^ 1;
   // 每个单押要给哪个双押让手：只有紧挨着双押、隔得不超过 focus 的（前后都是双押看近的，一样近看后面的）
   const focus = M.map((m, i) => {
     if (m.count > 1) return -1;
@@ -307,17 +310,17 @@ function planMod(M) {
     const m = M[i]; let lanes;
     if (m.count > 1) {
       const handBlocked = (h) => pairOf(h).some((l) => blocked(l, m.t, prev));
-      lanes = pairOf(handBlocked(1) && !handBlocked(0) ? 0 : 1);
+      lanes = pairOf(handBlocked(pref) && !handBlocked(1 - pref) ? 1 - pref : pref);
     } else {
       let [lane, roll] = nextFinger(m.t);
-      // 要让手的双押：前面的已经排好看它的手，后面的还没排按右手算
-      const ch = focus[i] < 0 ? -1 : focus[i] < i ? hand(out[focus[i]][0]) : 1;
+      // 要让手的双押：前面的已经排好看它的手，后面的还没排按偏好的手算
+      const ch = focus[i] < 0 ? -1 : focus[i] < i ? hand(out[focus[i]][0]) : pref;
       if (ch >= 0) {
         const index = ch === 1 ? 1 : 2;
         [lane, roll] = [blocked(index, m.t, prev) ? index ^ 1 : index, false];
       }
-      // 下一下要让给左手食指、又挨得太近：这一下先用 D（从外向内），不然下一下只能 F→D
-      if (lane === 1 && i + 1 < M.length && focus[i + 1] === i + 2 && M[i + 1].t - m.t < P.jack - EPS && !blocked(0, m.t, prev)) [lane, roll] = [0, false];
+      // 下一下要让给某根食指、又挨得太近：这一下先用同一只手的外侧手指（D→F 或 K→J），不然下一下只能 F→D 或 J→K
+      if (lane === yieldIndex && i + 1 < M.length && focus[i + 1] === i + 2 && M[i + 1].t - m.t < P.jack - EPS && !blocked(yieldOuter, m.t, prev)) [lane, roll] = [yieldOuter, false];
       if (blocked(lane, m.t, prev)) {
         let best = lane, score = 1e9;
         for (let c = 0; c < 4; c++) {
@@ -966,6 +969,7 @@ function init() {
   bindParam("pReset", "reset", 0.001); bindParam("pFocus", "focus", 0.001); bindParam("pJack", "jack", 0.001);
   $("pRoll").addEventListener("change", () => { P.roll = $("pRoll").checked; replan(); });
   $("pOuter").addEventListener("change", () => { P.outer = $("pOuter").checked; replan(); });
+  $("pChordOther").addEventListener("change", () => { P.chordOther = $("pChordOther").checked; replan(); });
   window.addEventListener("resize", resize);
   if (S.levels.length) loadLevel(0);
   else $("status").textContent = "没有内置关卡：用上面的「读取 .adofai」打开一个关卡。";

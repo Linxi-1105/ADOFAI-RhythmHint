@@ -124,10 +124,13 @@ public class PlannerTests
         Assert.Equal(LanesOf(notes.Take(7)), LanesOf(notes.Skip(7)));
     }
 
-    [Fact]
-    public void NoSameLaneTwiceInARowWhenFast()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void NoSameLaneTwiceInARowWhenFast(bool chordsOnOtherHand)
     {
         // 同一条轨道连续按两下（中间没有别的音符）至少隔 JackWindow
+        var options = new FingeringOptions { ChordsOnOtherHand = chordsOnOtherHand };
         var rng = new Random(11);
         for (var round = 0; round < 50; round++)
         {
@@ -143,21 +146,24 @@ public class PlannerTests
                 }
             }
 
-            var notes = NotePlanner.Plan(tiles, Fingering);
+            var notes = NotePlanner.Plan(tiles, options);
 
             for (var i = 1; i < notes.Count; i++)
             {
                 var shared = notes[i].Lanes.Keys.Intersect(notes[i - 1].Lanes.Keys).Any();
-                Assert.False(shared && notes[i].Time - notes[i - 1].Time < Fingering.JackWindow,
+                Assert.False(shared && notes[i].Time - notes[i - 1].Time < options.JackWindow,
                     $"第 {round} 轮，{notes[i].Time:F3}s 和上一下用了同一条轨道");
             }
         }
     }
 
-    [Fact]
-    public void ChordsAreAlwaysOneHand()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ChordsAreAlwaysOneHand(bool chordsOnOtherHand)
     {
         // 复现：出现过左右手各一个的双押（轨道 0 + 3）。冰与火玩家的双押只能是同一只手：12 或 34（轨道 0+1 或 2+3）
+        var options = new FingeringOptions { ChordsOnOtherHand = chordsOnOtherHand };
         var rng = new Random(5);
         for (var round = 0; round < 50; round++)
         {
@@ -173,7 +179,7 @@ public class PlannerTests
                 }
             }
 
-            foreach (var n in NotePlanner.Plan(tiles, Fingering).Where(n => n.IsChord))
+            foreach (var n in NotePlanner.Plan(tiles, options).Where(n => n.IsChord))
             {
                 var lanes = n.Lanes.Keys.ToArray();
                 Assert.True(lanes.SequenceEqual(new[] { 0, 1 }) || lanes.SequenceEqual(new[] { 2, 3 }),
@@ -206,6 +212,56 @@ public class PlannerTests
     }
 
     [Fact]
+    public void ChordsCanPreferTheOtherHand()
+    {
+        // 玩家反馈：双押用手和惯用手分开设置。右手为主手、双押选另一只手：双押优先左手 D+F
+        var options = new FingeringOptions { ChordsOnOtherHand = true };
+        foreach (var (gap, every) in new[] { (0.25, 4), (0.2, 3), (0.1, 4), (0.15, 2) })
+        {
+            var tiles = new List<TileHit>();
+            for (var i = 0; i < 24; i++)
+            {
+                var time = 1.0 + (i * gap);
+                tiles.Add(new TileHit(tiles.Count + 1, time));
+                if (i % every == 0)
+                {
+                    tiles.Add(new TileHit(tiles.Count + 1, time + 0.01));
+                }
+            }
+
+            var notes = NotePlanner.Plan(tiles, options);
+
+            Assert.All(notes.Where(n => n.IsChord), n => Assert.Equal(new[] { 0, 1 }, n.Lanes.Keys.ToArray()));
+        }
+    }
+
+    [Fact]
+    public void SinglesNextToLeftChordMoveToRightHand()
+    {
+        // 双押在左手时反过来：双押前后的单押放右手，让左手专心按双押
+        var tiles = new List<TileHit> { new(1, 1.0), new(2, 1.11), new(3, 1.135), new(4, 1.33) };
+
+        var notes = NotePlanner.Plan(tiles, new FingeringOptions { ChordsOnOtherHand = true });
+
+        Assert.Equal(new[] { 0, 1 }, notes[1].Lanes.Keys.ToArray());
+        Assert.Equal(2, notes[0].Lanes.Keys.Single());
+        Assert.Equal(2, notes[2].Lanes.Keys.Single());
+    }
+
+    [Fact]
+    public void NoteBeforeYieldingToRightIndexStartsOnOuterFinger()
+    {
+        // 下一下要让给右手食指 J（后面是左手双押）、又挨得太近：这一下先用 K，K→J 从外向内；
+        // 不然这一下 J、下一下只能改 K，成了 J→K（用户：不要有 21 式）
+        var tiles = new List<TileHit> { new(1, 1.0), new(2, 1.1), new(3, 1.3), new(4, 1.31) };
+
+        var notes = NotePlanner.Plan(tiles, new FingeringOptions { ChordsOnOtherHand = true });
+
+        Assert.Equal(new[] { 3, 2 }, LanesOf(notes.Take(2)));
+        Assert.Equal(new[] { 0, 1 }, notes[2].Lanes.Keys.ToArray());
+    }
+
+    [Fact]
     public void SinglesNextToRightChordMoveToLeftHand()
     {
         // 复现（用户截图）：J 单押 → J+K 双押 → J 单押，右手食指、中指配合不过来。
@@ -228,14 +284,20 @@ public class PlannerTests
             .ToList();
 
     [Theory]
-    [InlineData(0.047)]
-    [InlineData(0.1)]
-    [InlineData(0.15)]
-    [InlineData(0.2)]
-    public void ChordNeighboursMoveToOtherHand(double gap)
+    [InlineData(0.047, false)]
+    [InlineData(0.1, false)]
+    [InlineData(0.15, false)]
+    [InlineData(0.2, false)]
+    [InlineData(0.047, true)]
+    [InlineData(0.1, true)]
+    [InlineData(0.15, true)]
+    [InlineData(0.2, true)]
+    public void ChordNeighboursMoveToOtherHand(double gap, bool chordsOnOtherHand)
     {
         // 双押 单 单 单 双押 …：紧挨着右手双押的单押放左手，不和双押共用一个键；中间的照常排，
-        // 不要整串都压在左手 F D 轮流（用户：不要有 21 式、从内向外的楼梯）
+        // 不要整串都压在左手 F D 轮流（用户：不要有 21 式、从内向外的楼梯）。双押在左手时反过来
+        var options = new FingeringOptions { ChordsOnOtherHand = chordsOnOtherHand };
+        var chordHand = chordsOnOtherHand ? 0 : 1;
         var tiles = new List<TileHit>();
         for (var i = 0; i < 17; i++)
         {
@@ -247,15 +309,15 @@ public class PlannerTests
             }
         }
 
-        var notes = NotePlanner.Plan(tiles, Fingering);
+        var notes = NotePlanner.Plan(tiles, options);
 
-        Assert.All(notes.Where(n => n.IsChord), n => Assert.Equal(new[] { 2, 3 }, n.Lanes.Keys.ToArray()));
+        Assert.All(notes.Where(n => n.IsChord), n => Assert.Equal(chordHand, Lanes.HandOf(n.Lanes.Keys.First())));
         for (var i = 1; i < notes.Count; i++)
         {
             if (notes[i].IsChord != notes[i - 1].IsChord)
             {
                 var single = notes[i].IsChord ? notes[i - 1] : notes[i];
-                Assert.Equal(0, Lanes.HandOf(single.Lanes.Keys.Single()));
+                Assert.Equal(1 - chordHand, Lanes.HandOf(single.Lanes.Keys.Single()));
             }
         }
 
@@ -277,10 +339,13 @@ public class PlannerTests
         Assert.Empty(IndexToOuterSteps(notes));
     }
 
-    [Fact]
-    public void NoIndexToOuterStepsInRandomCharts()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void NoIndexToOuterStepsInRandomCharts(bool chordsOnOtherHand)
     {
         // 用户：不要有 21 式（F→D），尽量避免从内向外的楼梯（J→K 同理）
+        var options = new FingeringOptions { ChordsOnOtherHand = chordsOnOtherHand };
         var rng = new Random(23);
         for (var round = 0; round < 30; round++)
         {
@@ -296,7 +361,7 @@ public class PlannerTests
                 }
             }
 
-            var steps = IndexToOuterSteps(NotePlanner.Plan(tiles, Fingering));
+            var steps = IndexToOuterSteps(NotePlanner.Plan(tiles, options));
             Assert.True(steps.Count == 0, $"第 {round} 轮：{string.Join("；", steps.Take(5))}");
         }
     }
@@ -313,10 +378,12 @@ public class PlannerTests
         Assert.All(lanes.Skip(1), l => Assert.Equal(2, l));
     }
 
-    [Fact]
-    public void FastChordStreamStillAlternatesWhenItMust()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void FastChordStreamStillAlternatesWhenItMust(bool chordsOnOtherHand)
     {
-        // 双押一个接一个且快到同一只手来不及（< JackWindow）：只能左右手轮流，不能连按
+        // 双押一个接一个且快到同一只手来不及（< JackWindow）：只能左右手轮流，不能连按；第一个放在偏好的那只手
         var tiles = new List<TileHit>();
         for (var i = 0; i < 8; i++)
         {
@@ -324,9 +391,9 @@ public class PlannerTests
             tiles.Add(new TileHit(tiles.Count + 1, 1.0 + (i * 0.1) + 0.01));
         }
 
-        var notes = NotePlanner.Plan(tiles, Fingering);
+        var notes = NotePlanner.Plan(tiles, new FingeringOptions { ChordsOnOtherHand = chordsOnOtherHand });
 
-        Assert.Equal(new[] { 2, 3 }, notes[0].Lanes.Keys.ToArray());
+        Assert.Equal(chordsOnOtherHand ? new[] { 0, 1 } : new[] { 2, 3 }, notes[0].Lanes.Keys.ToArray());
         Assert.True(notes.Zip(notes.Skip(1), (a, b) => Lanes.HandOf(a.Lanes.Keys.First()) != Lanes.HandOf(b.Lanes.Keys.First())).All(x => x));
     }
 
@@ -431,10 +498,27 @@ public class PlannerTests
     }
 
     [Fact]
-    public void LeftHandedIsTheMirrorOfRightHanded()
+    public void LeftHandedWithChordsOnOtherHandKeepsLeftIndexAndPutsChordsOnRight()
+    {
+        // 惯用手和双押用手分开设：左撇子、双押用另一只手 = 慢的左手食指 F 连点，双押优先右手 J+K
+        var options = new FingeringOptions { LeftHanded = true, ChordsOnOtherHand = true };
+        var slow = Run(1.0, 8, 0.3);
+        slow.Add(new TileHit(9, 4.0));
+        slow.Add(new TileHit(10, 4.01));
+
+        var notes = NotePlanner.Plan(slow, options);
+
+        Assert.All(notes.Take(8), n => Assert.Equal(1, n.Lanes.Keys.Single()));
+        Assert.Equal(new[] { 2, 3 }, notes[8].Lanes.Keys);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LeftHandedIsTheMirrorOfRightHanded(bool chordsOnOtherHand)
     {
         // 左撇子就是整套排法左右镜像（D↔K、F↔J）：轮指变成 D F K J，双押旁边的单押换到右手，
-        // 双押同手、不出现食指→外侧手指这些约束镜像后照样成立
+        // 双押同手、不出现食指→外侧手指这些约束镜像后照样成立；双押用另一只手时也一样
         var rng = new Random(31);
         for (var round = 0; round < 30; round++)
         {
@@ -450,8 +534,8 @@ public class PlannerTests
                 }
             }
 
-            var right = NotePlanner.Plan(tiles, new FingeringOptions());
-            var left = NotePlanner.Plan(tiles, new FingeringOptions { LeftHanded = true });
+            var right = NotePlanner.Plan(tiles, new FingeringOptions { ChordsOnOtherHand = chordsOnOtherHand });
+            var left = NotePlanner.Plan(tiles, new FingeringOptions { LeftHanded = true, ChordsOnOtherHand = chordsOnOtherHand });
 
             Assert.Equal(right.Count, left.Count);
             for (var i = 0; i < right.Count; i++)
