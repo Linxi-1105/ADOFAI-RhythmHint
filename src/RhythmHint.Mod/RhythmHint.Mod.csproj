@@ -11,6 +11,8 @@
     <GameDir Condition="'$(GameDir)' == ''">$(ADOFAI_DIR)</GameDir>
     <ManagedDir>$(GameDir)\A Dance of Fire and Ice_Data\Managed</ManagedDir>
     <ModDeployDir>$(GameDir)\Mods\$(ModId)</ModDeployDir>
+    <!-- 仓库地址只写这一处：Info.json 的 HomePage 由它拼出 -->
+    <RepoUrl>https://github.com/xiaoming6680/ADOFAI-RhythmHint</RepoUrl>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
@@ -50,14 +52,16 @@
            Text="游戏里还没装 Unity Mod Manager（找不到 $(ManagedDir)\UnityModManager\UnityModManager.dll）。" />
   </Target>
 
-  <!-- UMM 的 Info.json：版本号取自 Directory.Build.props，只有一个来源 -->
+  <!-- UMM 的 Info.json：版本号取自 Directory.Build.props，只有一个来源。
+       作者也只写在这里，设置窗口「关于」从 Mod.Info 读 -->
   <Target Name="WriteInfoJson" AfterTargets="Build">
     <PropertyGroup>
       <InfoJsonText>{
   "Id": "$(ModId)",
   "DisplayName": "全节奏提示 RhythmHint",
-  "Author": "XM",
+  "Author": "XIAOMING6680",
   "Version": "$(Version)",
+  "HomePage": "$(RepoUrl)",
   "ManagerVersion": "0.27.0",
   "AssemblyName": "$(AssemblyName).dll",
   "EntryMethod": "RhythmHint.Main.Load"

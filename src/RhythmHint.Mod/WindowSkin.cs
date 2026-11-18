@@ -212,6 +212,28 @@ internal static class WindowSkin
         return clicked;
     }
 
+    /// <summary>一行：名字、一段文字（可为空）和几个按钮，例如群号和「复制」；返回被点的按钮下标，没点为 -1。</summary>
+    public static int Info(string label, string text, params string[] buttons)
+    {
+        BeginRow(label);
+        if (text.Length > 0)
+        {
+            GUILayout.Label(text, Label, GUILayout.Height(RowHeight));
+        }
+
+        var clicked = -1;
+        for (var i = 0; i < buttons.Length; i++)
+        {
+            if (GUILayout.Button(buttons[i], Button, GUILayout.MinWidth(56)))
+            {
+                clicked = i;
+            }
+        }
+
+        EndRow();
+        return clicked;
+    }
+
     /// <summary>
     /// 一排选项按钮，当前值高亮；返回新的值。当前值不在选项里（例如手改了设置文件）时也显示出来，保持不变。
     /// 选项多时每 perRow 个换一行，下一行和控件一栏对齐。

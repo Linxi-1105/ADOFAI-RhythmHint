@@ -109,5 +109,12 @@
   "打开 / 关闭设置窗口": "Open / close settings",
   "也可在 Unity Mod Manager（Ctrl+F10）中打开；其他按键请修改 Settings.xml。": "You can also open it from Unity Mod Manager (Ctrl+F10). For other keys, edit Settings.xml.",
   "关于": "About",
+  "作者": "Author",
+  "交流 QQ 群": "QQ group",
+  "复制": "Copy",
+  "GitHub 仓库": "GitHub repository",
+  "在浏览器中打开": "Open in browser",
+  "复制链接": "Copy link",
+  "已复制": "Copied",
   "版本 {0}。仅提供视觉提示，不修改判定；运行日志见 UMM 的 Log.txt。": "Version {0}. Visual hints only; judgment is not changed. Logs are in UMM's Log.txt."
 }

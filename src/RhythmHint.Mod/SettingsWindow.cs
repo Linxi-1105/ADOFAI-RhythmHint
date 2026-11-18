@@ -12,6 +12,7 @@ internal sealed class SettingsWindow
 {
     private const int WindowId = 0x52484D57; // "RHMW"
     private static readonly string[] HotkeyPresets = { "F8", "F9", "F7", "F6", "Home", "Insert" };
+    private const string QqGroup = "1136407588";
 
     private readonly KeyPicker _keyPicker = new();
     private Rect _rect = new(0, 0, 780, 840);
@@ -20,6 +21,8 @@ internal sealed class SettingsWindow
     private Vector2 _scroll;
     private int _confirmResetTab = -1; // 「恢复本页默认值」点了一次、等确认的页
     private float _confirmResetUntil;
+    private string? _copied; // 刚复制到剪贴板的内容，对应的按钮显示「已复制」一会儿
+    private float _copiedUntil;
 
     public bool Visible { get; private set; }
 
@@ -255,7 +258,7 @@ internal sealed class SettingsWindow
     /// <summary>间隔（毫秒）相当于多少 BPM 的直线：180° 直线每块砖一拍，BPM = 60000 / 毫秒。</summary>
     private static int StraightBpm(int ms) => Mathf.RoundToInt(60000f / Mathf.Max(1, ms));
 
-    private static void StatusTab(Settings s, Overlay overlay)
+    private void StatusTab(Settings s, Overlay overlay)
     {
         WindowSkin.SectionTitle(Lang.T("当前状态"));
         GUILayout.Label(overlay.Status, WindowSkin.Note);
@@ -280,7 +283,37 @@ internal sealed class SettingsWindow
         s.SettingsHotkey = WindowSkin.Choice(Lang.T("打开 / 关闭设置窗口"), s.SettingsHotkey, HotkeyPresets);
         WindowSkin.Hint(Lang.T("也可在 Unity Mod Manager（Ctrl+F10）中打开；其他按键请修改 Settings.xml。"));
 
+        // 作者和仓库地址取自 Info.json（RhythmHint.Mod.csproj 生成），群号写在这里
         WindowSkin.SectionTitle(Lang.T("关于"));
-        GUILayout.Label(Lang.T("版本 {0}。仅提供视觉提示，不修改判定；运行日志见 UMM 的 Log.txt。", Main.Mod.Info.Version), WindowSkin.Note);
+        var info = Main.Mod.Info;
+        WindowSkin.Info(Lang.T("作者"), info.Author);
+        if (WindowSkin.Info(Lang.T("交流 QQ 群"), QqGroup, CopyLabel(QqGroup, Lang.T("复制"))) == 0)
+        {
+            Copy(QqGroup);
+        }
+
+        if (!string.IsNullOrEmpty(info.HomePage))
+        {
+            switch (WindowSkin.Info(Lang.T("GitHub 仓库"), string.Empty, Lang.T("在浏览器中打开"), CopyLabel(info.HomePage, Lang.T("复制链接"))))
+            {
+                case 0: Browser.Open(info.HomePage); break;
+                case 1: Copy(info.HomePage); break;
+            }
+
+            WindowSkin.Hint(info.HomePage);
+        }
+
+        GUILayout.Label(Lang.T("版本 {0}。仅提供视觉提示，不修改判定；运行日志见 UMM 的 Log.txt。", info.Version), WindowSkin.Note);
     }
+
+    private void Copy(string text)
+    {
+        GUIUtility.systemCopyBuffer = text;
+        _copied = text;
+        _copiedUntil = Time.unscaledTime + 2f;
+    }
+
+    /// <summary>复制按钮的文字：刚复制过这一项的 2 秒内显示「已复制」。</summary>
+    private string CopyLabel(string text, string label) =>
+        _copied == text && Time.unscaledTime < _copiedUntil ? Lang.T("已复制") : label;
 }
