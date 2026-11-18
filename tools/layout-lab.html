@@ -139,12 +139,14 @@ kbd { font-family: var(--font-num); background: var(--raise); border: 1px solid 
 
     <section class="card">
       <h2>「当前 Mod」列的参数</h2>
+      <label>排键方式 <select id="pStyle"><option value="TimeReset">时间重置法（默认）</option><option value="ReviewPreferenceV1">审核偏好 v1</option></select></label>
       <div class="param"><span>主手重置间隔（毫秒）</span><input type="range" id="pReset" min="100" max="300" step="5" value="165"><output id="pResetOut">165</output></div>
       <div class="param"><span>双押前后换手（毫秒）</span><input type="range" id="pFocus" min="0" max="800" step="10" value="450"><output id="pFocusOut">450</output></div>
       <div class="param"><span>同键连按最短（毫秒）</span><input type="range" id="pJack" min="50" max="300" step="5" value="150"><output id="pJackOut">150</output></div>
       <label><input type="checkbox" id="pRoll" checked> 很快时同手轮指</label>
       <label><input type="checkbox" id="pOuter" checked> 外侧手指先落（K J D F）</label>
       <label><input type="checkbox" id="pChordOther"> 多押用另一只手（左手 D F）</label>
+      <label><input type="checkbox" id="pLeft"> 左手为主手（整谱镜像）</label>
     </section>
 
     <section class="card">
@@ -155,6 +157,7 @@ kbd { font-family: var(--font-num); background: var(--raise); border: 1px solid 
   </aside>
 </main>
 
+<script src="review-editor/note-planner.js"></script>
 <script>
 "use strict";
 // ---------- 内置关卡（砖块时间毫秒、长按毫秒、节拍线），由 tools/build-layout-lab.py 注入 ----------
@@ -209,7 +212,7 @@ function toMoments(tiles) {
     else out.push({ t: tile.t, lastT: tile.t, count: 1, tiles: [tile.i], hold: tile.hold, members: [] });
     out[out.length - 1].members.push(tile);
   }
-  return out.flatMap((m) => m.count > 4 ? m.members.map((x) => ({ t: x.t, lastT: x.t, count: 1, tiles: [x.i], hold: x.hold })) : [m]);
+  return out.flatMap((m) => m.count > 4 ? m.members.map((x) => ({ t: x.t, lastT: x.t, count: 1, tiles: [x.i], hold: x.hold, members: [x] })) : [m]);
 }
 
 function loadLevel(index) {
@@ -281,7 +284,16 @@ function parseAdofai(text) {
 
 // ---------- 排键方案 ----------
 // chordAngle / chordGap / chordWindow：多押怎么合并，和 C# FingeringOptions 的 ChordAngle / ChordMaxGap / ChordWindow 默认值一样
-const P = { reset: 0.165, focus: 0.45, jack: 0.15, roll: true, outer: true, chordOther: false, chordAngle: 30, chordGap: 0.06, chordWindow: 0.035 };
+const P = {
+  reset: NotePlanner.defaults.ResetWindow, focus: NotePlanner.defaults.ChordFocusWindow,
+  jack: NotePlanner.defaults.JackWindow, roll: NotePlanner.defaults.UseRoll, outer: NotePlanner.defaults.OuterRoll,
+  chordOther: NotePlanner.defaults.ChordsOnOtherHand, left: NotePlanner.defaults.LeftHanded,
+  chordAngle: NotePlanner.defaults.ChordAngle, chordGap: NotePlanner.defaults.ChordMaxGap, chordWindow: NotePlanner.defaults.ChordWindow,
+  style: NotePlanner.defaults.Style,
+  reviewShortMinGap: NotePlanner.defaults.ReviewShortMinGap, reviewShortMaxGap: NotePlanner.defaults.ReviewShortMaxGap,
+  reviewShortMinNotes: NotePlanner.defaults.ReviewShortMinNotes, reviewShortMaxNotes: NotePlanner.defaults.ReviewShortMaxNotes,
+  reviewTimingTolerance: NotePlanner.defaults.ReviewTimingTolerance,
+};
 const EPS = 1e-6;
 
 function onBeat(t) {
@@ -296,86 +308,29 @@ function onBeat(t) {
 }
 
 function hand(l) { return l < 2 ? 0 : 1; }
-// 按两个键的那只手（和 C# PlannedNote.PairHand 一样）：三押是按两个键的那只手，四押算右手
-function pairHand(lanes) { return lanes.filter((l) => l >= 2).length * 2 >= lanes.length ? 1 : 0; }
 function pairOf(h) { return [h * 2, h * 2 + 1]; }
-function blocked(l, t, prev) { return !!prev && prev.lanes.includes(l) && t - prev.t < P.jack - EPS; }
 
-// 当前 Mod（1.0.0）的规则，和 C# NotePlanner 一样：时间重置法（主手重置间隔 R）。
-// 慢（> R）右手食指连点；R/2–R 左右食指轮流；R/2 以内同手轮指；停下回右手；外轮 K J D F；
-// 多押优先右手（勾了「多押用另一只手」优先左手）：双押只在 0+1 / 2+3，三押是这只手两键 + 另一只手食指（刚按过用外侧），四押全按；
-// 多押前后 focus 以内的单押放另一只手；同轨不在 jack 内连按
-function planMod(M) {
-  const out = new Array(M.length); const rolled = new Array(M.length).fill(false);
-  let prev = null, last = -1, lastT = 0, lastRight = -Infinity;
-  const r = P.reset;
-  const pref = P.chordOther ? 0 : 1;
-  const yieldIndex = pref === 1 ? 1 : 2, yieldOuter = yieldIndex ^ 1;
-  // 每个单押要给哪个双押让手：只有紧挨着双押、隔得不超过 focus 的（前后都是双押看近的，一样近看后面的）
-  const focus = M.map((m, i) => {
-    if (m.count > 1) return -1;
-    const before = i > 0 && M[i - 1].count > 1 ? m.t - M[i - 1].t : Infinity;
-    const after = i + 1 < M.length && M[i + 1].count > 1 ? M[i + 1].t - m.t : Infinity;
-    return after <= P.focus + EPS && after <= before + EPS ? i + 1 : before <= P.focus + EPS ? i - 1 : -1;
-  });
-  const nextFinger = (t) => {
-    const d = t - lastT;
-    if (last === 2) return d > r + EPS ? [2, false] : d > r / 2 + EPS || !P.roll ? [1, false] : [3, true];
-    if (last === 3) return d > r + EPS ? [2, false] : [1, false];
-    if (last === 1 && P.roll && (d <= r / 2 + EPS || t - lastRight <= r + EPS)) return [0, true];
-    return [2, false];
+// 当前 Mod 列使用审核编辑器共用的规划器；不再维护第二份手序算法。
+function plannerOptions() {
+  return {
+    ChordWindow: P.chordWindow, ChordAngle: P.chordAngle, ChordMaxGap: P.chordGap,
+    ResetWindow: P.reset, ChordFocusWindow: P.focus, JackWindow: P.jack,
+    UseRoll: P.roll, OuterRoll: P.outer, LeftHanded: P.left, ChordsOnOtherHand: P.chordOther,
+    Style: P.style, ReviewShortMinGap: P.reviewShortMinGap, ReviewShortMaxGap: P.reviewShortMaxGap,
+    ReviewShortMinNotes: P.reviewShortMinNotes, ReviewShortMaxNotes: P.reviewShortMaxNotes,
+    ReviewTimingTolerance: P.reviewTimingTolerance,
   };
-  for (let i = 0; i < M.length; i++) {
-    const m = M[i]; let lanes;
-    if (m.count > 1) {
-      const handBlocked = (h) => pairOf(h).some((l) => blocked(l, m.t, prev));
-      const h = handBlocked(pref) && !handBlocked(1 - pref) ? 1 - pref : pref;
-      const index = h === 0 ? 1 : 2, other = h === 0 ? 2 : 1;
-      const extra = blocked(other, m.t, prev) && !blocked(other ^ 1, m.t, prev) ? other ^ 1 : other;
-      lanes = [index, index ^ 1, extra, extra ^ 1].slice(0, m.count).sort((a, b) => a - b);
-    } else {
-      let [lane, roll] = nextFinger(m.t);
-      // 要让手的双押：前面的已经排好看它的手，后面的还没排按偏好的手算
-      const ch = focus[i] < 0 ? -1 : focus[i] < i ? pairHand(out[focus[i]]) : pref;
-      if (ch >= 0) {
-        const index = ch === 1 ? 1 : 2;
-        [lane, roll] = [blocked(index, m.t, prev) ? index ^ 1 : index, false];
-      }
-      // 下一下要让给某根食指、又挨得太近：这一下先用同一只手的外侧手指（D→F 或 K→J），不然下一下只能 F→D 或 J→K
-      if (lane === yieldIndex && i + 1 < M.length && focus[i + 1] === i + 2 && M[i + 1].t - m.t < P.jack - EPS && !blocked(yieldOuter, m.t, prev)) [lane, roll] = [yieldOuter, false];
-      if (blocked(lane, m.t, prev)) {
-        let best = lane, score = 1e9;
-        for (let c = 0; c < 4; c++) {
-          if (blocked(c, m.t, prev)) continue;
-          const s = Math.min(...prev.lanes.map((p) => Math.abs(p - c))) * 10 + Math.abs(c - lane);
-          if (s < score) { score = s; best = c; }
-        }
-        [lane, roll] = [best, false];
-      }
-      lanes = [lane]; rolled[i] = roll;
-    }
-    out[i] = lanes; prev = { t: m.t, lanes };
-    last = lanes.length > 1 ? (pairHand(lanes) === 1 ? 3 : 0) : lanes[0];
-    lastT = m.t; if (lanes.some((l) => l >= 2)) lastRight = m.t;
-  }
-  if (P.roll && P.outer) {
-    const jacks = (k, lane, t) => out[k].includes(lane) && Math.abs(M[k].t - t) < P.jack - EPS;
-    for (let i = 1; i < M.length; i++) {
-      if (!rolled[i] || out[i - 1].length > 1 || M[i].t - M[i - 1].t > r + EPS) continue;
-      const outer = out[i][0], index = out[i - 1][0];
-      if ((outer ^ 1) !== index) continue;
-      if ((i >= 2 && jacks(i - 2, outer, M[i - 1].t)) || (i + 1 < M.length && jacks(i + 1, index, M[i].t))) {
-        // 换了会连按：改按另一只手的食指，不留「食指→外侧手指」
-        const other = hand(outer) === 1 ? 1 : 2;
-        if (!jacks(i - 1, other, M[i].t) && !(i + 1 < M.length && jacks(i + 1, other, M[i].t))) out[i] = [other];
-        continue;
-      }
-      out[i - 1] = [outer]; out[i] = [index];
-    }
-  }
-  return out;
 }
 
+function planMod(M) {
+  const hits = M.flatMap((m) => m.members.map((tile) => ({
+    tileIndex: tile.i, time: tile.t, holdSeconds: tile.hold,
+    angle: tile.ang == null || Number.isNaN(tile.ang) ? null : tile.ang,
+  })));
+  const planned = NotePlanner.plan(hits, plannerOptions());
+  if (planned.length !== M.length) throw new Error("当前 Mod 与节奏分组不一致，请重新载入关卡");
+  return planned.map((note) => note.lanes.map((entry) => entry.lane));
+}
 // 纯交互：一直在 F J 之间交替，双押放在轮到的那只手
 function planTrill(M) {
   let lane = 2;
@@ -415,6 +370,7 @@ function planZigzag(M) {
 }
 
 function replan() {
+  if (!S.level) return;
   const M = S.moments;
   S.plans = { mod: planMod(M), trill: planTrill(M), beat: planBeat(M), zigzag: planZigzag(M) };
   if (!S.manual[S.level.key]) S.manual[S.level.key] = S.plans.mod.map((l) => [...l]);
@@ -992,6 +948,8 @@ function init() {
   $("pRoll").addEventListener("change", () => { P.roll = $("pRoll").checked; replan(); });
   $("pOuter").addEventListener("change", () => { P.outer = $("pOuter").checked; replan(); });
   $("pChordOther").addEventListener("change", () => { P.chordOther = $("pChordOther").checked; replan(); });
+  $("pStyle").addEventListener("change", () => { P.style = $("pStyle").value; replan(); });
+  $("pLeft").addEventListener("change", () => { P.left = $("pLeft").checked; replan(); });
   window.addEventListener("resize", resize);
   if (S.levels.length) loadLevel(0);
   else $("status").textContent = "没有内置关卡：用上面的「读取 .adofai」打开一个关卡。";

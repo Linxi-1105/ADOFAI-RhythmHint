@@ -310,6 +310,15 @@ internal sealed class SettingsWindow
         WindowSkin.SectionTitle(Lang.T("当前状态"));
         GUILayout.Label(overlay.Status, WindowSkin.Note);
 
+        WindowSkin.SectionTitle(Lang.T("排键审核"));
+        if (WindowSkin.Buttons(Lang.T("导出当前关卡排键（JSON）")) == 0)
+        {
+            ReviewExport.CurrentLevel();
+        }
+
+        WindowSkin.Hint(ReviewExport.Status);
+        WindowSkin.Hint(Lang.T("在本地网页编辑器中打开导出的 JSON，调整轨道后保存审核文件。"));
+
         // 语言名用它自己的文字写（不翻译），「跟随游戏」翻译；一行放不下六个，三个一行
         WindowSkin.SectionTitle(Lang.T("界面语言"));
         var follow = Lang.T("跟随游戏");

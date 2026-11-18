@@ -21,6 +21,11 @@ def main() -> int:
         return 2
 
     template = Path(__file__).with_name("layout-lab.html").read_text(encoding="utf-8")
+    shared_reference = '<script src="review-editor/note-planner.js"></script>'
+    if shared_reference not in template:
+        raise ValueError("Shared planner reference missing from layout-lab template")
+    shared = Path(__file__).with_name("review-editor").joinpath("note-planner.js").read_text(encoding="utf-8")
+    template = template.replace(shared_reference, "<script>\n" + re.sub(r"</script", r"<\\/script", shared, flags=re.I) + "\n</script>")
     if PLACEHOLDER not in template:
         print("模板里找不到数据占位符 /*LEVELS*/[]", file=sys.stderr)
         return 1
@@ -36,7 +41,9 @@ def main() -> int:
         levels.append(data)
 
     out = Path(sys.argv[1])
-    out.write_text(template.replace(PLACEHOLDER, json.dumps(levels, ensure_ascii=False, separators=(",", ":"))), encoding="utf-8")
+    # A chart title must never close the inline script in the portable output.
+    payload = json.dumps(levels, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c")
+    out.write_text(template.replace(PLACEHOLDER, payload), encoding="utf-8")
     print(f"已生成 {out}（{len(levels)} 个关卡，{out.stat().st_size // 1024} KB）")
     return 0
 
