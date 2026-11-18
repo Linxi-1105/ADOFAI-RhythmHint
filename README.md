@@ -8,6 +8,8 @@
 ![Unity Mod Manager](https://img.shields.io/badge/Unity%20Mod%20Manager-0.27%2B-3D9EE0)
 ![License](https://img.shields.io/badge/license-MIT-222)
 
+简体中文 | [繁體中文](README.zh-Hant.md) | [English](README.en.md) | [한국어](README.ko.md) | [日本語](README.ja.md)
+
 <img src="docs/images/hero.webp" alt="实机画面" width="880">
 
 </div>
@@ -22,7 +24,7 @@
 
 <img src="docs/images/anatomy.webp" alt="画面各部分" width="880">
 
-- **左边四条轨道**：每块要按的砖对应一个音符。橙色单押，蓝色双押，长按带尾巴；设置里能把横条换成和太鼓条一样的圆球
+- **左边四条轨道**：每块要按的砖对应一个音符。橙色单押，蓝色双押，紫色三押、四押，长按带尾巴；设置里能把横条换成和太鼓条一样的圆球
 - **底下的按键框**：按 D F J K 会亮
 - **顶上的太鼓条**：后面一长串节奏都能提前瞄到
 - **左上角**：当前 BPM 和剩余时间
@@ -64,6 +66,8 @@
 <img src="docs/images/settings.webp" alt="设置窗口的显示页和排键页" width="760">
 
 窗口可以拖，关掉自动保存；在窗口里点来点去不会误触游戏。
+
+设置的「状态」页可以换界面语言：简体中文、繁體中文、English、한국어、日本語，默认跟着游戏的语言走，没有翻译的语言显示英文。
 
 ## 安装
 
