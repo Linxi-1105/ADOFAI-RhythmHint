@@ -145,7 +145,7 @@ kbd { font-family: var(--font-num); background: var(--raise); border: 1px solid 
       <div class="param"><span>同键连按最短（毫秒）</span><input type="range" id="pJack" min="50" max="300" step="5" value="150"><output id="pJackOut">150</output></div>
       <label><input type="checkbox" id="pRoll" checked> 很快时同手轮指</label>
       <label><input type="checkbox" id="pOuter" checked> 外侧手指先落（K J D F）</label>
-      <label><input type="checkbox" id="pChordOther"> 多押用另一只手（左手 D F）</label>
+      <label><input type="checkbox" id="pChordOther"> 多押优先用非惯用手</label>
       <label><input type="checkbox" id="pLeft"> 左手为主手（整谱镜像）</label>
     </section>
 
@@ -158,6 +158,7 @@ kbd { font-family: var(--font-num); background: var(--raise); border: 1px solid 
 </main>
 
 <script src="review-editor/note-planner.js"></script>
+<script src="review-editor/adofai-import.js"></script>
 <script>
 "use strict";
 // ---------- 内置关卡（砖块时间毫秒、长按毫秒、节拍线），由 tools/build-layout-lab.py 注入 ----------
@@ -227,59 +228,28 @@ function loadLevel(index) {
   setSegment(Math.max(0, Math.floor(S.moments[0].t)));
 }
 
-// ---------- 读 .adofai（只支持 angleData / pathData 绝对方向 + SetSpeed + Twirl + Pause 的常见关卡，和 tools/Preview.cs 同一套规则） ----------
-const PATH_ANGLES = { R: 0, p: 15, J: 30, E: 45, T: 60, o: 75, U: 90, q: 105, G: 120, Q: 135, H: 150, W: 165, L: 180, x: 195, N: 210, Z: 225, F: 240, V: 255, D: 270, Y: 285, B: 300, C: 315, M: 330, A: 345, "!": 999 };
+// ---------- 读 .adofai（与审核编辑器共用离线时序读取器） ----------
 function parseAdofai(text) {
-  const clean = text.replace(/^﻿/, "").replace(/,(\s*[\]}])/g, "$1");
-  const j = JSON.parse(clean);
-  const angles = Array.isArray(j.angleData) ? j.angleData : typeof j.pathData === "string" && j.pathData
-    ? Array.from(j.pathData).map((c) => { if (!(c in PATH_ANGLES)) throw new Error("pathData 里的「" + c + "」是相对方向，暂不支持"); return PATH_ANGLES[c]; })
-    : null;
-  if (!angles) throw new Error("关卡没有 angleData 或 pathData");
-  const bpm = Number(j.settings && j.settings.bpm);
-  if (!(bpm > 0)) throw new Error("关卡没有 bpm");
-  const ev = {};
-  for (const a of j.actions || []) (ev[a.floor] = ev[a.floor] || []).push(a);
-  // 每块要按的砖记下从上一块要按的砖转过的角度；中旋砖不用按（游戏里当自动砖），转角累加到下一块（和 Core 的 FloorHits 一样）
-  const tiles = []; const speeds = [];
-  let time = 0, cw = true, cur = bpm, lastDir = 0, ang = 0;
-  for (let k = 0; k < angles.length; k++) {
-    let pause = 0;
-    for (const e of ev[k] || []) {
-      if (e.eventType === "Twirl") cw = !cw;
-      else if (e.eventType === "SetSpeed") cur = e.speedType === "Multiplier" ? cur * Number(e.bpmMultiplier) : Number(e.beatsPerMinute);
-      else if (e.eventType === "Pause") pause += Number(e.duration) || 0;
-    }
-    const mid = angles[k] === 999;
-    if (k > 0 && !mid) { tiles.push({ i: k, t: time, hold: 0, ang }); ang = 0; }
-    if (!speeds.length || Math.abs(speeds[speeds.length - 1].s - cur / bpm) > 1e-9) speeds.push({ t: time, s: cur / bpm });
-    if (mid) { lastDir = (lastDir + 180) % 360; continue; }
-    const entry = (k > 0 ? lastDir : 0) + 180;
-    const mod = (x) => ((x % 360) + 360) % 360;
-    let swept = cw ? mod(entry - angles[k]) : mod(angles[k] - entry);
-    if (swept < 1e-6) swept = 360;
-    time += (swept / 180 + pause) * 60 / cur;
-    lastDir = angles[k]; ang += swept;
-  }
-  tiles.push({ i: angles.length, t: time, hold: 0, ang });
+  const { hits, speeds, crotchet, settings } = AdofaiImport.parseTiming(text);
+  const tiles = hits.map(({ tileIndex, time, holdSeconds, angle }) => ({ i: tileIndex, t: time, hold: holdSeconds, ang: angle ?? NaN }));
+  const end = tiles[tiles.length - 1].t;
   // 节拍线：×2、×0.5 这类变速只改疏密不改拍子（和 Mod 的 BeatGrid.MusicalTempo 一致）
   const tempo = []; let factor = 1, density = 1;
-  for (const sp of speeds) {
-    const l2 = Math.log2(sp.s / (factor * density));
+  for (const { time, speed } of speeds) {
+    const l2 = Math.log2(speed / (factor * density));
     if (Math.abs(l2 - Math.round(l2)) < 0.01) { density *= 2 ** Math.round(l2); if (tempo.length) continue; }
-    else factor = sp.s / density;
-    tempo.push({ t: sp.t, spb: 60 / bpm / factor });
+    else factor = speed / density;
+    tempo.push({ t: time, spb: crotchet / factor });
   }
   const beats = []; let seg = 0, t = 0, beat = 0;
-  while (t <= time + 2 && beats.length < 20000) {
+  while (t <= end + 2 && beats.length < 20000) {
     while (seg + 1 < tempo.length && tempo[seg + 1].t <= t + 1e-6) seg++;
     beats.push({ t, m: beat % 4 === 0 });
     let next = t + Math.max(0.01, tempo[seg].spb);
     if (seg + 1 < tempo.length && next > tempo[seg + 1].t + 1e-6) { next = tempo[seg + 1].t; beat = -1; }
     t = next; beat++;
   }
-  const st = j.settings || {};
-  return { tiles, beats, song: st.songFilename || "", offset: (Number(st.offset) || 0) / 1000, pitch: Number(st.pitch) || 100 };
+  return { tiles, beats, song: settings.songFilename || "", offset: (Number(settings.offset) || 0) / 1000, pitch: Number(settings.pitch) || 100 };
 }
 
 // ---------- 排键方案 ----------

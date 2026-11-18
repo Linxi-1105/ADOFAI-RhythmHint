@@ -8,19 +8,36 @@
 // 用法：dotnet run tools/Preview.cs -- <关卡.adofai> [参考谱.pez/.json] [--from 秒] [--seconds 秒]
 //       [--reset 毫秒] [--focus 毫秒] [--jack 毫秒] [--chord 毫秒] [--no-roll] [--inner-roll] [--left-handed] [--chord-other-hand]   临时试排键参数
 //       [--export 文件.json]   导出砖块时间和节拍线，给 tools/layout-lab 网页用
-// 只支持常见的 angleData / pathData（绝对方向字母）+ SetSpeed + Twirl + Pause 关卡，用来大致验证；游戏里以游戏算出的时间为准。
+//       [--review-export 文件.review.json] [--review-rules]   导出可审核排键；可选审核偏好排法，默认仍为时间重置法
+// 支持常见 angleData / pathData（绝对方向、中旋与现代相对方向）+ SetSpeed + Twirl + Pause；离线仅作近似，游戏时序以游戏内导出为准。
 
 using System.Globalization;
 using Newtonsoft.Json.Linq;
 using RhythmHint.Core;
 using RhythmHint.Reference;
 
+var valueOptions = new HashSet<string> { "--from", "--seconds", "--reset", "--focus", "--jack", "--chord", "--export", "--review-export" };
 var files = args.Where((a, i) => !a.StartsWith("--", StringComparison.Ordinal)
-    && (i == 0 || !args[i - 1].StartsWith("--", StringComparison.Ordinal))).ToList();
+    && (i == 0 || !valueOptions.Contains(args[i - 1]))).ToList();
 double from = ReadOption("--from", 0), span = ReadOption("--seconds", 6);
 if (files.Count == 0)
 {
-    Console.Error.WriteLine("用法：dotnet run tools/Preview.cs -- <关卡.adofai> [参考谱] [--from 秒] [--seconds 秒] [--reset|--focus|--jack|--chord 毫秒] [--no-roll] [--inner-roll] [--left-handed] [--chord-other-hand]");
+    Console.Error.WriteLine("用法：dotnet run tools/Preview.cs -- <关卡.adofai> [参考谱] [--from 秒] [--seconds 秒] [--reset|--focus|--jack|--chord 毫秒] [--no-roll] [--inner-roll] [--left-handed] [--chord-other-hand] [--review-rules] [--review-export 文件.review.json]");
+    return 2;
+}
+
+var paths = new HashSet<string>(files.Select(Path.GetFullPath),
+    OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+string? labOutput;
+string? reviewOutput;
+try
+{
+    labOutput = OutputPath("--export");
+    reviewOutput = OutputPath("--review-export");
+}
+catch (ArgumentException ex)
+{
+    Console.Error.WriteLine(ex.Message);
     return 2;
 }
 
@@ -31,47 +48,75 @@ options.UseRoll = !args.Contains("--no-roll");
 options.OuterRoll = !args.Contains("--inner-roll");
 options.LeftHanded = args.Contains("--left-handed");
 options.ChordsOnOtherHand = args.Contains("--chord-other-hand");
+options.Style = args.Contains("--review-rules") ? FingeringStyle.ReviewPreferenceV1 : FingeringStyle.TimeReset;
 options.JackWindow = ReadOption("--jack", options.JackWindow * 1000) / 1000;
 options.ChordWindow = ReadOption("--chord", options.ChordWindow * 1000) / 1000;
 
 List<TileHit> tiles;
 List<(double Time, double Speed)> speeds;
 double crotchet;
+JObject levelDocument;
 try
 {
-    (tiles, speeds, crotchet) = AdofaiTiming.Read(files[0]);
+    levelDocument = AdofaiTiming.ParseJson(File.ReadAllText(files[0]));
+    (tiles, speeds, crotchet) = AdofaiTiming.Read(levelDocument);
 }
 catch (Exception ex) when (ex is Newtonsoft.Json.JsonReaderException or InvalidDataException or IOException)
 {
     Console.Error.WriteLine($"读不了关卡文件 {files[0]}：{ex.Message}");
-    Console.Error.WriteLine("（有的关卡文件不是标准 JSON，这个预览工具读不了；游戏里的 Mod 用的是游戏算好的砖块，不受影响）");
+    Console.Error.WriteLine("请在游戏中打开 Mod 设置 → 状态 → 导出当前关卡排键；游戏导出采用实际砖块数据，不受离线解析限制。");
+    return 1;
+}
+
+if (tiles.Count == 0)
+{
+    Console.Error.WriteLine("关卡没有可供预览的击打；请在游戏中导出实际排键。");
     return 1;
 }
 
 Console.WriteLine($"关卡：{Path.GetFileName(files[0])}，需要按键 {tiles.Count} 次，{tiles[0].Time:F2}s – {tiles[^1].Time:F2}s");
 var beats = BeatGrid.Build(BeatGrid.MusicalTempo(speeds, crotchet), 0, tiles[^1].Time + 2);
-var exportIndex = Array.IndexOf(args, "--export");
-if (exportIndex >= 0 && exportIndex + 1 < args.Length)
+var levelSettings = levelDocument["settings"]!;
+if (labOutput != null)
 {
     // 给排键试验台网页用：砖块时间（毫秒）、长按、节拍线
-    var levelSettings = JObject.Parse(File.ReadAllText(files[0]))["settings"];
     var export = new
     {
         name = Path.GetFileName(Path.GetDirectoryName(Path.GetFullPath(files[0]))),
         bpm = Math.Round(60 / crotchet, 3),
         // 歌曲：音频时间 = 砖块时间 + offset（和游戏 scrConductor 的 addoffset 一样）
-        song = (string?)levelSettings?["songFilename"] ?? "",
-        offset = (double?)levelSettings?["offset"] ?? 0,
-        pitch = (double?)levelSettings?["pitch"] ?? 100,
+        song = (string?)levelSettings["songFilename"] ?? "",
+        offset = (double?)levelSettings["offset"] ?? 0,
+        pitch = (double?)levelSettings["pitch"] ?? 100,
         // 每块：序号、时间（毫秒）、长按（毫秒）、和上一块之间的转角（度，算不出来是 null）
         tiles = tiles.Select(t => new object?[] { t.TileIndex, Math.Round(t.Time * 1000, 1), Math.Round(t.HoldSeconds * 1000, 1),
             double.IsNaN(t.Angle) ? null : Math.Round(t.Angle, 3) }),
         beats = beats.Select(b => new[] { Math.Round(b.Time * 1000, 1), b.IsMeasure ? 1 : 0 }),
     };
-    File.WriteAllText(args[exportIndex + 1], Newtonsoft.Json.JsonConvert.SerializeObject(export));
-    Console.WriteLine($"已导出 {tiles.Count} 块砖、{beats.Count} 条节拍线到 {args[exportIndex + 1]}");
+    File.WriteAllText(labOutput, Newtonsoft.Json.JsonConvert.SerializeObject(export));
+    Console.WriteLine($"已导出 {tiles.Count} 块砖、{beats.Count} 条节拍线到 {labOutput}");
 }
 var notes = NotePlanner.Plan(tiles, options);
+if (reviewOutput != null)
+{
+    var document = JObject.Parse(ReviewChart.Export(Path.GetFileNameWithoutExtension(files[0]) + "（离线近似）",
+        "offline-approximation", notes, options, sourceHits: tiles));
+    document["sourceFile"] = new JObject
+    {
+        ["name"] = Path.GetFileName(files[0]), ["bpm"] = (double)levelSettings["bpm"]!,
+        ["songFilename"] = (string?)levelSettings["songFilename"] ?? "", ["offset"] = (double?)levelSettings["offset"] ?? 0,
+        ["pitch"] = (double?)levelSettings["pitch"] ?? 100,
+    };
+    document["timing"] = new JObject
+    {
+        ["originSeconds"] = 0,
+        ["speeds"] = new JArray(speeds.Select(s => new JObject { ["time"] = s.Time, ["speed"] = s.Speed })),
+    };
+    Directory.CreateDirectory(Path.GetDirectoryName(reviewOutput)!);
+    File.WriteAllText(reviewOutput, document.ToString(), new System.Text.UTF8Encoding(false));
+    Console.WriteLine($"已导出 {notes.Count} 个排键提示到 {reviewOutput}");
+    Console.Error.WriteLine("离线近似：未模拟游戏倒计时、校准和完整事件系统；正式审核以游戏内导出为准。");
+}
 var doubles = notes.Count(n => n.Lanes.Count == 2);
 var rightDoubles = notes.Count(n => n.Lanes.Count == 2 && n.PairHand == 1);
 var laneUse = Enumerable.Range(0, Lanes.Count).Select(l => notes.Count(n => n.Lanes.ContainsKey(l)));
@@ -164,13 +209,42 @@ double ReadOption(string name, double fallback)
     return i >= 0 && i + 1 < args.Length && double.TryParse(args[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : fallback;
 }
 
+string? OutputPath(string option)
+{
+    var index = Array.IndexOf(args, option);
+    if (index < 0) return null;
+    if (index + 1 >= args.Length || args[index + 1].StartsWith("--", StringComparison.Ordinal))
+    {
+        throw new ArgumentException($"{option} 后需要提供 JSON 输出路径。");
+    }
+
+    var path = Path.GetFullPath(args[index + 1]);
+    if (!paths.Add(path))
+    {
+        throw new ArgumentException($"{option} 的输出路径不能与输入文件或另一份输出相同：{path}");
+    }
+
+    return path;
+}
+
 /// <summary>
 /// 按 ADOFAI 的规则从 angleData / pathData 算每块砖的到达时间和转过的角度（只处理 SetSpeed、Twirl、Pause 和中旋），
 /// 再交给 Core 的 FloorHits：哪些砖要按、转角怎么累加、转角信不信，和游戏里的 Mod 一样。
 /// </summary>
 internal static class AdofaiTiming
 {
-    /// <summary>pathData 的绝对方向字母（度）；'!' 是中旋。相对方向的字母（5 6 7 8 等）暂不支持。</summary>
+    // These events change presentation, not the outgoing floor interval used by this preview.
+    private static readonly HashSet<string> PresentationEvents = new(StringComparer.Ordinal)
+    {
+        "AddDecoration", "AddText", "AddObject", "AddParticle", "AnimateTrack", "Bloom", "Bookmark",
+        "Checkpoint", "ColorTrack", "CustomBackground", "EditorComment", "EmitParticle", "Flash",
+        "HallOfMirrors", "Hide", "MoveCamera", "MoveDecorations", "MoveTrack", "PlaySound", "PositionTrack",
+        "RecolorTrack", "ScalePlanets", "ScreenScroll", "ScreenTile", "SetDefaultText", "SetFilter",
+        "SetFilterAdvanced", "SetFrameRate", "SetHitsound", "SetObject", "SetParticle", "SetPlanetRotation",
+        "SetText", "ShakeScreen", "RepeatEvents", "SetConditionalEvents", "ScaleRadius",
+    };
+
+    /// <summary>pathData 的绝对方向字母（度）；'!' 是中旋。</summary>
     private static readonly Dictionary<char, double> PathAngles = new()
     {
         ['R'] = 0, ['p'] = 15, ['J'] = 30, ['E'] = 45, ['T'] = 60, ['o'] = 75, ['U'] = 90, ['q'] = 105, ['G'] = 120, ['Q'] = 135,
@@ -179,18 +253,87 @@ internal static class AdofaiTiming
     };
 
     /// <returns>需要按键的砖块、变速点（时间, 相对起始 BPM 的倍率）、起始一拍的秒数。</returns>
-    public static (List<TileHit> Hits, List<(double Time, double Speed)> Speeds, double Crotchet) Read(string path)
+    public static (List<TileHit> Hits, List<(double Time, double Speed)> Speeds, double Crotchet) Read(JObject root)
     {
-        var root = JObject.Parse(File.ReadAllText(path));
-        var angles = root["angleData"]?.Select(x => (double)x).ToArray()
-            ?? (root["pathData"]?.ToString() is { Length: > 0 } pathData
-                ? pathData.Select(c => PathAngles.TryGetValue(c, out var a) ? a
-                    : throw new InvalidDataException($"pathData 里的「{c}」是相对方向，离线预览暂不支持")).ToArray()
-                : throw new InvalidDataException("关卡没有 angleData 或 pathData"));
-        var bpm = (double?)root["settings"]?["bpm"] ?? throw new InvalidDataException("关卡没有 bpm");
-        var events = (root["actions"] as JArray ?? new JArray()).OfType<JObject>()
-            .GroupBy(e => (int)e["floor"]!).ToDictionary(g => g.Key, g => g.ToList());
+        if (root["angleData"] is JToken angleToken && angleToken is not JArray)
+        {
+            throw new InvalidDataException("angleData 必须是数组。");
+        }
 
+        var angles = root["angleData"]?.Select((x, i) => Number(x, $"angleData[{i}]")).ToArray()
+            ?? ReadPathAngles(root);
+        if (angles.Length == 0)
+        {
+            throw new InvalidDataException("关卡需要非空 angleData 或 pathData。");
+        }
+
+        var bpm = PositiveNumber(root["settings"]?["bpm"], "settings.bpm");
+        if (root["actions"] is JToken actionToken && actionToken is not JArray)
+        {
+            throw new InvalidDataException("actions 必须是数组。");
+        }
+
+        var events = new Dictionary<int, List<JObject>>();
+        foreach (var token in root["actions"] as JArray ?? new JArray())
+        {
+            if (token is not JObject e)
+            {
+                throw new InvalidDataException("actions 中每个事件必须是对象。");
+            }
+
+            var kind = (string?)e["eventType"] ?? "";
+            if (PresentationEvents.Contains(kind))
+            {
+                continue;
+            }
+
+            if (kind is not ("SetSpeed" or "Twirl" or "Pause"))
+            {
+                throw new InvalidDataException($"离线预览不支持事件 {kind}；请从游戏内导出真实排键。");
+            }
+
+            var floor = Number(e["floor"], "事件 floor");
+            if (floor < 0 || floor > angles.Length || floor != Math.Floor(floor))
+            {
+                throw new InvalidDataException("时序事件 floor 必须是有效的整数砖块序号。");
+            }
+
+            if (e["angleOffset"] is JToken offset && Number(offset, "angleOffset") != 0)
+            {
+                throw new InvalidDataException($"离线预览不支持 {kind} 的非零 angleOffset；请从游戏内导出。");
+            }
+
+            if ((kind != "Pause" && e["duration"] is JToken duration && Number(duration, "duration") != 0)
+                || !string.IsNullOrEmpty((string?)e["eventTag"]))
+            {
+                throw new InvalidDataException($"离线预览不支持带 duration/eventTag 的 {kind}；请从游戏内导出。");
+            }
+
+            if (kind == "SetSpeed")
+            {
+                var speedType = (string?)e["speedType"] ?? "Bpm";
+                if (speedType is not ("Multiplier" or "Bpm"))
+                {
+                    throw new InvalidDataException($"不支持的 SetSpeed.speedType：{speedType}。");
+                }
+
+                PositiveNumber(e[speedType == "Multiplier" ? "bpmMultiplier" : "beatsPerMinute"], "SetSpeed 速度");
+            }
+            else if (kind == "Pause" && e["duration"] is JToken pause)
+            {
+                Number(pause, "Pause.duration");
+            }
+
+            if (!events.TryGetValue((int)floor, out var list))
+            {
+                events[(int)floor] = list = new List<JObject>();
+            }
+
+            list.Add(e);
+        }
+
+        var version = (double?)root["settings"]?["version"] ?? 0;
+        var pauseCorrections = LegacyPauseCorrections(angles, events, version);
         var floors = new List<FloorInfo>(angles.Length + 1);
         var speeds = new List<(double Time, double Speed)>();
         var time = 0.0;
@@ -214,9 +357,21 @@ internal static class AdofaiTiming
                         current = (double)e["beatsPerMinute"]!;
                         break;
                     case "Pause":
-                        pauseBeats += (double?)e["duration"] ?? 0;
+                        var duration = (double?)e["duration"] ?? 0;
+                        var correction = pauseCorrections[k];
+                        if (correction != 0)
+                        {
+                            duration = version == 9 ? duration + correction : Math.Max(0, duration + correction);
+                        }
+
+                        pauseBeats += duration;
                         break;
                 }
+            }
+
+            if (!double.IsFinite(current) || current <= 0 || !double.IsFinite(pauseBeats))
+            {
+                throw new InvalidDataException("变速或暂停计算结果无效；请从游戏内导出。");
             }
 
             if (speeds.Count == 0 || Math.Abs(speeds[^1].Speed - (current / bpm)) > 1e-9)
@@ -240,7 +395,13 @@ internal static class AdofaiTiming
             }
 
             floors.Add(new FloorInfo(k, time, false, false, swept, current / bpm));
-            time += (swept / 180 + pauseBeats) * 60 / current;
+            var interval = (swept / 180 + pauseBeats) * 60 / current;
+            if (!double.IsFinite(interval) || interval < 0 || !double.IsFinite(time + interval))
+            {
+                throw new InvalidDataException("暂停导致时间倒序或时间计算溢出；请从游戏内导出。");
+            }
+
+            time += interval;
             lastDir = angles[k];
         }
 
@@ -250,4 +411,143 @@ internal static class AdofaiTiming
     }
 
     private static double Mod(double x) => ((x % 360) + 360) % 360;
+
+    private static double[] ReadPathAngles(JObject root)
+    {
+        if (root["pathData"]?.Type != JTokenType.String || root["pathData"]!.ToString().Length == 0)
+        {
+            throw new InvalidDataException("关卡没有 angleData 或 pathData。");
+        }
+
+        var relative = new Dictionary<char, double>
+        {
+            ['5'] = 72, ['6'] = -72, ['7'] = 52, ['8'] = -52, ['9'] = -30,
+            ['h'] = 120, ['j'] = -120, ['t'] = 60, ['y'] = 300,
+        };
+        var modern = (double?)root["settings"]?["version"] >= 5 && (bool?)root["settings"]?["legacySpriteTiles"] != true;
+        var result = new List<double>();
+        var previous = 0.0;
+        foreach (var c in root["pathData"]!.ToString())
+        {
+            if (PathAngles.TryGetValue(c, out var absolute)) previous = absolute;
+            else if (modern && relative.TryGetValue(c, out var delta)) previous = (float)(previous + delta);
+            else throw new InvalidDataException($"pathData 里的「{c}」使用未支持的轨道语义；请从游戏内导出。");
+            result.Add(previous);
+        }
+
+        return result.ToArray();
+    }
+
+    // Compatibility with the game's version 9–16 Pause migration. The core
+    // outgoing-interval formula and FloorHits filtering remain the preview's own.
+    private static int[] LegacyPauseCorrections(double[] angles, Dictionary<int, List<JObject>> events, double version)
+    {
+        var corrections = new int[angles.Length];
+        if (version < 9 || version > 16) return corrections;
+        const double pi = 3.1415927410125732, tau = 6.2831854820251465;
+        const float radiansPerDegree = (float)pi / 180f;
+        var entry = 4.71238899230957;
+        var clockwise = true;
+        for (var k = 0; k < angles.Length; k++)
+        {
+            var angle = (float)angles[k];
+            var midspin = angle == 999f;
+            var exit = midspin ? (double)(float)entry : (double)((0f - angle + 90f) * radiansPerDegree);
+            var raw = (((exit - entry) * (clockwise ? 1 : -1)) % tau + tau) % tau;
+            var turnaround = !midspin && (Math.Abs(raw) <= 1e-6 || Math.Abs(raw) >= 6.283184482025146);
+            if (version == 9) corrections[k] = turnaround ? 1 : 0;
+            else if (turnaround ^ (Math.Abs(raw - tau) < .0001)) corrections[k] = turnaround ? -1 : 1;
+            entry = (exit + pi) % tau;
+            foreach (var e in events.GetValueOrDefault(k + 1) ?? new List<JObject>())
+                if ((string?)e["eventType"] == "Twirl") clockwise = !clockwise;
+        }
+
+        return corrections;
+    }
+
+    // Newtonsoft already accepts comments, trailing commas and raw characters in
+    // strings. Some older charts additionally omit a comma after an array-valued
+    // object property. Repair only that lexical boundary, never arbitrary text.
+    internal static JObject ParseJson(string text)
+    {
+        text = text.TrimStart('\uFEFF');
+        try { return JObject.Parse(text); }
+        catch (Newtonsoft.Json.JsonReaderException) { }
+        var output = new System.Text.StringBuilder();
+        var containers = new Stack<char>();
+        var quoted = false;
+        var escaped = false;
+        var lineComment = false;
+        var blockComment = false;
+        for (var i = 0; i < text.Length; i++)
+        {
+            var c = text[i];
+            output.Append(c);
+            if (lineComment) { if (c is '\r' or '\n') lineComment = false; continue; }
+            if (blockComment)
+            {
+                if (c == '*' && i + 1 < text.Length && text[i + 1] == '/')
+                {
+                    output.Append(text[++i]); blockComment = false;
+                }
+                continue;
+            }
+            if (quoted)
+            {
+                if (escaped) escaped = false;
+                else if (c == '\\') escaped = true;
+                else if (c == '"') quoted = false;
+                continue;
+            }
+            if (c == '/' && i + 1 < text.Length && text[i + 1] is '/' or '*')
+            {
+                lineComment = text[i + 1] == '/'; blockComment = !lineComment;
+                output.Append(text[++i]); continue;
+            }
+            if (c == '"') quoted = true;
+            else if (c is '[' or '{') containers.Push(c);
+            else if (c is ']' or '}')
+            {
+                var opened = containers.Count > 0 ? containers.Pop() : '\0';
+                if (c != ']' || opened != '[' || containers.Count == 0 || containers.Peek() != '{') continue;
+                var next = i + 1;
+                while (next < text.Length && char.IsWhiteSpace(text[next])) next++;
+                if (next >= text.Length || text[next++] != '"') continue;
+                var keyEscaped = false;
+                while (next < text.Length)
+                {
+                    var key = text[next++];
+                    if (keyEscaped) keyEscaped = false;
+                    else if (key == '\\') keyEscaped = true;
+                    else if (key == '"') break;
+                }
+                while (next < text.Length && char.IsWhiteSpace(text[next])) next++;
+                if (next < text.Length && text[next] == ':') output.Append(',');
+            }
+        }
+
+        return JObject.Parse(output.ToString());
+    }
+
+    private static double Number(JToken? token, string name)
+    {
+        if (token is null || (token.Type != JTokenType.Float && token.Type != JTokenType.Integer)
+            || !double.IsFinite((double)token))
+        {
+            throw new InvalidDataException($"{name} 必须是有限数值。");
+        }
+
+        return (double)token;
+    }
+
+    private static double PositiveNumber(JToken? token, string name)
+    {
+        var value = Number(token, name);
+        if (value <= 0)
+        {
+            throw new InvalidDataException($"{name} 必须大于零。");
+        }
+
+        return value;
+    }
 }

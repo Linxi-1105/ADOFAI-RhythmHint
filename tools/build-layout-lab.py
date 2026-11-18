@@ -21,11 +21,13 @@ def main() -> int:
         return 2
 
     template = Path(__file__).with_name("layout-lab.html").read_text(encoding="utf-8")
-    shared_reference = '<script src="review-editor/note-planner.js"></script>'
-    if shared_reference not in template:
-        raise ValueError("Shared planner reference missing from layout-lab template")
-    shared = Path(__file__).with_name("review-editor").joinpath("note-planner.js").read_text(encoding="utf-8")
-    template = template.replace(shared_reference, "<script>\n" + re.sub(r"</script", r"<\\/script", shared, flags=re.I) + "\n</script>")
+    scripts = Path(__file__).with_name("review-editor")
+    for name in ("note-planner.js", "adofai-import.js"):
+        reference = f'<script src="review-editor/{name}"></script>'
+        if reference not in template:
+            raise ValueError(f"Missing {name} reference in layout-lab template")
+        script = (scripts / name).read_text(encoding="utf-8")
+        template = template.replace(reference, "<script>\n" + re.sub(r"</script", r"<\\/script", script, flags=re.I) + "\n</script>")
     if PLACEHOLDER not in template:
         print("模板里找不到数据占位符 /*LEVELS*/[]", file=sys.stderr)
         return 1
