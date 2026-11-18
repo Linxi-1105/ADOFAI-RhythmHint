@@ -79,6 +79,7 @@ internal sealed class Overlay : MonoBehaviour
         try
         {
             Lang.Update(Main.Settings);
+            UpdateNotice.Update(Main.Settings);
             ReadHotkey();
             if (_window.Visible)
             {

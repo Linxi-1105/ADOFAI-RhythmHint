@@ -11,8 +11,12 @@
     <GameDir Condition="'$(GameDir)' == ''">$(ADOFAI_DIR)</GameDir>
     <ManagedDir>$(GameDir)\A Dance of Fire and Ice_Data\Managed</ManagedDir>
     <ModDeployDir>$(GameDir)\Mods\$(ModId)</ModDeployDir>
-    <!-- 仓库地址只写这一处：Info.json 的 HomePage 由它拼出 -->
+    <!-- 仓库地址只写这一处：Info.json 的 HomePage、Repository 和更新清单里的下载地址都由它拼出 -->
     <RepoUrl>https://github.com/xiaoming6680/ADOFAI-RhythmHint</RepoUrl>
+    <!-- Repository：UMM 启动时读的更新清单，指向最新一个 Release 里的 Repository.json（GitHub 会跳转到那个 Release）。
+         在游戏里试提示时可用 -p:ModRepository=file:///D:/…/Repository.json 指向本地假清单；打发布包时不许改 -->
+    <DefaultModRepository>$(RepoUrl)/releases/latest/download/Repository.json</DefaultModRepository>
+    <ModRepository Condition="'$(ModRepository)' == ''">$(DefaultModRepository)</ModRepository>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
@@ -62,6 +66,7 @@
   "Author": "XIAOMING6680",
   "Version": "$(Version)",
   "HomePage": "$(RepoUrl)",
+  "Repository": "$(ModRepository)",
   "ManagerVersion": "0.27.0",
   "AssemblyName": "$(AssemblyName).dll",
   "EntryMethod": "RhythmHint.Main.Load"
@@ -73,18 +78,32 @@
   <!-- dotnet build -c Release -p:UmmPackage=true：在仓库根目录 artifacts\ 生成 UMM 可直接安装的 RhythmHint-版本.zip。
        压缩包里只有 RhythmHint/RhythmHint.dll 和 RhythmHint/Info.json（UMM 识别 Info.json 所在的文件夹）。
        用 MSBuild 的 ZipDirectory：路径分隔符是标准的「/」。0.9.1 用 Windows PowerShell 5.1 的 Compress-Archive 打包，
-       路径是「RhythmHint\Info.json」，不是标准 zip 路径，安装器可能认不出 -->
+       路径是「RhythmHint\Info.json」，不是标准 zip 路径，安装器可能认不出。
+       同时生成 UMM 的更新清单 artifacts\Repository.json，发 Release 时和压缩包一起上传：
+       游戏里的 UMM 读它提示新版本，UMM 安装器 Mods 页右键可按其中的 DownloadUrl 一键更新 -->
   <Target Name="PackageForUmm" AfterTargets="WriteInfoJson" Condition="'$(UmmPackage)' == 'true'">
+    <Error Condition="'$(ModRepository)' != '$(DefaultModRepository)'"
+           Text="打发布包时不能改 ModRepository（现在是 $(ModRepository)），否则玩家收不到更新提示。" />
     <PropertyGroup>
       <ArtifactsDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '..', '..', 'artifacts'))</ArtifactsDir>
       <PackageStageDir>$(ArtifactsDir)stage\</PackageStageDir>
       <PackageZip>$(ArtifactsDir)$(ModId)-$(Version).zip</PackageZip>
+      <RepositoryJsonText>{
+  "Releases": [
+    {
+      "Id": "$(ModId)",
+      "Version": "$(Version)",
+      "DownloadUrl": "$(RepoUrl)/releases/download/v$(Version)/$(ModId)-$(Version).zip"
+    }
+  ]
+}</RepositoryJsonText>
     </PropertyGroup>
     <RemoveDir Directories="$(PackageStageDir)" />
     <Copy SourceFiles="$(OutDir)$(AssemblyName).dll;$(OutDir)Info.json" DestinationFolder="$(PackageStageDir)$(ModId)" />
     <ZipDirectory SourceDirectory="$(PackageStageDir)" DestinationFile="$(PackageZip)" Overwrite="true" />
     <RemoveDir Directories="$(PackageStageDir)" />
-    <Message Importance="high" Text="已打包 $(PackageZip)" />
+    <WriteLinesToFile File="$(ArtifactsDir)Repository.json" Lines="$(RepositoryJsonText)" Overwrite="true" />
+    <Message Importance="high" Text="已打包 $(PackageZip)，更新清单 $(ArtifactsDir)Repository.json" />
   </Target>
 
   <!-- dotnet build -p:Deploy=true：编译后复制到游戏的 Mods 目录（不碰已有的 Settings.xml） -->

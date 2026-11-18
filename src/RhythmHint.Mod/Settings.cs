@@ -57,6 +57,9 @@ public sealed class Settings : UnityModManager.ModSettings
     /// <summary>界面语言代码（见 Core 的 Languages.All）；空 = 跟随游戏的语言。</summary>
     public string Language = string.Empty;
 
+    /// <summary>UMM 查到过的最新版本号（见 UpdateNotice）；空 = 没查到过。设置窗口里不显示，恢复默认值也不清。</summary>
+    public string LatestVersion = string.Empty;
+
     /// <summary>多押转角上限（度）：相邻两块砖转角不超过它、又挨得近，就合成一个多押（见 FingeringOptions.ChordAngle）。</summary>
     /// <remarks>
     /// 1.1.0 之前按时间合并（PseudoChordWindowMs，毫秒；更早叫 ChordWindowMs），分不清多押和极快的连打，

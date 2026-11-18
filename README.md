@@ -76,7 +76,7 @@
    - 也可以手动解压，把里面的 `RhythmHint` 文件夹放进 `游戏目录\Mods\`
 3. 进游戏按 `Ctrl+F10` 确认它已启用
 
-国内下载慢的话，[夸克网盘](https://pan.quark.cn/s/6ef42ac0c8dd?pwd=uxha)里有 UMM 和最新版 Mod，Mod 交流 Q 群 1136407588 的群文件里也有。以后更新只要换新的 `RhythmHint-版本号.zip`，UMM 不用重装。
+国内下载慢的话，[夸克网盘](https://pan.quark.cn/s/6ef42ac0c8dd?pwd=uxha)里有 UMM 和最新版 Mod，Mod 交流 Q 群 1136407588 的群文件里也有。以后更新只要换新的 `RhythmHint-版本号.zip`，UMM 不用重装。有新版本时 F8 设置窗口的标题栏会提示，在 UMM 安装器的 Mods 页右键本 Mod 选 **Update** 就能一键更新（1.1.0 及更早的版本还没有这个功能）。
 
 想自己编译看[开发说明](docs/开发说明.md)。
 

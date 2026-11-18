@@ -13,6 +13,7 @@ internal sealed class SettingsWindow
     private const int WindowId = 0x52484D57; // "RHMW"
     private static readonly string[] HotkeyPresets = { "F8", "F9", "F7", "F6", "Home", "Insert" };
     private const string QqGroup = "1136407588";
+    private const int StatusTabIndex = 3; // 「状态」页，页签顺序见 Contents
 
     private readonly KeyPicker _keyPicker = new();
     private Rect _rect = new(0, 0, 780, 840);
@@ -84,6 +85,12 @@ internal sealed class SettingsWindow
         GUILayout.BeginHorizontal();
         GUILayout.Label(Lang.T("全节奏提示 · 设置"), WindowSkin.Title);
         GUILayout.FlexibleSpace();
+        var newer = UpdateNotice.Newer;
+        if (newer != null && GUILayout.Button(Lang.T("有新版本 {0}", newer), WindowSkin.Selected))
+        {
+            SelectTab(StatusTabIndex);
+        }
+
         if (GUILayout.Button(Lang.T("关闭（{0}）", s.SettingsHotkey), WindowSkin.Button))
         {
             Close();
@@ -98,10 +105,7 @@ internal sealed class SettingsWindow
         {
             if (GUILayout.Button(tabs[i], i == _tab ? WindowSkin.TabActive : WindowSkin.Tab))
             {
-                _tab = i;
-                _scroll = Vector2.zero;
-                _confirmResetTab = -1;
-                _keyPicker.Close();
+                SelectTab(i);
             }
         }
 
@@ -136,6 +140,14 @@ internal sealed class SettingsWindow
         GUILayout.EndScrollView();
         GUILayout.Label(Lang.T("拖动标题栏可移动窗口，关闭时自动保存设置。"), WindowSkin.Note);
         GUI.DragWindow(new Rect(0, 0, 10000, 48));
+    }
+
+    private void SelectTab(int tab)
+    {
+        _tab = tab;
+        _scroll = Vector2.zero;
+        _confirmResetTab = -1;
+        _keyPicker.Close();
     }
 
     /// <summary>
@@ -260,6 +272,20 @@ internal sealed class SettingsWindow
 
     private void StatusTab(Settings s, Overlay overlay)
     {
+        var newer = UpdateNotice.Newer;
+        var home = Main.Mod.Info.HomePage;
+        if (newer != null)
+        {
+            WindowSkin.SectionTitle(Lang.T("更新"));
+            var buttons = string.IsNullOrEmpty(home) ? Array.Empty<string>() : new[] { Lang.T("打开下载页") };
+            if (WindowSkin.Info(Lang.T("最新版本"), newer.ToString(), buttons) == 0)
+            {
+                Browser.Open(home + "/releases/latest");
+            }
+
+            WindowSkin.Hint(Lang.T("可在 UMM 安装器的 Mods 页右键本 Mod，选择 Update 一键更新；也可从交流 QQ 群的群文件下载。"));
+        }
+
         WindowSkin.SectionTitle(Lang.T("当前状态"));
         GUILayout.Label(overlay.Status, WindowSkin.Note);
 
