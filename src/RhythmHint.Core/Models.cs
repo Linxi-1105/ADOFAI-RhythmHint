@@ -27,7 +27,11 @@ public static class Lanes
 /// <param name="TileIndex">砖块序号（scrFloor.seqID）。</param>
 /// <param name="Time">到达时间，秒，和游戏的歌曲进度同一时间轴。</param>
 /// <param name="HoldSeconds">长按砖的持续时间，普通砖为 0。</param>
-public readonly record struct TileHit(int TileIndex, double Time, double HoldSeconds = 0);
+/// <param name="Angle">
+/// 从上一块要按的砖到这块，星球转过的角度（度，180° 是一拍）。谱师把要同时按的砖画成很小的转角，
+/// 用它分辨多押和极快的连打。NaN 表示不知道（这时只看时间）。
+/// </param>
+public readonly record struct TileHit(int TileIndex, double Time, double HoldSeconds = 0, double Angle = double.NaN);
 
 /// <summary>最终画到屏幕上的一个音符。</summary>
 public sealed class PlannedNote
@@ -50,6 +54,27 @@ public sealed class PlannedNote
     /// <summary>这一下要按的轨道及各自的长按时长（0 为普通音符）。</summary>
     public SortedDictionary<int, double> Lanes { get; } = new();
 
-    /// <summary>同时按两个及以上轨道，画成蓝色。</summary>
+    /// <summary>同时按两个及以上轨道。</summary>
     public bool IsChord => Lanes.Count > 1;
+
+    /// <summary>三押、四押（同时按三个及以上轨道），画成紫色；双押是蓝色。</summary>
+    public bool IsMultiChord => Lanes.Count > 2;
+
+    /// <summary>
+    /// 按两个键的那只手（0 左、1 右）：双押就是它那只手；三押是按两个键的那只手（另一只手只补一个键）；
+    /// 四押两只手都按两个，算右手。单押是它那只手。
+    /// </summary>
+    public int PairHand
+    {
+        get
+        {
+            var right = 0;
+            foreach (var lane in Lanes.Keys)
+            {
+                right += Core.Lanes.HandOf(lane);
+            }
+
+            return right * 2 >= Lanes.Count ? 1 : 0;
+        }
+    }
 }

@@ -143,7 +143,11 @@ internal static class GameReader
         return $"{level.FloorSource}共 {level.Floors.Count} 块：已销毁 {missing}，自动 {auto}，中旋 {midSpin}，假砖 {fake}，长按 {hold}；最后一块时间 {(last != null ? last.entryTime : 0):F2} 秒";
     }
 
-    /// <summary>需要按键的砖块（规则见 FloorHits.From）。</summary>
+    /// <summary>
+    /// 需要按键的砖块（规则见 FloorHits.From）。转角读 scrFloor.angleLength（星球在这块砖上转过的角度，按弧度换算成度），
+    /// 用来分辨多押和极快的连打。它记在哪一段（离开还是到达这块砖）没有文档，先和砖块时间核对、用对得上的那种，
+    /// 都对不上就退回只看时间；核对结果写进日志。
+    /// </summary>
     public static List<TileHit> ReadHits(LevelState level)
     {
         var floors = new List<FloorInfo>(level.Floors.Count);
@@ -151,10 +155,20 @@ internal static class GameReader
         {
             floors.Add(f == null
                 ? new FloorInfo(-1, 0, false, true)
-                : new FloorInfo(f.seqID, f.entryTime, f.holdLength > -1, f.auto || f.midSpin || f.isFake));
+                : new FloorInfo(f.seqID, f.entryTime, f.holdLength > -1, f.auto || f.midSpin || f.isFake,
+                    f.angleLength * (180 / System.Math.PI), f.speed));
         }
 
-        return FloorHits.From(floors);
+        var crotchet = Crotchet(level);
+        var check = FloorHits.CheckAngles(floors, crotchet);
+        Main.Mod.Logger.Log($"转角核对：按离开这块砖对上 {check.ExitMatch:P0}，按到达这块砖对上 {check.ArrivalMatch:P0}；"
+            + check.Source switch
+            {
+                AngleSource.Exit => "按离开对，多押按转角判断",
+                AngleSource.Arrival => "按到达对，多押按转角判断",
+                _ => "都对不上，多押改按时间判断",
+            });
+        return FloorHits.From(floors, crotchet);
     }
 
     /// <summary>变速点：砖块速度倍率（相对关卡起始 BPM）变化的地方各记一个点。</summary>

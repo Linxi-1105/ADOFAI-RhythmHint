@@ -21,8 +21,8 @@ internal sealed class OverlayFrame
 
     public IReadOnlyList<PlannedNote> Notes = Array.Empty<PlannedNote>();
     public IReadOnlyList<BeatLine> Beats = Array.Empty<BeatLine>();
-    public readonly Dictionary<int, (float Time, bool Chord)> Flash = new();
-    public (float Time, bool Chord) TaikoFlash = (-10f, false);
+    public readonly Dictionary<int, (float Time, Color Color)> Flash = new();
+    public (float Time, Color Color) TaikoFlash = (-10f, Painter.Orange);
     public readonly bool[] KeysDown = new bool[Lanes.Count];
     public string[] KeyLabels = Array.Empty<string>();
 
@@ -40,7 +40,7 @@ internal sealed class OverlayFrame
 
     /// <summary>
     /// 砖块序号前进时，把刚经过的音符所在轨道点亮；倒退（检查点重来、演示循环）时重新定位。
-    /// 伪双押由两块砖组成，两块都按过（LastTileIndex）才算这个提示过去。
+    /// 伪多押由几块挨着的砖组成，都按过（LastTileIndex）才算这个提示过去。
     /// </summary>
     public void TrackHits(int seq)
     {
@@ -55,10 +55,10 @@ internal sealed class OverlayFrame
                 var note = Notes[NextNote];
                 foreach (var lane in note.Lanes.Keys)
                 {
-                    Flash[lane] = (Time.unscaledTime, note.IsChord);
+                    Flash[lane] = (Time.unscaledTime, Painter.NoteColor(note));
                 }
 
-                TaikoFlash = (Time.unscaledTime, note.IsChord);
+                TaikoFlash = (Time.unscaledTime, Painter.NoteColor(note));
                 NextNote++;
             }
         }

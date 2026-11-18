@@ -59,8 +59,11 @@ public class PresentationTests
         var notes = NotePlanner.Plan(demo.Tiles, new FingeringOptions());
 
         Assert.Equal(16 * 60.0 / 160, demo.LoopSeconds, 6);
-        Assert.Contains(notes, n => n.IsChord);                         // 伪双押画成双押
+        Assert.Contains(notes, n => n.Lanes.Count == 2);                // 伪双押画成双押
+        Assert.Contains(notes, n => n.IsMultiChord);                    // 三押（紫色）
         Assert.Contains(notes, n => n.Lanes.Values.Any(h => h > 0));    // 长按
+        Assert.All(demo.Tiles, t => Assert.False(double.IsNaN(t.Angle))); // 和游戏里一样按转角判断多押
+        Assert.All(DemoChart.Repeat(demo, 2), t => Assert.False(double.IsNaN(t.Angle)));
         Assert.Equal(4, notes.SelectMany(n => n.Lanes.Keys).Distinct().Count()); // 四条轨道都用到
         Assert.All(demo.Tiles, t => Assert.InRange(t.Time, 0, demo.LoopSeconds));
     }

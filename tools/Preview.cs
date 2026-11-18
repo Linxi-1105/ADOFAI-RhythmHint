@@ -8,7 +8,7 @@
 // 用法：dotnet run tools/Preview.cs -- <关卡.adofai> [参考谱.pez/.json] [--from 秒] [--seconds 秒]
 //       [--reset 毫秒] [--focus 毫秒] [--jack 毫秒] [--chord 毫秒] [--no-roll] [--inner-roll] [--left-handed] [--chord-other-hand]   临时试排键参数
 //       [--export 文件.json]   导出砖块时间和节拍线，给 tools/layout-lab 网页用
-// 只支持常见的 angleData + SetSpeed + Twirl 关卡，用来大致验证；游戏里以游戏算出的时间为准。
+// 只支持常见的 angleData / pathData（绝对方向字母）+ SetSpeed + Twirl + Pause 关卡，用来大致验证；游戏里以游戏算出的时间为准。
 
 using System.Globalization;
 using Newtonsoft.Json.Linq;
@@ -63,19 +63,24 @@ if (exportIndex >= 0 && exportIndex + 1 < args.Length)
         song = (string?)levelSettings?["songFilename"] ?? "",
         offset = (double?)levelSettings?["offset"] ?? 0,
         pitch = (double?)levelSettings?["pitch"] ?? 100,
-        tiles = tiles.Select(t => new[] { t.TileIndex, Math.Round(t.Time * 1000, 1), Math.Round(t.HoldSeconds * 1000, 1) }),
+        // 每块：序号、时间（毫秒）、长按（毫秒）、和上一块之间的转角（度，算不出来是 null）
+        tiles = tiles.Select(t => new object?[] { t.TileIndex, Math.Round(t.Time * 1000, 1), Math.Round(t.HoldSeconds * 1000, 1),
+            double.IsNaN(t.Angle) ? null : Math.Round(t.Angle, 3) }),
         beats = beats.Select(b => new[] { Math.Round(b.Time * 1000, 1), b.IsMeasure ? 1 : 0 }),
     };
     File.WriteAllText(args[exportIndex + 1], Newtonsoft.Json.JsonConvert.SerializeObject(export));
     Console.WriteLine($"已导出 {tiles.Count} 块砖、{beats.Count} 条节拍线到 {args[exportIndex + 1]}");
 }
 var notes = NotePlanner.Plan(tiles, options);
-var chords = notes.Count(n => n.IsChord);
-var rightChords = notes.Count(n => n.IsChord && n.Lanes.ContainsKey(3));
+var doubles = notes.Count(n => n.Lanes.Count == 2);
+var rightDoubles = notes.Count(n => n.Lanes.Count == 2 && n.PairHand == 1);
 var laneUse = Enumerable.Range(0, Lanes.Count).Select(l => notes.Count(n => n.Lanes.ContainsKey(l)));
-Console.WriteLine($"提示 {notes.Count} 个，双押 {chords} 个（右手 {rightChords}，左手 {chords - rightChords}），各轨使用次数 [{string.Join(", ", laneUse)}]");
+var byAngle = tiles.Exists(t => !double.IsNaN(t.Angle));
+Console.WriteLine($"提示 {notes.Count} 个，双押 {doubles} 个（右手 {rightDoubles}，左手 {doubles - rightDoubles}），"
+    + $"三押 {notes.Count(n => n.Lanes.Count == 3)} 个，四押 {notes.Count(n => n.Lanes.Count == 4)} 个（{(byAngle ? "按转角" : "按时间")}判断），"
+    + $"各轨使用次数 [{string.Join(", ", laneUse)}]");
 var tooFast = notes.Zip(notes.Skip(1), (a, b) => (a, b)).Count(p => p.a.IsChord && p.b.IsChord && p.b.Time - p.a.Time < options.JackWindow);
-Console.WriteLine($"两个双押挨得太近、同一只手来不及（只能左右手轮流）：{tooFast} 处");
+Console.WriteLine($"两个多押挨得太近、同一只手来不及（只能左右手轮流）：{tooFast} 处");
 
 // 散点程度：连在一起（间隔不超过 300 ms）的相邻两下，第一条轨道相差 2 条及以上算「跳轨」
 int linked = 0, jumps = 0;
@@ -96,7 +101,7 @@ var lone = LayoutStats.LoneNotes(notes, LayoutStats.DefaultLinkGap);
 Console.WriteLine($"孤立音符（前后都隔 2 条以上轨道）：{lone.Count} 个{(lone.Count == 0 ? "" : "，例如 " + string.Join("、", lone.Take(5).Select(n => $"{n.Time:F2}s")))}");
 
 // 手序：快的地方同一只手连着按两个单押（轮指以外不该有）；停顿之后从哪只手起手（应该总是主手：默认右手，--left-handed 时左手）
-int HandOf(PlannedNote n) => Lanes.HandOf(n.Lanes.Keys.First());
+int HandOf(PlannedNote n) => n.IsChord ? n.PairHand : Lanes.HandOf(n.Lanes.Keys.First()); // 多押看按两个键的那只手
 var mainHand = options.LeftHanded ? 0 : 1;
 int fastPairs = 0, sameHand = 0, restarts = 0, mainStarts = 0;
 for (var i = 1; i < notes.Count; i++)
@@ -129,7 +134,7 @@ if (files.Count > 1)
 }
 
 Console.WriteLine();
-Console.WriteLine($"  时间      | 自动 0123 |{(reference is null ? "" : " 参考 0123 |")}  ({from:F1}s 起 {span:F1}s；O 单押，# 双押，= 带长按)");
+Console.WriteLine($"  时间      | 自动 0123 |{(reference is null ? "" : " 参考 0123 |")}  ({from:F1}s 起 {span:F1}s；O 单押，# 多押，= 带长按)");
 var groupOfTile = new Dictionary<int, int>();
 for (var i = 0; i < tiles.Count && align is not null; i++)
 {
@@ -159,20 +164,34 @@ double ReadOption(string name, double fallback)
     return i >= 0 && i + 1 < args.Length && double.TryParse(args[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : fallback;
 }
 
-/// <summary>按 ADOFAI 的规则从 angleData 算每块砖的到达时间（只处理 SetSpeed、Twirl 和中旋）。</summary>
+/// <summary>
+/// 按 ADOFAI 的规则从 angleData / pathData 算每块砖的到达时间和转过的角度（只处理 SetSpeed、Twirl、Pause 和中旋），
+/// 再交给 Core 的 FloorHits：哪些砖要按、转角怎么累加、转角信不信，和游戏里的 Mod 一样。
+/// </summary>
 internal static class AdofaiTiming
 {
+    /// <summary>pathData 的绝对方向字母（度）；'!' 是中旋。相对方向的字母（5 6 7 8 等）暂不支持。</summary>
+    private static readonly Dictionary<char, double> PathAngles = new()
+    {
+        ['R'] = 0, ['p'] = 15, ['J'] = 30, ['E'] = 45, ['T'] = 60, ['o'] = 75, ['U'] = 90, ['q'] = 105, ['G'] = 120, ['Q'] = 135,
+        ['H'] = 150, ['W'] = 165, ['L'] = 180, ['x'] = 195, ['N'] = 210, ['Z'] = 225, ['F'] = 240, ['V'] = 255, ['D'] = 270,
+        ['Y'] = 285, ['B'] = 300, ['C'] = 315, ['M'] = 330, ['A'] = 345, ['!'] = 999,
+    };
+
     /// <returns>需要按键的砖块、变速点（时间, 相对起始 BPM 的倍率）、起始一拍的秒数。</returns>
     public static (List<TileHit> Hits, List<(double Time, double Speed)> Speeds, double Crotchet) Read(string path)
     {
         var root = JObject.Parse(File.ReadAllText(path));
         var angles = root["angleData"]?.Select(x => (double)x).ToArray()
-            ?? throw new InvalidDataException("只支持带 angleData 的关卡");
+            ?? (root["pathData"]?.ToString() is { Length: > 0 } pathData
+                ? pathData.Select(c => PathAngles.TryGetValue(c, out var a) ? a
+                    : throw new InvalidDataException($"pathData 里的「{c}」是相对方向，离线预览暂不支持")).ToArray()
+                : throw new InvalidDataException("关卡没有 angleData 或 pathData"));
         var bpm = (double?)root["settings"]?["bpm"] ?? throw new InvalidDataException("关卡没有 bpm");
         var events = (root["actions"] as JArray ?? new JArray()).OfType<JObject>()
             .GroupBy(e => (int)e["floor"]!).ToDictionary(g => g.Key, g => g.ToList());
 
-        var hits = new List<TileHit>();
+        var floors = new List<FloorInfo>(angles.Length + 1);
         var speeds = new List<(double Time, double Speed)>();
         var time = 0.0;
         var clockwise = true;
@@ -180,6 +199,7 @@ internal static class AdofaiTiming
         var lastDir = 0.0;
         for (var k = 0; k < angles.Length; k++)
         {
+            var pauseBeats = 0.0;
             foreach (var e in events.GetValueOrDefault(k) ?? new List<JObject>())
             {
                 switch ((string?)e["eventType"])
@@ -193,12 +213,10 @@ internal static class AdofaiTiming
                     case "SetSpeed":
                         current = (double)e["beatsPerMinute"]!;
                         break;
+                    case "Pause":
+                        pauseBeats += (double?)e["duration"] ?? 0;
+                        break;
                 }
-            }
-
-            if (k > 0)
-            {
-                hits.Add(new TileHit(k, time));
             }
 
             if (speeds.Count == 0 || Math.Abs(speeds[^1].Speed - (current / bpm)) > 1e-9)
@@ -208,7 +226,8 @@ internal static class AdofaiTiming
 
             if (angles[k] == 999)
             {
-                // 中旋：原地转 180°，不花时间
+                // 中旋：原地转 180°，不花时间；这块砖不用按（游戏里 midSpin 当自动砖）
+                floors.Add(new FloorInfo(k, time, false, true, 0, current / bpm));
                 lastDir = (lastDir + 180) % 360;
                 continue;
             }
@@ -220,13 +239,14 @@ internal static class AdofaiTiming
                 swept = 360;
             }
 
-            time += swept / 180 * 60 / current;
+            floors.Add(new FloorInfo(k, time, false, false, swept, current / bpm));
+            time += (swept / 180 + pauseBeats) * 60 / current;
             lastDir = angles[k];
         }
 
         // angleData 有 N 项就有 N+1 块砖，最后一块（第 N 块）的到达也要按一下
-        hits.Add(new TileHit(angles.Length, time));
-        return (hits, speeds, 60 / bpm);
+        floors.Add(new FloorInfo(angles.Length, time, false, false));
+        return (FloorHits.From(floors, 60 / bpm), speeds, 60 / bpm);
     }
 
     private static double Mod(double x) => ((x % 360) + 360) % 360;

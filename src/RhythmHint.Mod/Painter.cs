@@ -1,3 +1,4 @@
+using RhythmHint.Core;
 using UnityEngine;
 
 namespace RhythmHint;
@@ -12,8 +13,14 @@ internal static class Painter
 
     public static readonly Color Orange = new(0.96f, 0.47f, 0.16f);
     public static readonly Color Blue = new(0.24f, 0.62f, 0.88f);
+
+    /// <summary>三押、四押（用户要一个新颜色）：色相和橙、蓝都离得远，深色底上和它们一样亮。</summary>
+    public static readonly Color Purple = new(0.70f, 0.45f, 0.95f);
     public static readonly Color PanelColor = new(0.07f, 0.07f, 0.08f);
     public static readonly Color BpmBoxColor = new(0.11f, 0.30f, 0.58f);
+
+    /// <summary>音符颜色：单押橙、双押蓝、三押和四押紫。</summary>
+    public static Color NoteColor(PlannedNote note) => note.IsMultiChord ? Purple : note.IsChord ? Blue : Orange;
 
     /// <summary>整体透明度（入场 / 出场动画用），乘到每次绘制的颜色上。</summary>
     public static float Alpha { get; set; } = 1f;

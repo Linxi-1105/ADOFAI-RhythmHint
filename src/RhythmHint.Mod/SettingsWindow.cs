@@ -123,7 +123,7 @@ internal sealed class SettingsWindow
                 break;
             case 2:
                 LayoutTab(s, overlay);
-                ResetRow(s.ResetFingering, "惯用手和双押用手保持不变。");
+                ResetRow(s.ResetFingering, "惯用手和多押用手保持不变。");
                 break;
             default:
                 StatusTab(s, overlay);
@@ -214,20 +214,20 @@ internal sealed class SettingsWindow
     {
         WindowSkin.SectionTitle("排键规则");
         s.LeftHanded = WindowSkin.Choice("惯用手", s.LeftHanded ? HandPresets[1] : HandPresets[0], HandPresets) == HandPresets[1];
-        s.ChordsOnOtherHand = WindowSkin.Choice("双押用手",
+        s.ChordsOnOtherHand = WindowSkin.Choice("多押用手",
             s.ChordsOnOtherHand ? ChordHandPresets[1] : ChordHandPresets[0], ChordHandPresets) == ChordHandPresets[1];
 
-        // 左撇子是整套排法左右镜像，说明文字里的手和键位跟着换；双押用手是相对惯用手的
+        // 左撇子是整套排法左右镜像，说明文字里的手和键位跟着换；多押用手是相对惯用手的
         var main = s.LeftHanded ? "左手" : "右手";
         var (chordHand, chordKeys) = s.LeftHanded != s.ChordsOnOtherHand ? ("左手", "D F") : ("右手", "J K");
         var (outerRoll, innerRoll) = s.LeftHanded ? ("D F K J", "F D J K") : ("K J D F", "J K F D");
-        WindowSkin.Hint($"只看本关的砖块间隔：慢时{main}食指单点，稍快时左右食指交替，极快时同手轮指；双押优先{chordHand}（{chordKeys}）。");
+        WindowSkin.Hint($"只看本关的砖块间隔：慢时{main}食指单点，稍快时左右食指交替，极快时同手轮指；多押优先{chordHand}（{chordKeys}），三押由另一只手补一个键。");
 
         WindowSkin.SectionTitle("节奏分界");
         s.ResetWindowMs = WindowSkin.Slider("主手重置间隔（毫秒）", s.ResetWindowMs, 100, 300, 5);
         WindowSkin.Hint($"间隔更长时{main}食指单点；当前相当于 {StraightBpm(s.ResetWindowMs)} BPM 的直线。");
-        s.ChordFocusMs = WindowSkin.Slider("双押换手范围（毫秒）", s.ChordFocusMs, 0, 800, 10);
-        WindowSkin.Hint("与双押相隔在此范围内的单押改用另一只手；0 为不换手。");
+        s.ChordFocusMs = WindowSkin.Slider("多押换手范围（毫秒）", s.ChordFocusMs, 0, 800, 10);
+        WindowSkin.Hint("与多押相隔在此范围内的单押改用另一只手；0 为不换手。");
 
         WindowSkin.SectionTitle("轮指");
         s.UseRoll = WindowSkin.Switch("极快时同手轮指", s.UseRoll);
@@ -237,13 +237,16 @@ internal sealed class SettingsWindow
         WindowSkin.SectionTitle("其他参数");
         s.JackWindowMs = WindowSkin.Slider("同键连按最小间隔（毫秒）", s.JackWindowMs, 50, 300, 5);
         WindowSkin.Hint($"当前相当于 {StraightBpm(s.JackWindowMs)} BPM 的直线，更快时不连按同一个键。");
-        s.PseudoChordWindowMs = WindowSkin.Slider("双押合并阈值（毫秒）", s.PseudoChordWindowMs, 0, 45, 1);
-        WindowSkin.Hint("间隔小于此值的两下合成一个双押（含约 25 毫秒的伪双押）。");
+        s.ChordAngleDeg = WindowSkin.Slider("多押转角上限（度）", s.ChordAngleDeg, 0, 60, 1);
+        WindowSkin.Hint($"相邻两块砖转角不超过此值、且相隔不超过 {MaxChordGapMs} 毫秒时合为多押；连续 5 块以上视为连打。");
         if (WindowSkin.Buttons("重新排键") == 0)
         {
             overlay.RequestRebuild();
         }
     }
+
+    /// <summary>多押里相邻两块最多隔多久（毫秒），只读 FingeringOptions 的默认值，不在设置里调。</summary>
+    private static readonly int MaxChordGapMs = Mathf.RoundToInt((float)(new RhythmHint.Core.FingeringOptions().ChordMaxGap * 1000));
 
     /// <summary>间隔（毫秒）相当于多少 BPM 的直线：180° 直线每块砖一拍，BPM = 60000 / 毫秒。</summary>
     private static int StraightBpm(int ms) => Mathf.RoundToInt(60000f / Mathf.Max(1, ms));

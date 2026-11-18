@@ -144,7 +144,7 @@ kbd { font-family: var(--font-num); background: var(--raise); border: 1px solid 
       <div class="param"><span>同键连按最短（毫秒）</span><input type="range" id="pJack" min="50" max="300" step="5" value="150"><output id="pJackOut">150</output></div>
       <label><input type="checkbox" id="pRoll" checked> 很快时同手轮指</label>
       <label><input type="checkbox" id="pOuter" checked> 外侧手指先落（K J D F）</label>
-      <label><input type="checkbox" id="pChordOther"> 双押用另一只手（左手 D F）</label>
+      <label><input type="checkbox" id="pChordOther"> 多押用另一只手（左手 D F）</label>
     </section>
 
     <section class="card">
@@ -160,7 +160,7 @@ kbd { font-family: var(--font-num); background: var(--raise); border: 1px solid 
 // ---------- 内置关卡（砖块时间毫秒、长按毫秒、节拍线），由 tools/build-layout-lab.py 注入 ----------
 const BUILTIN = /*LEVELS*/[];
 
-const COLORS = { orange: "#f5782a", blue: "#3d9ee0", line: "#2b2d37", beat: "#1c1e25", measure: "#343744", text: "#e9e9ef", muted: "#8e909d", ok: "#4cc38a", bad: "#e2574c", judge: "#ffffff" };
+const COLORS = { orange: "#f5782a", blue: "#3d9ee0", purple: "#b373f2", line: "#2b2d37", beat: "#1c1e25", measure: "#343744", text: "#e9e9ef", muted: "#8e909d", ok: "#4cc38a", bad: "#e2574c", judge: "#ffffff" };
 const STRATS = [
   { key: "mine", name: "我的录制" },
   { key: "mod", name: "当前 Mod" },
@@ -188,20 +188,28 @@ function levelFromExport(e, key) {
     key,
     name: e.name,
     song: e.song || "", offset: (e.offset || 0) / 1000, pitch: e.pitch || 100,
-    tiles: e.tiles.map(([i, ms, h]) => ({ i, t: ms / 1000, hold: h / 1000 })),
+    // 每块：序号、时间、长按、和上一块之间的转角（度；旧导出没有这一列、算不出来是 null，都当作不知道）
+    tiles: e.tiles.map(([i, ms, h, ang]) => ({ i, t: ms / 1000, hold: h / 1000, ang: ang == null ? NaN : ang })),
     beats: e.beats.map(([ms, m]) => ({ t: ms / 1000, m: !!m })),
   };
 }
 
-// 把挨得很近的砖（< 35 ms，含伪双押）合成一个「时刻」
+// 把同时到的砖合成一个「时刻」，和 C# NotePlanner.Moments 一样：有转角时和上一块转角 ≤ chordAngle、相隔 ≤ chordGap 算同一下，
+// 一块接一块串起来；没有转角时和这一组第一块相隔 < chordWindow。连成 5 块以上是连打，全拆开
+// 比较转角的容差（度），和 C# NotePlanner.AngleTolerance 一样：游戏里 30° 读出来可能是 30.000004°
+const ANGLE_TOL = 0.1;
 function toMoments(tiles) {
   const out = [];
   for (const tile of tiles) {
-    const last = out[out.length - 1];
-    if (last && tile.t - last.t < 0.035) { last.count++; last.tiles.push(tile.i); }
-    else out.push({ t: tile.t, count: 1, tiles: [tile.i], hold: tile.hold });
+    const g = out[out.length - 1];
+    const same = g && (Number.isNaN(tile.ang)
+      ? tile.t - g.t < P.chordWindow
+      : tile.ang <= P.chordAngle + ANGLE_TOL && tile.t - g.lastT <= P.chordGap + EPS);
+    if (same) { g.count++; g.tiles.push(tile.i); g.lastT = tile.t; }
+    else out.push({ t: tile.t, lastT: tile.t, count: 1, tiles: [tile.i], hold: tile.hold, members: [] });
+    out[out.length - 1].members.push(tile);
   }
-  return out;
+  return out.flatMap((m) => m.count > 4 ? m.members.map((x) => ({ t: x.t, lastT: x.t, count: 1, tiles: [x.i], hold: x.hold })) : [m]);
 }
 
 function loadLevel(index) {
@@ -216,34 +224,41 @@ function loadLevel(index) {
   setSegment(Math.max(0, Math.floor(S.moments[0].t)));
 }
 
-// ---------- 读 .adofai（只支持 angleData + SetSpeed + Twirl 的常见关卡，和 tools/Preview.cs 同一套规则） ----------
+// ---------- 读 .adofai（只支持 angleData / pathData 绝对方向 + SetSpeed + Twirl + Pause 的常见关卡，和 tools/Preview.cs 同一套规则） ----------
+const PATH_ANGLES = { R: 0, p: 15, J: 30, E: 45, T: 60, o: 75, U: 90, q: 105, G: 120, Q: 135, H: 150, W: 165, L: 180, x: 195, N: 210, Z: 225, F: 240, V: 255, D: 270, Y: 285, B: 300, C: 315, M: 330, A: 345, "!": 999 };
 function parseAdofai(text) {
   const clean = text.replace(/^﻿/, "").replace(/,(\s*[\]}])/g, "$1");
   const j = JSON.parse(clean);
-  const angles = j.angleData;
-  if (!Array.isArray(angles)) throw new Error("只支持带 angleData 的关卡");
+  const angles = Array.isArray(j.angleData) ? j.angleData : typeof j.pathData === "string" && j.pathData
+    ? Array.from(j.pathData).map((c) => { if (!(c in PATH_ANGLES)) throw new Error("pathData 里的「" + c + "」是相对方向，暂不支持"); return PATH_ANGLES[c]; })
+    : null;
+  if (!angles) throw new Error("关卡没有 angleData 或 pathData");
   const bpm = Number(j.settings && j.settings.bpm);
   if (!(bpm > 0)) throw new Error("关卡没有 bpm");
   const ev = {};
   for (const a of j.actions || []) (ev[a.floor] = ev[a.floor] || []).push(a);
+  // 每块要按的砖记下从上一块要按的砖转过的角度；中旋砖不用按（游戏里当自动砖），转角累加到下一块（和 Core 的 FloorHits 一样）
   const tiles = []; const speeds = [];
-  let time = 0, cw = true, cur = bpm, lastDir = 0;
+  let time = 0, cw = true, cur = bpm, lastDir = 0, ang = 0;
   for (let k = 0; k < angles.length; k++) {
+    let pause = 0;
     for (const e of ev[k] || []) {
       if (e.eventType === "Twirl") cw = !cw;
       else if (e.eventType === "SetSpeed") cur = e.speedType === "Multiplier" ? cur * Number(e.bpmMultiplier) : Number(e.beatsPerMinute);
+      else if (e.eventType === "Pause") pause += Number(e.duration) || 0;
     }
-    if (k > 0) tiles.push({ i: k, t: time, hold: 0 });
+    const mid = angles[k] === 999;
+    if (k > 0 && !mid) { tiles.push({ i: k, t: time, hold: 0, ang }); ang = 0; }
     if (!speeds.length || Math.abs(speeds[speeds.length - 1].s - cur / bpm) > 1e-9) speeds.push({ t: time, s: cur / bpm });
-    if (angles[k] === 999) { lastDir = (lastDir + 180) % 360; continue; }
+    if (mid) { lastDir = (lastDir + 180) % 360; continue; }
     const entry = (k > 0 ? lastDir : 0) + 180;
     const mod = (x) => ((x % 360) + 360) % 360;
     let swept = cw ? mod(entry - angles[k]) : mod(angles[k] - entry);
     if (swept < 1e-6) swept = 360;
-    time += swept / 180 * 60 / cur;
-    lastDir = angles[k];
+    time += (swept / 180 + pause) * 60 / cur;
+    lastDir = angles[k]; ang += swept;
   }
-  tiles.push({ i: angles.length, t: time, hold: 0 });
+  tiles.push({ i: angles.length, t: time, hold: 0, ang });
   // 节拍线：×2、×0.5 这类变速只改疏密不改拍子（和 Mod 的 BeatGrid.MusicalTempo 一致）
   const tempo = []; let factor = 1, density = 1;
   for (const sp of speeds) {
@@ -265,7 +280,8 @@ function parseAdofai(text) {
 }
 
 // ---------- 排键方案 ----------
-const P = { reset: 0.165, focus: 0.45, jack: 0.15, roll: true, outer: true, chordOther: false };
+// chordAngle / chordGap / chordWindow：多押怎么合并，和 C# FingeringOptions 的 ChordAngle / ChordMaxGap / ChordWindow 默认值一样
+const P = { reset: 0.165, focus: 0.45, jack: 0.15, roll: true, outer: true, chordOther: false, chordAngle: 30, chordGap: 0.06, chordWindow: 0.035 };
 const EPS = 1e-6;
 
 function onBeat(t) {
@@ -280,12 +296,15 @@ function onBeat(t) {
 }
 
 function hand(l) { return l < 2 ? 0 : 1; }
+// 按两个键的那只手（和 C# PlannedNote.PairHand 一样）：三押是按两个键的那只手，四押算右手
+function pairHand(lanes) { return lanes.filter((l) => l >= 2).length * 2 >= lanes.length ? 1 : 0; }
 function pairOf(h) { return [h * 2, h * 2 + 1]; }
 function blocked(l, t, prev) { return !!prev && prev.lanes.includes(l) && t - prev.t < P.jack - EPS; }
 
 // 当前 Mod（1.0.0）的规则，和 C# NotePlanner 一样：时间重置法（主手重置间隔 R）。
 // 慢（> R）右手食指连点；R/2–R 左右食指轮流；R/2 以内同手轮指；停下回右手；外轮 K J D F；
-// 双押优先右手（勾了「双押用另一只手」优先左手）、只在 0+1 / 2+3；双押前后 focus 以内的单押放另一只手；同轨不在 jack 内连按
+// 多押优先右手（勾了「多押用另一只手」优先左手）：双押只在 0+1 / 2+3，三押是这只手两键 + 另一只手食指（刚按过用外侧），四押全按；
+// 多押前后 focus 以内的单押放另一只手；同轨不在 jack 内连按
 function planMod(M) {
   const out = new Array(M.length); const rolled = new Array(M.length).fill(false);
   let prev = null, last = -1, lastT = 0, lastRight = -Infinity;
@@ -310,11 +329,14 @@ function planMod(M) {
     const m = M[i]; let lanes;
     if (m.count > 1) {
       const handBlocked = (h) => pairOf(h).some((l) => blocked(l, m.t, prev));
-      lanes = pairOf(handBlocked(pref) && !handBlocked(1 - pref) ? 1 - pref : pref);
+      const h = handBlocked(pref) && !handBlocked(1 - pref) ? 1 - pref : pref;
+      const index = h === 0 ? 1 : 2, other = h === 0 ? 2 : 1;
+      const extra = blocked(other, m.t, prev) && !blocked(other ^ 1, m.t, prev) ? other ^ 1 : other;
+      lanes = [index, index ^ 1, extra, extra ^ 1].slice(0, m.count).sort((a, b) => a - b);
     } else {
       let [lane, roll] = nextFinger(m.t);
       // 要让手的双押：前面的已经排好看它的手，后面的还没排按偏好的手算
-      const ch = focus[i] < 0 ? -1 : focus[i] < i ? hand(out[focus[i]][0]) : pref;
+      const ch = focus[i] < 0 ? -1 : focus[i] < i ? pairHand(out[focus[i]]) : pref;
       if (ch >= 0) {
         const index = ch === 1 ? 1 : 2;
         [lane, roll] = [blocked(index, m.t, prev) ? index ^ 1 : index, false];
@@ -333,8 +355,8 @@ function planMod(M) {
       lanes = [lane]; rolled[i] = roll;
     }
     out[i] = lanes; prev = { t: m.t, lanes };
-    last = lanes.length > 1 ? (hand(lanes[0]) === 1 ? 3 : 0) : lanes[0];
-    lastT = m.t; if (hand(last) === 1) lastRight = m.t;
+    last = lanes.length > 1 ? (pairHand(lanes) === 1 ? 3 : 0) : lanes[0];
+    lastT = m.t; if (lanes.some((l) => l >= 2)) lastRight = m.t;
   }
   if (P.roll && P.outer) {
     const jacks = (k, lane, t) => out[k].includes(lane) && Math.abs(M[k].t - t) < P.jack - EPS;
@@ -505,16 +527,16 @@ function draw() {
       const m = S.moments[k]; if (m.t < tMin - 0.2 || m.t > tMax) continue;
       const y = yOf(m.t);
       if (c.key === "rhythm") {
-        ctx.fillStyle = m.count > 1 ? COLORS.blue : "#d8d9e0";
+        ctx.fillStyle = m.count > 2 ? COLORS.purple : m.count > 1 ? COLORS.blue : "#d8d9e0";
         ctx.fillRect(x0 + 6, y - 6, COL - 12, 12);
         continue;
       }
       const lanes = plan && plan[k];
       if (!lanes || !lanes.length) { ctx.strokeStyle = COLORS.muted; ctx.strokeRect(x0 + 4, y - 6, COL - 8, 12); continue; }
-      const chord = lanes.filter((l) => l >= 0).length > 1;
+      const keys = lanes.filter((l) => l >= 0).length;
       for (const l of lanes) {
         if (l < 0) continue;
-        ctx.fillStyle = chord ? COLORS.blue : COLORS.orange;
+        ctx.fillStyle = keys > 2 ? COLORS.purple : keys > 1 ? COLORS.blue : COLORS.orange;
         ctx.fillRect(x0 + l * LANE + 3, y - 6, LANE - 6, 12);
         ctx.strokeStyle = "rgba(255,255,255,0.75)"; ctx.lineWidth = 1.2;
         ctx.strokeRect(x0 + l * LANE + 3, y - 6, LANE - 6, 12);

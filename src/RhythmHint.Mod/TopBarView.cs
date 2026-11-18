@@ -85,7 +85,7 @@ internal static class TopBarView
     private static void DrawJudgeCircle(OverlayFrame f, OverlayLayout l, Vector2 c)
     {
         var a = 1f - ((Time.unscaledTime - f.TaikoFlash.Time) / FlashSeconds);
-        BallSkin.Judge(c, 46 * l.Scale, 4 * l.Scale, false, a, f.TaikoFlash.Chord ? Painter.Blue : Painter.Orange);
+        BallSkin.Judge(c, 46 * l.Scale, 4 * l.Scale, false, a, f.TaikoFlash.Color);
     }
 
     /// <summary>按住中的长按：圆停在判定圈上脉动，尾巴从右往左缩短，松开时消失。</summary>
@@ -97,12 +97,12 @@ internal static class TopBarView
         {
             if (ReferenceEquals(h.Note, drawn))
             {
-                continue; // 双押的两条长按画成一个
+                continue; // 多押的几条长按画成一个
             }
 
             drawn = h.Note;
             var r = (h.Note.IsChord ? 40 : 34) * l.Scale;
-            var color = h.Note.IsChord ? Painter.Blue : Painter.Orange;
+            var color = Painter.NoteColor(h.Note);
             var len = (float)(h.Remaining * speed);
             BallSkin.Tail(new Rect(judgeX, cy - (r * 0.55f), len, r * 1.1f), color.WithAlpha(0.8f));
             BallSkin.HoldHead(new Vector2(judgeX, cy), r, color, 4 * l.Scale, pulse);
@@ -123,7 +123,7 @@ internal static class TopBarView
 
             var x = judgeX + (float)(dt * speed);
             var r = (note.IsChord ? 40 : 34) * l.Scale;
-            var color = note.IsChord ? Painter.Blue : Painter.Orange;
+            var color = Painter.NoteColor(note);
             var hold = 0.0;
             foreach (var h in note.Lanes.Values)
             {

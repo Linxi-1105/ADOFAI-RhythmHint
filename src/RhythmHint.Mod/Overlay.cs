@@ -247,18 +247,20 @@ internal sealed class Overlay : MonoBehaviour
         Frame.Load(notes, beats, end);
         Frame.Caption = string.Empty;
 
-        var chords = 0;
+        var chords = new int[Lanes.Count + 1]; // 按几个键：双押、三押、四押各几个
         var laneUse = new int[Lanes.Count];
         foreach (var n in notes)
         {
-            chords += n.IsChord ? 1 : 0;
+            chords[n.Lanes.Count]++;
             foreach (var lane in n.Lanes.Keys)
             {
                 laneUse[lane]++;
             }
         }
 
-        _levelStatus = $"本关共 {hits.Count} 次按键，生成 {notes.Count} 个提示（其中双押 {chords} 个），各轨道音符数 [{string.Join(", ", laneUse)}]"
+        var byAngle = hits.Exists(h => !double.IsNaN(h.Angle));
+        _levelStatus = $"本关共 {hits.Count} 次按键，生成 {notes.Count} 个提示（双押 {chords[2]}、三押 {chords[3]}、四押 {chords[4]} 个，"
+            + $"{(byAngle ? "按转角判断" : "按时间判断")}），各轨道音符数 [{string.Join(", ", laneUse)}]"
             + (hits.Count == 0 ? $"；{GameReader.DescribeFloors(level)}" : string.Empty);
         Main.Mod.Logger.Log(_levelStatus);
     }

@@ -182,8 +182,11 @@ public class PlannerTests
             foreach (var n in NotePlanner.Plan(tiles, options).Where(n => n.IsChord))
             {
                 var lanes = n.Lanes.Keys.ToArray();
-                Assert.True(lanes.SequenceEqual(new[] { 0, 1 }) || lanes.SequenceEqual(new[] { 2, 3 }),
-                    $"第 {round} 轮 {n.Time:F3}s 双押在轨道 {string.Join("+", lanes)}");
+                // 三押必然用到两只手：按双押的那只手两个键，另一只手一个键（用户：三押跟着双押用手走）
+                var ok = lanes.Length == 3
+                    ? lanes.Count(l => Lanes.HandOf(l) == n.PairHand) == 2
+                    : lanes.SequenceEqual(new[] { 0, 1 }) || lanes.SequenceEqual(new[] { 2, 3 });
+                Assert.True(ok, $"第 {round} 轮 {n.Time:F3}s 按轨道 {string.Join("+", lanes)}");
             }
         }
     }

@@ -8,7 +8,8 @@ namespace RhythmHint.Core;
 /// 把关卡的砖块变成要画的音符。只看这一关自己的砖块之间的间隔，不读任何外部谱面、不看 BPM 和小节。
 /// 思路来自 LaneReader 的「时间重置法」，和原版「全节奏提示」作者的实际按法一致（见 docs/开发说明.md）：
 /// <list type="number">
-/// <item>同时到（含伪双押，相隔不到 ChordWindow）的砖合成一个「时刻」，画成一个双押（只在 0+1 或 2+3）</item>
+/// <item>同时到的砖合成一个「时刻」：相邻两块转角不超过 ChordAngle、相隔不超过 ChordMaxGap（读不到转角时和第一块相隔不到 ChordWindow），
+/// 最多四块。双押只在 0+1 或 2+3；三押是双押那只手两个键加另一只手一个键；四押四个键</item>
 /// <item>每个单押只看和前面几下的间隔（R = ResetWindow）：慢（&gt; R）右手食指连点；R/2–R 两只手食指轮流；
 /// R/2 以内同一只手两根手指轮指；停下来（&gt; R）总是回到右手食指</item>
 /// <item>轮指默认外侧手指先落：K J D F（用户习惯的 4312）</item>
@@ -26,6 +27,12 @@ public static class NotePlanner
     /// <summary>比较时间时的容差，避免浮点误差把正好卡在门槛上的间隔判错。</summary>
     private const double Epsilon = 1e-6;
 
+    /// <summary>
+    /// 比较转角时的容差（度）。复现（用户截图）：游戏里方向存成单精度浮点，30° 读出来是 30.000004° 或 29.999996°，
+    /// 卡在 30° 的门槛上时有的三押合上、有的合不上。谱师用的转角都是整数度，0.1° 足够吸收误差又不会把 31° 算进来。
+    /// </summary>
+    private const double AngleTolerance = 0.1;
+
     // 四个键：D（左手外侧）F（左手食指）J（右手食指）K（右手外侧）
     private const int LeftOuter = 0;
     private const int LeftIndex = 1;
@@ -35,7 +42,7 @@ public static class NotePlanner
     /// <param name="tiles">需要按键的砖块，按时间排好。</param>
     public static List<PlannedNote> Plan(IReadOnlyList<TileHit> tiles, FingeringOptions options)
     {
-        var moments = Moments(tiles, options.ChordWindow);
+        var moments = Moments(tiles, options);
         var notes = new List<PlannedNote>(moments.Count);
         var rolled = new List<bool>(moments.Count);
         var hands = new HandState();
@@ -51,7 +58,7 @@ public static class NotePlanner
             var last = notes.Count > 0 ? notes[notes.Count - 1] : null;
             if (moment.Count > 1)
             {
-                notes.Add(BuildChord(moment, ChordHand(preferredChordHand, time, last, options)));
+                notes.Add(BuildChord(moment, ChordHand(preferredChordHand, time, last, options), last, options));
                 rolled.Add(false);
             }
             else
@@ -60,7 +67,7 @@ public static class NotePlanner
                 if (focus[i] >= 0)
                 {
                     // 前面的双押已经排好（一个时刻一个音符，序号相同）；后面的还没排，按偏好的手算
-                    var chordHand = focus[i] < i ? Lanes.HandOf(notes[focus[i]].Lanes.Keys.First()) : preferredChordHand;
+                    var chordHand = focus[i] < i ? notes[focus[i]].PairHand : preferredChordHand;
                     // 用户：右手单押接右手双押，食指、中指配合不过来。双押附近的单押放另一只手，让那只手专心按双押
                     (lane, roll) = (FocusLane(1 - chordHand, time, last, options), false);
                 }
@@ -139,14 +146,15 @@ public static class NotePlanner
             }
         }
 
-        /// <summary>记下实际按的（可能被双押、连按检查改过）。双押当成那只手外侧手指按的：右手双押之后接左手，左手双押之后回右手。</summary>
+        /// <summary>
+        /// 记下实际按的（可能被双押、连按检查改过）。多押当成按两个键那只手的外侧手指按的：右手双押之后接左手，左手双押之后回右手；
+        /// 三押、四押里右手也按了，就算右手刚按过。
+        /// </summary>
         public void Pressed(PlannedNote note)
         {
-            var first = note.Lanes.Keys.First();
-            var lane = note.IsChord ? (Lanes.HandOf(first) == 1 ? RightOuter : LeftOuter) : first;
-            last = lane;
+            last = note.IsChord ? (note.PairHand == 1 ? RightOuter : LeftOuter) : note.Lanes.Keys.First();
             lastTime = note.Time;
-            if (Lanes.HandOf(lane) == 1)
+            if (note.Lanes.Keys.Any(lane => Lanes.HandOf(lane) == 1))
             {
                 lastRight = note.Time;
             }
@@ -193,13 +201,17 @@ public static class NotePlanner
         return Blocked(index, time, last, o) ? Lanes.Partner(index) : index;
     }
 
-    /// <summary>把挨得很近的砖合成一个时刻（双押 / 伪双押）。</summary>
-    private static List<List<TileHit>> Moments(IReadOnlyList<TileHit> tiles, double chordWindow)
+    /// <summary>
+    /// 把同时到的砖合成一个时刻（双押、三押、四押，含伪多押）。有转角时看转角：和上一块之间转得很小（≤ ChordAngle）、
+    /// 又挨得近（≤ ChordMaxGap）就是同一下，一块接一块串起来；读不到转角时和这一组第一块相隔不到 ChordWindow 算同一下。
+    /// 连成 5 块以上：4K 只有四个键，是连打不是多押，全部拆开。
+    /// </summary>
+    private static List<List<TileHit>> Moments(IReadOnlyList<TileHit> tiles, FingeringOptions o)
     {
         var moments = new List<List<TileHit>>();
         foreach (var tile in tiles)
         {
-            if (moments.Count > 0 && tile.Time - moments[moments.Count - 1][0].Time < chordWindow)
+            if (moments.Count > 0 && SamePress(moments[moments.Count - 1], tile, o))
             {
                 moments[moments.Count - 1].Add(tile);
             }
@@ -209,8 +221,14 @@ public static class NotePlanner
             }
         }
 
-        return moments;
+        return moments.SelectMany(m => m.Count > Lanes.Count ? m.Select(t => new List<TileHit> { t }) : new[] { m }).ToList();
     }
+
+    /// <summary>tile 和 group 是不是同一下。玩家反馈旧版只看时间，把快速轮指段识别成双押：极快的连打转角正常、只是 BPM 高。</summary>
+    private static bool SamePress(List<TileHit> group, TileHit tile, FingeringOptions o) =>
+        double.IsNaN(tile.Angle)
+            ? tile.Time - group[0].Time < o.ChordWindow
+            : tile.Angle <= o.ChordAngle + AngleTolerance && tile.Time - group[group.Count - 1].Time <= o.ChordMaxGap + Epsilon;
 
     /// <summary>
     /// 用户：双押优先右手（J K）；双押选了另一只手时优先左手（D F）。偏好的手上一下刚按过、来不及时才放另一只手。
@@ -221,18 +239,24 @@ public static class NotePlanner
         return HandBlocked(preferred) && !HandBlocked(1 - preferred) ? 1 - preferred : preferred;
     }
 
-    /// <summary>双押只能是同一只手的两根手指：轨道 0+1 或 2+3，绝不跨手。三块以上同时到的砖也只画成一只手的双押。</summary>
-    private static PlannedNote BuildChord(List<TileHit> moment, int hand)
+    /// <summary>
+    /// 双押只能是同一只手的两根手指：轨道 0+1 或 2+3，绝不跨手。三押（用户：跟着双押用手走）是这只手两个键、
+    /// 另一只手的食指补一个（食指刚按过、会连按才用外侧手指）；四押四个键全按。砖按先后依次落在
+    /// 这只手食指、这只手外侧、另一只手补的键、剩下那个键上，长按跟着各自的砖。
+    /// </summary>
+    private static PlannedNote BuildChord(List<TileHit> moment, int hand, PlannedNote? last, FingeringOptions o)
     {
         var first = moment[0];
         var note = new PlannedNote(first.TileIndex, first.Time) { LastTileIndex = moment[moment.Count - 1].TileIndex };
-        var main = Lanes.IndexLane(hand);
-        var partner = Lanes.Partner(main);
-        note.Lanes[main] = first.HoldSeconds;
-        note.Lanes[partner] = 0;
-        for (var k = 1; k < moment.Count; k++)
+        var index = Lanes.IndexLane(hand);
+        var otherIndex = Lanes.IndexLane(1 - hand);
+        var extra = Blocked(otherIndex, first.Time, last, o) && !Blocked(Lanes.Partner(otherIndex), first.Time, last, o)
+            ? Lanes.Partner(otherIndex)
+            : otherIndex;
+        var order = new[] { index, Lanes.Partner(index), extra, Lanes.Partner(extra) };
+        for (var k = 0; k < moment.Count; k++)
         {
-            note.Lanes[partner] = Math.Max(note.Lanes[partner], moment[k].HoldSeconds);
+            note.Lanes[order[k]] = moment[k].HoldSeconds;
         }
 
         return note;

@@ -5,7 +5,7 @@ using UnityEngine;
 namespace RhythmHint;
 
 /// <summary>
-/// 左侧四轨下落面板：不透明底色、节拍线、橙色单押 / 蓝色双押音符，判定线和按键框。
+/// 左侧四轨下落面板：不透明底色、节拍线、橙色单押 / 蓝色双押 / 紫色三押和四押音符，判定线和按键框。
 /// 音符有两种样式：横条（配方形按键框），或圆形（和顶部太鼓条一样的球，配判定圈，判定点在判定圈圆心）。
 /// </summary>
 internal static class LaneView
@@ -95,7 +95,7 @@ internal static class LaneView
             }
 
             // 判定线处最亮，往上渐渐淡出
-            var color = (kv.Value.Chord ? Painter.Blue : Painter.Orange).WithAlpha(0.45f * a);
+            var color = kv.Value.Color.WithAlpha(0.45f * a);
             var h = 200 * l.Scale;
             Painter.FadeUp(new Rect(l.LaneX(kv.Key), judgeY - h, l.LaneWidth, h), color);
         }
@@ -111,7 +111,7 @@ internal static class LaneView
         var pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 18f));
         foreach (var h in holds)
         {
-            var color = h.Note.IsChord ? Painter.Blue : Painter.Orange;
+            var color = Painter.NoteColor(h.Note);
             var x = l.LaneX(h.Lane);
             var glowH = 200 * l.Scale;
             Painter.FadeUp(new Rect(x, judgeY - glowH, l.LaneWidth, glowH), color.WithAlpha(0.28f + (0.12f * pulse)));
@@ -148,7 +148,7 @@ internal static class LaneView
             }
 
             var y = judgeY - (float)(dt * speed);
-            var color = note.IsChord ? Painter.Blue : Painter.Orange;
+            var color = Painter.NoteColor(note);
             foreach (var kv in note.Lanes)
             {
                 var x = l.LaneX(kv.Key) + inset;
@@ -182,7 +182,7 @@ internal static class LaneView
                 var a = 1f - ((Time.unscaledTime - flash.Time) / FlashSeconds);
                 if (a > 0)
                 {
-                    Painter.Rect(box, (flash.Chord ? Painter.Blue : Painter.Orange).WithAlpha(0.7f * a), 6 * l.Scale);
+                    Painter.Rect(box, flash.Color.WithAlpha(0.7f * a), 6 * l.Scale);
                 }
             }
 
@@ -190,7 +190,7 @@ internal static class LaneView
             if (held >= 0)
             {
                 // 长按没松开前按键框一直亮着
-                Painter.Rect(box, (holds[held].Note.IsChord ? Painter.Blue : Painter.Orange).WithAlpha(0.55f), 6 * l.Scale);
+                Painter.Rect(box, (Painter.NoteColor(holds[held].Note)).WithAlpha(0.55f), 6 * l.Scale);
             }
 
             Painter.Border(box, f.KeysDown[i] || held >= 0 ? Color.white : new Color(0.35f, 0.35f, 0.4f), 2 * l.Scale, 6 * l.Scale);
@@ -215,7 +215,7 @@ internal static class LaneView
         var breath = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * HoldBreath));
         foreach (var h in holds)
         {
-            var color = h.Note.IsChord ? Painter.Blue : Painter.Orange;
+            var color = Painter.NoteColor(h.Note);
             Painter.Glow(new Vector2(l.LaneCenter(h.Lane), hitY), r * 2, color.WithAlpha(0.3f + (0.2f * breath)));
         }
 
@@ -224,7 +224,7 @@ internal static class LaneView
             var a = 1f - ((Time.unscaledTime - kv.Value.Time) / FlashSeconds);
             if (a > 0)
             {
-                var color = kv.Value.Chord ? Painter.Blue : Painter.Orange;
+                var color = kv.Value.Color;
                 Painter.Glow(new Vector2(l.LaneCenter(kv.Key), hitY), r * 2.2f, color.WithAlpha(0.7f * a));
             }
         }
@@ -233,7 +233,7 @@ internal static class LaneView
         {
             var c = new Vector2(l.LaneCenter(i), hitY);
             var flash = f.Flash.TryGetValue(i, out var hit) ? 1f - ((Time.unscaledTime - hit.Time) / FlashSeconds) : 0f;
-            BallSkin.Judge(c, r, rim, f.KeysDown[i], flash, hit.Chord ? Painter.Blue : Painter.Orange);
+            BallSkin.Judge(c, r, rim, f.KeysDown[i], flash, hit.Color);
             if (i < f.KeyLabels.Length)
             {
                 var label = new Rect(c.x - (r * 0.8f), c.y - (r * 0.8f), r * 1.6f, r * 1.6f);
@@ -252,7 +252,7 @@ internal static class LaneView
         var rim = BallRim * l.Scale;
         foreach (var h in holds)
         {
-            var color = h.Note.IsChord ? Painter.Blue : Painter.Orange;
+            var color = Painter.NoteColor(h.Note);
             var x = l.LaneCenter(h.Lane);
             BallSkin.HoldBody(x, hitY, hitY - (float)(h.Remaining * speed), r, color, rim);
             BallSkin.Note(new Vector2(x, hitY), r, Color.Lerp(color, Color.white, 0.3f), rim);
@@ -273,7 +273,7 @@ internal static class LaneView
             }
 
             var y = hitY - (float)(dt * speed);
-            var color = note.IsChord ? Painter.Blue : Painter.Orange;
+            var color = Painter.NoteColor(note);
             foreach (var kv in note.Lanes)
             {
                 var x = l.LaneCenter(kv.Key);

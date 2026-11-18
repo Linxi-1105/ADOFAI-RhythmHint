@@ -54,16 +54,19 @@ public sealed class Settings : UnityModManager.ModSettings
     /// <summary>打开 / 关闭独立设置窗口的按键（Unity 按键名）。</summary>
     public string SettingsHotkey = "F8";
 
-    /// <summary>间隔小于它的两块砖画成一个双押（含伪双押）。</summary>
-    /// <remarks>0.1.0 时叫 ChordWindowMs、默认 20，漏掉了官方关卡约 25 ms 的伪双押；改名让旧设置不再生效。</remarks>
-    public int PseudoChordWindowMs = 35;
+    /// <summary>多押转角上限（度）：相邻两块砖转角不超过它、又挨得近，就合成一个多押（见 FingeringOptions.ChordAngle）。</summary>
+    /// <remarks>
+    /// 1.1.0 之前按时间合并（PseudoChordWindowMs，毫秒；更早叫 ChordWindowMs），分不清多押和极快的连打，
+    /// 旧设置文件里的这两个字段读的时候会被忽略。
+    /// </remarks>
+    public int ChordAngleDeg = 30;
 
     // 1.0.0 起排键改成「时间重置法」，旧设置文件里的 UltraWindowMs、PhraseBreakMs、PatternRoll1243 等字段读的时候会被忽略
 
     /// <summary>主手重置间隔：比它慢右手食指连点，一半到它之间左右食指轮流，一半以内同手轮指。</summary>
     public int ResetWindowMs = 165;
 
-    /// <summary>紧挨着双押、隔得不超过它的单押放另一只手，让按双押的手专心按双押。</summary>
+    /// <summary>紧挨着多押、隔得不超过它的单押放另一只手，让按多押的手专心按多押。</summary>
     public int ChordFocusMs = 450;
 
     /// <summary>同一条轨道连续按两下至少隔这么久。</summary>
@@ -79,8 +82,8 @@ public sealed class Settings : UnityModManager.ModSettings
     public bool LeftHanded;
 
     /// <summary>
-    /// 双押优先另一只手（玩家反馈：双押用手和惯用手分开设置）。存的是相对惯用手的选择：默认跟惯用手，
-    /// 老设置文件读进来不变；换惯用手时双押跟着换边。
+    /// 多押优先另一只手（玩家反馈：双押用手和惯用手分开设置；三押跟着它走）。存的是相对惯用手的选择：默认跟惯用手，
+    /// 老设置文件读进来不变；换惯用手时多押跟着换边。
     /// </summary>
     public bool ChordsOnOtherHand;
 
@@ -88,7 +91,7 @@ public sealed class Settings : UnityModManager.ModSettings
 
     public FingeringOptions ToFingering() => new()
     {
-        ChordWindow = PseudoChordWindowMs / 1000.0,
+        ChordAngle = ChordAngleDeg,
         ResetWindow = ResetWindowMs / 1000.0,
         ChordFocusWindow = ChordFocusMs / 1000.0,
         JackWindow = JackWindowMs / 1000.0,
@@ -100,7 +103,7 @@ public sealed class Settings : UnityModManager.ModSettings
 
     /// <summary>排键相关设置的指纹，变了就要重排。</summary>
     public string FingeringKey =>
-        $"{PseudoChordWindowMs}/{ResetWindowMs}/{ChordFocusMs}/{JackWindowMs}/{UseRoll}{OuterRoll}{LeftHanded}{ChordsOnOtherHand}";
+        $"{ChordAngleDeg}/{ResetWindowMs}/{ChordFocusMs}/{JackWindowMs}/{UseRoll}{OuterRoll}{LeftHanded}{ChordsOnOtherHand}";
 
     // 设置窗口每一页的「恢复本页默认值」：默认值只写在上面的字段初始值里，这里从一个新实例抄回来
 
@@ -131,11 +134,11 @@ public sealed class Settings : UnityModManager.ModSettings
         LightKeysOnPress = d.LightKeysOnPress;
     }
 
-    /// <summary>「排键」页的参数。惯用手和双押用手不动：那是玩家自己的习惯，不是调出来的参数。</summary>
+    /// <summary>「排键」页的参数。惯用手和多押用手不动：那是玩家自己的习惯，不是调出来的参数。</summary>
     public void ResetFingering()
     {
         var d = new Settings();
-        PseudoChordWindowMs = d.PseudoChordWindowMs;
+        ChordAngleDeg = d.ChordAngleDeg;
         ResetWindowMs = d.ResetWindowMs;
         ChordFocusMs = d.ChordFocusMs;
         JackWindowMs = d.JackWindowMs;
