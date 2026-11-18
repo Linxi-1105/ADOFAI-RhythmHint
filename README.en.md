@@ -76,7 +76,7 @@ The interface language can be changed on the Status page: 简体中文, 繁體�
    - You can also unzip it by hand and put the `RhythmHint` folder into `<game folder>\Mods\`
 3. Start the game and press `Ctrl+F10` to check that it is enabled
 
-To update later, just install the new `RhythmHint-<version>.zip`; there's no need to reinstall UMM. When a new version is out, the title bar of the F8 settings window tells you, and you can right-click the mod on the Mods tab of the UMM installer and choose **Update** to update in one click (1.1.0 and earlier don't have this yet).
+To update later, just install the new `RhythmHint-<version>.zip`; there's no need to reinstall UMM. When a new version is out, the title bar of the F8 settings window tells you, and you can right-click the mod on the Mods tab of the UMM installer and choose **Update** to update in one click (1.1.0 and earlier don't have this yet). See the [changelog](CHANGELOG.en.md) for what changed in each version.
 
 To build it yourself, see the [development notes](docs/开发说明.md) (in Chinese).
 
