@@ -132,7 +132,7 @@ internal sealed class DemoPlayer
         }
 
         _builtFor = key;
-        _demo = DemoChart.Build(bpm);
+        _demo = DemoChart.BuildForSettings(bpm, settings.Style);
         var tiles = DemoChart.Repeat(_demo, Loops);
         _tileTimes = tiles.ConvertAll(t => t.Time).ToArray();
         var beats = BeatGrid.Build(new[] { (0.0, _demo.SecondsPerBeat) }, 0, _demo.LoopSeconds * Loops);

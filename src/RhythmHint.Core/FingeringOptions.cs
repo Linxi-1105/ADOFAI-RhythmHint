@@ -1,8 +1,33 @@
 namespace RhythmHint.Core;
 
+/// <summary>排键方式。时间重置法保持默认行为，审核偏好方式是可独立选择的候选规则。</summary>
+public enum FingeringStyle
+{
+    TimeReset,
+    ReviewPreferenceV1,
+}
+
 /// <summary>排键参数（单位：秒）。对所有关卡一视同仁。</summary>
 public sealed class FingeringOptions
 {
+    /// <summary>默认使用时间重置法；审核偏好方式不替换默认排法。</summary>
+    public FingeringStyle Style { get; set; } = FingeringStyle.TimeReset;
+
+    /// <summary>审核偏好短串改为食指交互的最小间隔（秒）。更快的串保留轮指。</summary>
+    public double ReviewShortMinGap { get; set; } = 0.060;
+
+    /// <summary>审核偏好短串交互的最大间隔（秒），同时不超过 ResetWindow / 2。</summary>
+    public double ReviewShortMaxGap { get; set; } = 0.0825;
+
+    /// <summary>可转换的完整短串最少音符数，不对长串切滑动窗口。</summary>
+    public int ReviewShortMinNotes { get; set; } = 4;
+
+    /// <summary>可转换的完整短串最多音符数。</summary>
+    public int ReviewShortMaxNotes { get; set; } = 5;
+
+    /// <summary>短串相邻间隔相对首个间隔的容差（秒）。这些边界是待审核的工程参数。</summary>
+    public double ReviewTimingTolerance { get; set; } = 0.001;
+
     /// <summary>
     /// 读不到转角时（TileHit.Angle 是 NaN）才用：和这一组第一块相隔小于它算同时按。包括伪双押：官方关卡常用两块相隔约 25–31 ms 的砖表示双押。
     /// 只看时间分不清多押和极快的连打（玩家反馈旧版把快速轮指段识别成双押），所以有转角时改看 ChordAngle。

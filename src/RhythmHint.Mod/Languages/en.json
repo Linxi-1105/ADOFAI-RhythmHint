@@ -121,5 +121,16 @@
   "在浏览器中打开": "Open in browser",
   "复制链接": "Copy link",
   "已复制": "Copied",
-  "版本 {0}。仅提供视觉提示，不修改判定；运行日志见 UMM 的 Log.txt。": "Version {0}. Visual hints only; judgment is not changed. Logs are in UMM's Log.txt."
+  "版本 {0}。仅提供视觉提示，不修改判定；运行日志见 UMM 的 Log.txt。": "Version {0}. Visual hints only; judgment is not changed. Logs are in UMM's Log.txt.",
+  "时间重置法": "Time reset",
+  "审核偏好 v1": "Review preference v1",
+  "排法": "Fingering style",
+  "实验排法：恢复后减少让手，中速和短串优先交替；含长按关卡暂用时间重置法。": "Experimental: reduce hand yielding after recovery and prefer alternating hands for medium-speed and short runs. Levels with holds use time reset for now.",
+  "审核偏好的有效让手范围不超过主手重置间隔；0 为不换手。": "Review preference limits yielding to the dominant-hand reset interval; 0 disables yielding.",
+  "短串实验参数": "Short-run trial parameters",
+  "短串最小间隔（毫秒）": "Short-run minimum gap (ms)",
+  "短串最大间隔（毫秒）": "Short-run maximum gap (ms)",
+  "短串最少音符数": "Short-run minimum notes",
+  "短串最多音符数": "Short-run maximum notes",
+  "等间隔容差（毫秒）": "Even-spacing tolerance (ms)"
 }

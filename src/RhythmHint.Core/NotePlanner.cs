@@ -42,11 +42,19 @@ public static class NotePlanner
     /// <param name="tiles">需要按键的砖块，按时间排好。</param>
     public static List<PlannedNote> Plan(IReadOnlyList<TileHit> tiles, FingeringOptions options)
     {
+        if (options.Style == FingeringStyle.ReviewPreferenceV1)
+        {
+            ValidateReviewOptions(options);
+        }
+
         var moments = Moments(tiles, options);
         var notes = new List<PlannedNote>(moments.Count);
         var rolled = new List<bool>(moments.Count);
         var hands = new HandState();
-        var focus = FocusChords(moments, options);
+        // The feedback contains no holds. Preserve the complete time-reset plan
+        // for a chart with holds until that interaction has been reviewed.
+        var reviewPreference = options.Style == FingeringStyle.ReviewPreferenceV1 && !tiles.Any(hit => hit.HoldSeconds > 0);
+        var focus = FocusChords(moments, options, reviewPreference);
         var preferredChordHand = options.ChordsOnOtherHand ? 0 : 1;
         // 后面的双押还没排，先按偏好的手算：紧挨着它的单押要让给另一只手的食指
         var yieldIndex = Lanes.IndexLane(1 - preferredChordHand);
@@ -99,7 +107,29 @@ public static class NotePlanner
             OuterFirst(notes, rolled, options);
         }
 
+        if (reviewPreference)
+        {
+            ReviewPhrases(notes, options);
+        }
+
         return options.LeftHanded ? notes.ConvertAll(Mirror) : notes;
+    }
+
+    private static void ValidateReviewOptions(FingeringOptions o)
+    {
+        void Nonnegative(double value, string name)
+        {
+            if (double.IsNaN(value) || double.IsInfinity(value) || value < 0)
+                throw new ArgumentOutOfRangeException(name, "审核偏好参数必须是有限非负数。");
+        }
+
+        Nonnegative(o.ReviewShortMinGap, nameof(o.ReviewShortMinGap));
+        Nonnegative(o.ReviewShortMaxGap, nameof(o.ReviewShortMaxGap));
+        Nonnegative(o.ReviewTimingTolerance, nameof(o.ReviewTimingTolerance));
+        if (o.ReviewShortMinGap > o.ReviewShortMaxGap)
+            throw new ArgumentException("审核偏好短串最小间隔不能大于最大间隔。");
+        if (o.ReviewShortMinNotes < 2 || o.ReviewShortMinNotes > o.ReviewShortMaxNotes)
+            throw new ArgumentException("审核偏好短串至少需要两个音符，最小值不能大于最大值。");
     }
 
     /// <summary>左右镜像（D↔K、F↔J）：左撇子的排法就是右手为主时的镜像，规则只写一份，两边始终一致。</summary>
@@ -166,10 +196,12 @@ public static class NotePlanner
     /// 而且隔得不超过 ChordFocusWindow 的单押才让；前后都是双押时看离得近的，一样近看后面的。
     /// 中间的单押照常排，不整串压在一只手上 F D 轮流（用户：不要有 21 式、从内向外的楼梯）。
     /// </summary>
-    private static int[] FocusChords(List<List<TileHit>> moments, FingeringOptions o)
+    private static int[] FocusChords(List<List<TileHit>> moments, FingeringOptions o, bool reviewPreference)
     {
         var n = moments.Count;
         var focus = new int[n];
+        // Reuse the configured recovery interval, not a hidden learned threshold.
+        var focusWindow = reviewPreference ? Math.Min(o.ChordFocusWindow, o.ResetWindow) : o.ChordFocusWindow;
         for (var i = 0; i < n; i++)
         {
             focus[i] = -1;
@@ -181,17 +213,112 @@ public static class NotePlanner
             var time = moments[i][0].Time;
             var before = i > 0 && moments[i - 1].Count > 1 ? time - moments[i - 1][0].Time : double.PositiveInfinity;
             var after = i + 1 < n && moments[i + 1].Count > 1 ? moments[i + 1][0].Time - time : double.PositiveInfinity;
-            if (after <= o.ChordFocusWindow + Epsilon && after <= before + Epsilon)
+            if (after <= focusWindow + Epsilon && after <= before + Epsilon)
             {
                 focus[i] = i + 1;
             }
-            else if (before <= o.ChordFocusWindow + Epsilon)
+            else if (before <= focusWindow + Epsilon)
             {
                 focus[i] = i - 1;
             }
         }
 
         return focus;
+    }
+
+    /// <summary>
+    /// 审核偏好：按完整单押片段选择交互相位。中速用两食指，符合可配置边界的短轮指段才尝试改成交互。
+    /// 多押保持上游的分组和用手；片段两端以所有实际轨道检查连击，不能把三押只当作一只手。
+    /// </summary>
+    private static void ReviewPhrases(List<PlannedNote> notes, FingeringOptions o)
+    {
+        for (var start = 0; start < notes.Count;)
+        {
+            if (notes[start].IsChord)
+            {
+                start++;
+                continue;
+            }
+
+            var end = start;
+            while (end + 1 < notes.Count && !notes[end + 1].IsChord
+                && notes[end + 1].Time - notes[end].Time <= o.ResetWindow + Epsilon)
+            {
+                end++;
+            }
+
+            var length = end - start + 1;
+            if (length >= 2)
+            {
+                var medium = true;
+                var shortRoll = o.UseRoll && o.OuterRoll
+                    && length >= o.ReviewShortMinNotes && length <= o.ReviewShortMaxNotes;
+                var firstGap = notes[start + 1].Time - notes[start].Time;
+                for (var i = start + 1; i <= end; i++)
+                {
+                    var gap = notes[i].Time - notes[i - 1].Time;
+                    medium &= gap > (o.ResetWindow / 2) + Epsilon;
+                    shortRoll &= gap >= o.ReviewShortMinGap - Epsilon
+                        && gap <= Math.Min(o.ReviewShortMaxGap, o.ResetWindow / 2) + Epsilon
+                        && Math.Abs(gap - firstGap) <= o.ReviewTimingTolerance + Epsilon;
+                }
+
+                if (medium || shortRoll)
+                {
+                    var preferred = RightIndex;
+                    if (start > 0 && notes[start - 1].IsChord
+                        && notes[start].Time - notes[start - 1].Time <= Math.Min(o.ChordFocusWindow, o.ResetWindow) + Epsilon)
+                    {
+                        // PairHand follows ChordsOnOtherHand and the two-key hand of
+                        // a triple. The following checks still inspect its complete lane set.
+                        preferred = Lanes.IndexLane(1 - notes[start - 1].PairHand);
+                    }
+
+                    var firstLane = ReviewPhaseFits(notes, start, end, preferred, o) ? preferred
+                        : ReviewPhaseFits(notes, start, end, OtherIndex(preferred), o) ? OtherIndex(preferred) : -1;
+                    if (firstLane >= 0)
+                    {
+                        for (var i = start; i <= end; i++)
+                        {
+                            notes[i] = WithLane(notes[i], (i - start) % 2 == 0 ? firstLane : OtherIndex(firstLane));
+                        }
+                    }
+                }
+            }
+
+            start = end + 1;
+        }
+    }
+
+    private static int OtherIndex(int lane) => lane == RightIndex ? LeftIndex : RightIndex;
+
+    private static bool ReviewPhaseFits(List<PlannedNote> notes, int start, int end, int firstLane, FingeringOptions o)
+    {
+        var lastLane = (end - start) % 2 == 0 ? firstLane : OtherIndex(firstLane);
+        if (start > 0 && !ReviewBoundaryFits(notes[start - 1], notes[start].Time, firstLane, true, o))
+        {
+            return false;
+        }
+
+        return end + 1 >= notes.Count || ReviewBoundaryFits(notes[end + 1], notes[end].Time, lastLane, false, o);
+    }
+
+    private static bool ReviewBoundaryFits(PlannedNote neighbour, double time, int lane, bool neighbourBefore, FingeringOptions o)
+    {
+        if (Jacks(neighbour, lane, time, o))
+        {
+            return false;
+        }
+
+        if (!o.UseRoll || !o.OuterRoll || neighbour.IsChord || Math.Abs(neighbour.Time - time) > o.ResetWindow + Epsilon)
+        {
+            return true;
+        }
+
+        var other = neighbour.Lanes.Keys.First();
+        var from = neighbourBefore ? other : lane;
+        var to = neighbourBefore ? lane : other;
+        return !((from == LeftIndex && to == LeftOuter) || (from == RightIndex && to == RightOuter));
     }
 
     /// <summary>让手的单押按这只手的食指；食指刚按过（会连按）才用外侧手指。</summary>

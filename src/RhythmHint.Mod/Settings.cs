@@ -1,3 +1,4 @@
+using System;
 using RhythmHint.Core;
 using UnityModManagerNet;
 
@@ -6,6 +7,8 @@ namespace RhythmHint;
 /// <summary>保存在 Mods\RhythmHint\Settings.xml。字段必须是 public 才会被 UMM 存下来。</summary>
 public sealed class Settings : UnityModManager.ModSettings
 {
+    private static readonly FingeringOptions ReviewDefaults = new();
+
     /// <summary>设置页打开时播放演示。</summary>
     public bool ShowPreview = true;
 
@@ -84,6 +87,16 @@ public sealed class Settings : UnityModManager.ModSettings
     /// <summary>轮指时外侧手指先落（K J D F）；关掉是食指先落（J K F D）。</summary>
     public bool OuterRoll = true;
 
+    /// <summary>排法。未配置时继续使用原时间重置法；旧实验开关不迁移成默认启用。</summary>
+    public FingeringStyle Style = FingeringStyle.TimeReset;
+
+    /// <summary>审核偏好短串的实验参数（毫秒、音符数），仅审核偏好排法使用。</summary>
+    public int ReviewShortMinGapMs = (int)Math.Round(ReviewDefaults.ReviewShortMinGap * 1000);
+    public float ReviewShortMaxGapMs = (float)(ReviewDefaults.ReviewShortMaxGap * 1000);
+    public int ReviewShortMinNotes = ReviewDefaults.ReviewShortMinNotes;
+    public int ReviewShortMaxNotes = ReviewDefaults.ReviewShortMaxNotes;
+    public float ReviewTimingToleranceMs = (float)(ReviewDefaults.ReviewTimingTolerance * 1000);
+
     /// <summary>左撇子：以左手为主手，整套排法左右镜像（D↔K、F↔J）。</summary>
     public bool LeftHanded;
 
@@ -103,13 +116,20 @@ public sealed class Settings : UnityModManager.ModSettings
         JackWindow = JackWindowMs / 1000.0,
         UseRoll = UseRoll,
         OuterRoll = OuterRoll,
+        Style = Style,
+        ReviewShortMinGap = ReviewShortMinGapMs / 1000.0,
+        ReviewShortMaxGap = ReviewShortMaxGapMs / 1000.0,
+        ReviewShortMinNotes = ReviewShortMinNotes,
+        ReviewShortMaxNotes = ReviewShortMaxNotes,
+        ReviewTimingTolerance = ReviewTimingToleranceMs / 1000.0,
         LeftHanded = LeftHanded,
         ChordsOnOtherHand = ChordsOnOtherHand,
     };
 
     /// <summary>排键相关设置的指纹，变了就要重排。</summary>
     public string FingeringKey =>
-        $"{ChordAngleDeg}/{ResetWindowMs}/{ChordFocusMs}/{JackWindowMs}/{UseRoll}{OuterRoll}{LeftHanded}{ChordsOnOtherHand}";
+        $"{ChordAngleDeg}/{ResetWindowMs}/{ChordFocusMs}/{JackWindowMs}/{UseRoll}{OuterRoll}{LeftHanded}{ChordsOnOtherHand}"
+        + $"/{Style}/{ReviewShortMinGapMs}/{ReviewShortMaxGapMs}/{ReviewShortMinNotes}/{ReviewShortMaxNotes}/{ReviewTimingToleranceMs}";
 
     // 设置窗口每一页的「恢复本页默认值」：默认值只写在上面的字段初始值里，这里从一个新实例抄回来
 
@@ -150,6 +170,12 @@ public sealed class Settings : UnityModManager.ModSettings
         JackWindowMs = d.JackWindowMs;
         UseRoll = d.UseRoll;
         OuterRoll = d.OuterRoll;
+        Style = d.Style;
+        ReviewShortMinGapMs = d.ReviewShortMinGapMs;
+        ReviewShortMaxGapMs = d.ReviewShortMaxGapMs;
+        ReviewShortMinNotes = d.ReviewShortMinNotes;
+        ReviewShortMaxNotes = d.ReviewShortMaxNotes;
+        ReviewTimingToleranceMs = d.ReviewTimingToleranceMs;
     }
 
     /// <summary>「状态」页：打开设置窗口的快捷键。</summary>

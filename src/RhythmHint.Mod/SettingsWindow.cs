@@ -231,6 +231,15 @@ internal sealed class SettingsWindow
     private static void LayoutTab(Settings s, Overlay overlay)
     {
         WindowSkin.SectionTitle(Lang.T("排键规则"));
+        var resetStyle = Lang.T("时间重置法");
+        var reviewStyle = Lang.T("审核偏好 v1");
+        s.Style = WindowSkin.Choice(Lang.T("排法"), s.Style == FingeringStyle.ReviewPreferenceV1 ? reviewStyle : resetStyle,
+            new[] { resetStyle, reviewStyle }) == reviewStyle ? FingeringStyle.ReviewPreferenceV1 : FingeringStyle.TimeReset;
+        if (s.Style == FingeringStyle.ReviewPreferenceV1)
+        {
+            WindowSkin.Hint(Lang.T("实验排法：恢复后减少让手，中速和短串优先交替；含长按关卡暂用时间重置法。"));
+        }
+
         var (right, left) = (Lang.T("右手"), Lang.T("左手"));
         s.LeftHanded = Choice(Lang.T("惯用手"), s.LeftHanded, right, left);
         s.ChordsOnOtherHand = Choice(Lang.T("多押用手"), s.ChordsOnOtherHand, Lang.T("同惯用手"), Lang.T("另一只手"));
@@ -246,12 +255,24 @@ internal sealed class SettingsWindow
         s.ResetWindowMs = WindowSkin.Slider(Lang.T("主手重置间隔（毫秒）"), s.ResetWindowMs, 100, 300, 5);
         WindowSkin.Hint(Lang.T("间隔更长时{0}食指单点；当前相当于 {1} BPM 的直线。", main, StraightBpm(s.ResetWindowMs)));
         s.ChordFocusMs = WindowSkin.Slider(Lang.T("多押换手范围（毫秒）"), s.ChordFocusMs, 0, 800, 10);
-        WindowSkin.Hint(Lang.T("与多押相隔在此范围内的单押改用另一只手；0 为不换手。"));
+        WindowSkin.Hint(s.Style == FingeringStyle.ReviewPreferenceV1
+            ? Lang.T("审核偏好的有效让手范围不超过主手重置间隔；0 为不换手。")
+            : Lang.T("与多押相隔在此范围内的单押改用另一只手；0 为不换手。"));
 
         WindowSkin.SectionTitle(Lang.T("轮指"));
         s.UseRoll = WindowSkin.Switch(Lang.T("极快时同手轮指"), s.UseRoll);
         s.OuterRoll = WindowSkin.Switch(Lang.T("外侧手指先按"), s.OuterRoll);
         WindowSkin.Hint(s.UseRoll ? Lang.T("开启为 {0}，关闭为 {1}。", outerRoll, innerRoll) : Lang.T("轮指关闭时只用 F、J。"));
+
+        if (s.Style == FingeringStyle.ReviewPreferenceV1)
+        {
+            WindowSkin.SectionTitle(Lang.T("短串实验参数"));
+            s.ReviewShortMinGapMs = WindowSkin.Slider(Lang.T("短串最小间隔（毫秒）"), s.ReviewShortMinGapMs, 35, 150, 1);
+            s.ReviewShortMaxGapMs = WindowSkin.Slider(Lang.T("短串最大间隔（毫秒）"), s.ReviewShortMaxGapMs, s.ReviewShortMinGapMs, 165f, "0.0", 0.5f);
+            s.ReviewShortMinNotes = WindowSkin.Slider(Lang.T("短串最少音符数"), s.ReviewShortMinNotes, 2, 8, 1);
+            s.ReviewShortMaxNotes = WindowSkin.Slider(Lang.T("短串最多音符数"), s.ReviewShortMaxNotes, s.ReviewShortMinNotes, 16, 1);
+            s.ReviewTimingToleranceMs = WindowSkin.Slider(Lang.T("等间隔容差（毫秒）"), s.ReviewTimingToleranceMs, 0f, 10f, "0.0", 0.5f);
+        }
 
         WindowSkin.SectionTitle(Lang.T("其他参数"));
         s.JackWindowMs = WindowSkin.Slider(Lang.T("同键连按最小间隔（毫秒）"), s.JackWindowMs, 50, 300, 5);

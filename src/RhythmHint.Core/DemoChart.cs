@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace RhythmHint.Core;
@@ -20,7 +21,13 @@ public sealed class DemoChart
 
     public IReadOnlyList<TileHit> Tiles { get; }
 
-    public static DemoChart Build(double bpm)
+    public static DemoChart Build(double bpm) => Build(bpm, forSettings: false, holdLastNote: true);
+
+    /// <summary>同一段短串用来对比两种排法。审核偏好演示去掉长按，以免整段回退到时间重置法。</summary>
+    public static DemoChart BuildForSettings(double bpm, FingeringStyle style) =>
+        Build(bpm, forSettings: true, holdLastNote: style != FingeringStyle.ReviewPreferenceV1);
+
+    private static DemoChart Build(double bpm, bool forSettings, bool holdLastNote)
     {
         var spb = 60.0 / bpm;
         var tiles = new List<TileHit>();
@@ -60,10 +67,22 @@ public sealed class DemoChart
             Add(6 + (i * 0.5));
         }
 
-        // 第 8–9 拍：附点节奏
-        foreach (var b in new[] { 8, 8.75, 9.5 })
+        if (forSettings)
         {
-            Add(b);
+            // 预留第 8–9 拍给短串：160 BPM 时每步约 66.7 ms。压缩快歌里的间隔，避免碰上下一个双押。
+            var gap = Math.Min(1.0 / 15, spb / 3);
+            for (var i = 0; i < 4; i++)
+            {
+                At((8.5 * spb) + (i * gap));
+            }
+        }
+        else
+        {
+            // 第 8–9 拍：附点节奏
+            foreach (var b in new[] { 8, 8.75, 9.5 })
+            {
+                Add(b);
+            }
         }
 
         // 第 10–11 拍：每半拍一个双押（右手）
@@ -81,8 +100,8 @@ public sealed class DemoChart
         // 第 14.5 拍：三押（紫色）。和前面的 1/8 拍连打隔开大半拍，免得小转角的连打和它串成一长串
         Chord(14.5, keys: 3);
 
-        // 第 15 拍起长按大半拍（回到右手）
-        Add(15, holdBeats: 0.75);
+        // 第 15 拍起长按大半拍（审核偏好演示用同一时刻的单押）。
+        Add(15, holdBeats: holdLastNote ? 0.75 : 0);
         return new DemoChart(spb, tiles);
     }
 
