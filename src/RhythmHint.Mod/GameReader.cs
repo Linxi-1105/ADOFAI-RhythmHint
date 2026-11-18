@@ -24,28 +24,33 @@ internal readonly struct LevelState
     /// <summary>砖块列表是从哪里读的（诊断用）。</summary>
     public Message FloorSource { get; }
 
+    /// <summary>
+    /// 游戏状态，直接读状态机（StateEngine.GetState）。scrController.currentState 是它的 Update 里抄过来的，
+    /// 关卡编辑器里不更新（1.2.0 实测：编辑器里播放、死亡后都还是 None，死后音符照走）；状态机还没初始化时退回 currentState。
+    /// </summary>
+    public States State => Controller.stateMachine.GetState() is States state ? state : Controller.currentState;
+
     /// <summary>玩家失败（死亡）后的状态。</summary>
-    public bool Failed => Controller.currentState is States.Fail or States.Fail2;
+    public bool Failed => State is States.Fail or States.Fail2;
 
     /// <summary>通关。</summary>
-    public bool Won => Controller.currentState is States.Won;
+    public bool Won => State is States.Won;
 
     /// <summary>
-    /// 关卡编辑器里在试玩或自动播放（暂停在播放中也算）。
-    /// 编辑器走自己的启动流程，实测自动播放时 currentState 一直停在 Start，所以编辑器里以 playMode 为准。
+    /// 关卡编辑器里在试玩或自动播放（暂停在播放中也算）。编辑器走自己的启动流程，所以编辑器里以 playMode 为准。
     /// </summary>
     public bool EditorPlaying => ADOBase.isLevelEditor && ADOBase.editor.playMode;
 
     /// <summary>倒计时、检查点、游玩中、失败、通关时有画面可画；编辑器里只在播放模式时画；选关不画。</summary>
     public bool ShouldDraw => ADOBase.isLevelEditor
         ? EditorPlaying
-        : Controller.currentState is States.Countdown or States.Checkpoint
+        : State is States.Countdown or States.Checkpoint
             or States.PlayerControl or States.Fail or States.Fail2 or States.Won;
 
     /// <summary>游戏状态（英文状态名不翻译），编辑器里再写明是播放中还是编辑中。</summary>
     public Message StateName => ADOBase.isLevelEditor
-        ? Lang.M("{0}，编辑器{1}", Controller.currentState, EditorPlaying ? Lang.M("播放中") : Lang.M("编辑中"))
-        : new Message(Controller.currentState.ToString());
+        ? Lang.M("{0}，编辑器{1}", State, EditorPlaying ? Lang.M("播放中") : Lang.M("编辑中"))
+        : new Message(State.ToString());
 }
 
 /// <summary>读 ADOFAI 的游戏对象。接口来自反编译 Assembly-CSharp（游戏 Unity 6000.3），游戏大更新后可能要改。</summary>

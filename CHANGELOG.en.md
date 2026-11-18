@@ -7,6 +7,7 @@ What changed in each version, newest first.
 ## Unreleased
 
 - Fixed: with Fit game view beside panel on, only the top edge of the autoplay button in the editor's bottom-right corner could be clicked during playback
+- Fixed: in the level editor, notes on the lanes and the taiko bar kept moving after you died
 
 ## 1.2.0 · 2026-11-17
 

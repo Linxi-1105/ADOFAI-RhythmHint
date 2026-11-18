@@ -28,8 +28,7 @@ internal sealed class Overlay : MonoBehaviour
     private bool _rebuildRequested;
     private bool _demoShowing;
     private bool _uiFollowing;
-    private bool _editorWasPlaying;
-    private States _editorBaseline = States.None;
+    private readonly PlayStateTracker<States> _editorPlay = new();
     private string _builtFingering = string.Empty;
     private bool _failed;
     private float _previewUntil;
@@ -141,7 +140,7 @@ internal sealed class Overlay : MonoBehaviour
         if (!inLevel)
         {
             _fingerprint = null;
-            _editorWasPlaying = false;
+            _editorPlay.Reset();
         }
 
         var preview = !levelShown && settings.ShowPreview && Time.unscaledTime < _previewUntil;
@@ -180,16 +179,9 @@ internal sealed class Overlay : MonoBehaviour
     /// <returns>这一帧关卡是否应该显示；不显示时 reason 写明原因。</returns>
     private bool TickLevel(LevelState level, Settings settings, out Message reason)
     {
-        // 编辑器每次开始播放时记下当时的游戏状态：编辑器不会清掉上一次留下的「通关 / 失败」，
-        // 只有这次播放中状态真的变了才算通关或死亡（否则第二次播放一开始就被当成「本关结束」）
-        var editorPlaying = level.EditorPlaying;
-        if (editorPlaying && !_editorWasPlaying)
-        {
-            _editorBaseline = level.Controller.currentState;
-        }
-
-        _editorWasPlaying = editorPlaying;
-        var stale = ADOBase.isLevelEditor && level.Controller.currentState == _editorBaseline;
+        // 编辑器不会清掉上一次留下的「通关 / 失败」：这次播放中状态变过以后才算通关或死亡（见 PlayStateTracker）
+        var fresh = _editorPlay.Update(level.EditorPlaying, level.State);
+        var stale = ADOBase.isLevelEditor && !fresh;
         var won = level.Won && !stale;
         var failed = level.Failed && !stale;
 
