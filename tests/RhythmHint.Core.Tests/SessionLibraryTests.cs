@@ -163,6 +163,46 @@ public class SessionLibraryTests : IDisposable
         Assert.Single(SessionLibrary.Read(_folder));
     }
 
+    private const string IndexPrefix = "window.RHYTHMHINT_RECENT = ";
+
+    /// <summary>
+    /// 列表里某一项的字段类型不对（数组、对象）。复现（2026-11-19 评审）：Newtonsoft 强转时抛 ArgumentException，没接住，
+    /// 每次「编辑本关手序」都抛、设置窗口被关掉、编辑器一直打不开。现在坏的那项跳过，别的照常；
+    /// 这一次不删文件（认不出坏的那项用着哪些文件，宁可留着），下一次列表读得懂了再整理。
+    /// </summary>
+    [Fact]
+    public void ABrokenEntryIsSkippedAndTheRestStillWork()
+    {
+        var a = Export(Level("A"), T0);
+        var b = Export(Level("B", beat: 0.25), T0.AddMinutes(1));
+        var c = Export(Level("C", beat: 0.3), T0.AddMinutes(2));
+        var index = Path.Combine(Recent, "index.js");
+        var json = JObject.Parse(File.ReadAllText(index).Substring(IndexPrefix.Length).TrimEnd('\n', ';'));
+        var items = (JArray)json["items"]!;
+        items.Single(i => (string?)i["id"] == b.Id)["song"] = new JArray("B");
+        items.Add(new JObject { ["id"] = a.Id, ["session"] = a.Id + ".js", ["notes"] = new JObject { ["x"] = 1 }, ["exported"] = 5 });
+        File.WriteAllText(index, IndexPrefix + json.ToString(Newtonsoft.Json.Formatting.None) + ";\n");
+
+        Assert.Equal(new[] { c.Id, a.Id }, SessionLibrary.Read(_folder).Select(i => i.Id));
+
+        var d = Export(Level("D", beat: 0.35), T0.AddMinutes(3));
+        Assert.Equal(new[] { d.Id, c.Id, a.Id }, SessionLibrary.Read(_folder).Select(i => i.Id));
+        Assert.True(File.Exists(Path.Combine(Recent, b.Id + ".js")));
+
+        Export(Level("E", beat: 0.4), T0.AddMinutes(4));
+        Assert.False(File.Exists(Path.Combine(Recent, b.Id + ".js"))); // 列表又读得懂了：不在列表里的整理掉
+        Assert.Equal(4, SessionLibrary.Read(_folder).Count);
+    }
+
+    /// <summary>曲名恰好写成日期时间的样子，读回来还是原样（原来被 Newtonsoft 自动转成日期，再写成本机格式的日期）。</summary>
+    [Fact]
+    public void TextThatLooksLikeADateStaysAsWritten()
+    {
+        Export(Level("2026-11-18T09:00:00Z"), T0);
+
+        Assert.Equal("2026-11-18T09:00:00Z", Assert.Single(SessionLibrary.Read(_folder)).Song);
+    }
+
     [Fact]
     public void EntriesPointingOutsideTheFolderAreIgnored()
     {
@@ -186,8 +226,8 @@ public class SessionLibraryTests : IDisposable
 /// </summary>
 public class ShellLinkTests
 {
-    private const string Page = @"D:\!XM的项目\A Dance of Fire and Ice\Mods\RhythmHint\Editor\index.html";
-    private const string Icon = @"D:\!XM的项目\A Dance of Fire and Ice\Mods\RhythmHint\Editor\icon.ico";
+    private const string Page = @"D:\!测试\游戏\A Dance of Fire and Ice\Mods\RhythmHint\Editor\index.html";
+    private const string Icon = @"D:\!测试\游戏\A Dance of Fire and Ice\Mods\RhythmHint\Editor\icon.ico";
 
     [Fact]
     public void HeaderSaysItIsAShortcutWithTargetNameFolderAndIcon()
@@ -206,7 +246,7 @@ public class ShellLinkTests
         var lnk = ShellLink.Build(Page, Path.GetDirectoryName(Page)!, Icon, "RhythmHint");
 
         // 盘符项目 25 字节，后面的名字不一定在偶数位置上，按字节找
-        foreach (var part in new[] { "!XM的项目", "A Dance of Fire and Ice", "Mods", "RhythmHint", "Editor", "index.html" })
+        foreach (var part in new[] { "!测试", "游戏", "A Dance of Fire and Ice", "Mods", "RhythmHint", "Editor", "index.html" })
         {
             Assert.True(Has(lnk, part + "\0"), part); // 外壳项目里的名字（带结尾的 0）
         }

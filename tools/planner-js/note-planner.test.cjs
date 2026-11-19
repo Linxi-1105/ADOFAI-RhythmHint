@@ -21,6 +21,36 @@ test('C# uniform-speed state-machine examples and exact thresholds', () => {
   assert.deepEqual(lanesOf(P.plan(run(.04), { UseRoll: false })), Array.from({ length: 12 }, (_, i) => [i % 2 ? 1 : 2]));
 });
 
+// R = 130 ms 时两条分界（0.13、0.065 秒）两侧各差 2 微秒（两边都按 1e-6 的容差比），期望值是 C# NotePlanner 排出来的，两种排法一样。
+// 均匀连打在 0.13 秒两侧都是两只手食指轮流：同一个键 150 ms 以内不连按（JackWindow），单指要到 0.15 秒以上；
+// 所以 0.13 秒的分界用前后有轮指、停顿的短串看。原来的核对里间隔还是按 R = 165 ms 选的（0.165、0.0825）
+test('R = 130 ms boundaries match the C# planner on both sides', () => {
+  const fromGaps = gaps => {
+    let time = 1; const hits = [{ tileIndex: 1, time, holdSeconds: 0 }];
+    for (const gap of gaps) { time += gap; hits.push({ tileIndex: hits.length + 1, time, holdSeconds: 0 }); }
+    return hits;
+  };
+  const alternate = Array.from({ length: 12 }, (_, i) => [i % 2 ? 1 : 2]), roll = Array.from({ length: 12 }, (_, i) => [[3, 2, 0, 1][i % 4]]);
+  const cases = [
+    [run(.13 - 2e-6), alternate], [run(.13 + 2e-6), alternate], [run(.065 - 2e-6), roll], [run(.065 + 2e-6), alternate],
+    [fromGaps([.2, .05, .13 - 2e-6, .3]), [[2], [3], [2], [1], [2]]],
+    [fromGaps([.2, .05, .13 + 2e-6, .3]), [[2], [2], [1], [2], [2]]],
+    [fromGaps([.1, .1, .05, .13 - 2e-6, .3]), [[2], [1], [3], [2], [1], [2]]],
+    [fromGaps([.1, .1, .05, .13 + 2e-6, .3]), [[2], [1], [2], [1], [2], [2]]],
+    [fromGaps([.05, .1, .065 - 2e-6, .3]), [[3], [2], [0], [1], [2]]],
+    [fromGaps([.05, .1, .065 + 2e-6, .3]), [[3], [2], [1], [2], [2]]],
+    [fromGaps([.1, .1, .065 - 2e-6, .3]), [[2], [1], [3], [2], [2]]],
+    [fromGaps([.1, .1, .065 + 2e-6, .3]), [[2], [1], [2], [1], [2]]],
+    [fromGaps([.2, .1, .065 - 2e-6, .3]), [[2], [2], [0], [1], [2]]],
+    [fromGaps([.2, .1, .065 + 2e-6, .3]), [[2], [2], [1], [2], [2]]],
+  ];
+  for (const Style of ['TimeReset', 'ReviewPreferenceV1']) {
+    for (const [hits, expected] of cases) {
+      assert.deepEqual(lanesOf(P.plan(hits, { Style })), expected, `${Style} ${hits.map(h => h.time).join(' ')}`);
+    }
+  }
+});
+
 test('pseudo chords compare against the first tile, not the preceding tile', () => {
   const hits = [0, .025, .05].map((time, i) => ({ tileIndex: i + 1, time, holdSeconds: 0 }));
   const notes = P.plan(hits);

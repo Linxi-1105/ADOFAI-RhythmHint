@@ -182,7 +182,10 @@ public static class SessionLibrary
         })),
     };
 
-    /// <returns>列表文件不存在或读得出来为 true；读不出来为 false（items 为空）。</returns>
+    /// <returns>
+    /// 列表文件不存在、或每一项都读得懂为 true；整个读不出来为 false（items 为空）；
+    /// 有的项读不懂也为 false，items 里是读得懂的那些（Save 这时不整理文件：认不出读不懂的那项用着哪些文件）。
+    /// </returns>
     private static bool TryRead(string folder, out List<RecentSession> items)
     {
         items = new List<RecentSession>();
@@ -192,6 +195,7 @@ public static class SessionLibrary
             return true;
         }
 
+        JArray list;
         try
         {
             var text = File.ReadAllText(path, Utf8).Trim();
@@ -200,15 +204,33 @@ public static class SessionLibrary
                 return false;
             }
 
-            var json = JObject.Parse(text.Substring(IndexPrefix.Length).TrimEnd(';'));
-            if ((string?)json["format"] != IndexFormat || json["items"] is not JArray list)
+            // 不把像日期的文字自动转成日期（曲名恰好写成日期时间时原来被改写成本机格式的日期）
+            using var reader = new JsonTextReader(new StringReader(text.Substring(IndexPrefix.Length).TrimEnd(';'))) { DateParseHandling = DateParseHandling.None };
+            var json = JObject.Load(reader);
+            while (reader.Read())
+            {
+                // 和 JObject.Parse 一样：后面除了注释还有别的内容，读的时候抛 JsonReaderException
+            }
+
+            if (json["format"]?.Type != JTokenType.String || (string?)json["format"] != IndexFormat || json["items"] is not JArray array)
             {
                 return false;
             }
 
-            foreach (var token in list.OfType<JObject>())
+            list = array;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        var complete = true;
+        foreach (var token in list.OfType<JObject>())
+        {
+            RecentSession item;
+            try
             {
-                var item = new RecentSession
+                item = new RecentSession
                 {
                     Id = (string?)token["id"] ?? string.Empty,
                     Song = (string?)token["song"] ?? string.Empty,
@@ -220,23 +242,25 @@ public static class SessionLibrary
                     FileName = (string?)token["fileName"] ?? string.Empty,
                     Exported = (long?)token["exported"] ?? 0,
                 };
-
-                // 只认自己写的样子：文件名都由 Id 拼出来，不会指到 recent 目录外面
-                if (IdPattern.IsMatch(item.Id) && item.Session == item.Id + ".js"
-                    && (item.Audio.Length == 0 || (item.Audio.StartsWith(item.Id + "-", StringComparison.Ordinal) && item.Audio.IndexOfAny(new[] { '/', '\\' }) < 0)))
-                {
-                    items.Add(item);
-                }
+            }
+            catch (Exception ex) when (ex is ArgumentException or FormatException or InvalidCastException or OverflowException)
+            {
+                // 这一项的字段类型不对（Newtonsoft 强转数组、对象时抛 ArgumentException，不是数字的文字抛 FormatException……）：
+                // 跳过这一项，别的照常。复现（2026-11-19 评审）：原来没接住 ArgumentException，每次「编辑本关手序」都抛、编辑器打不开
+                complete = false;
+                continue;
             }
 
-            items.Sort((a, b) => b.Exported.CompareTo(a.Exported));
-            return true;
+            // 只认自己写的样子：文件名都由 Id 拼出来，不会指到 recent 目录外面
+            if (IdPattern.IsMatch(item.Id) && item.Session == item.Id + ".js"
+                && (item.Audio.Length == 0 || (item.Audio.StartsWith(item.Id + "-", StringComparison.Ordinal) && item.Audio.IndexOfAny(new[] { '/', '\\' }) < 0)))
+            {
+                items.Add(item);
+            }
         }
-        catch (Exception ex) when (ex is JsonException or FormatException or InvalidCastException or OverflowException)
-        {
-            items.Clear();
-            return false;
-        }
+
+        items.Sort((a, b) => b.Exported.CompareTo(a.Exported));
+        return complete;
     }
 
     private static void CheckId(string id)

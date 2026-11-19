@@ -266,4 +266,36 @@ public class DifficultyTests
         var hits = Stream(160, 90, 2);
         Assert.True(DifficultyEstimator.Estimate(hits, 1.5).Score > DifficultyEstimator.Estimate(hits, 1).Score);
     }
+
+    /// <summary>在后台线程上算，超时算失败（不让测试卡死）。</summary>
+    private static DifficultyEstimate EstimateWithin(IReadOnlyList<TileHit> hits, TimeSpan limit)
+    {
+        var task = Task.Run(() => DifficultyEstimator.Estimate(hits));
+        Assert.True(task.Wait(limit), $"估算超过 {limit.TotalSeconds} 秒没算完");
+        return task.Result;
+    }
+
+    /// <summary>
+    /// 一块砖在很远的地方（坏数据）：「最难几段的节奏种类」原来从第一下起一秒一秒往后数窗口，
+    /// 复现（2026-11-19 评审）：一块砖在 +∞ 时死循环、在 1e9 秒要 1.36 秒。现在跳过不到 4 下的空窗口，结果和一秒一秒数一样。
+    /// </summary>
+    [Fact]
+    public void Estimate_AFarAwayHitDoesNotHang()
+    {
+        var hits = Pattern(60, 180, 0.08, 0.12, 0.06, 0.1, 0.07, 0.09);
+        var peak = Feature(hits, "peakVariety");
+
+        // 远处多一块砖：前面的窗口一个不少、一个不多（远处那块凑不满 4 下，不成窗口）
+        foreach (var far in new[] { 1e9, 1e12 })
+        {
+            var estimate = EstimateWithin(hits.Append(new TileHit(99999, far, 0, 180)).ToList(), TimeSpan.FromSeconds(10));
+            Assert.Equal(peak, estimate.Features.Values[Array.IndexOf(DifficultyFeatures.Names, "peakVariety")]);
+        }
+
+        foreach (var broken in new[] { double.PositiveInfinity, double.NaN })
+        {
+            var estimate = EstimateWithin(hits.Append(new TileHit(99999, broken, 0, 180)).ToList(), TimeSpan.FromSeconds(10));
+            Assert.InRange(estimate.Tier, 1, 60);
+        }
+    }
 }

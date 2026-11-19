@@ -190,8 +190,45 @@ public class BeatGridTests
     }
 
     /// <summary>
+    /// 坏数据（一拍无穷长、速度 NaN / ∞、时间不是有限数）不抛异常。复现（2026-11-19 评审）：一拍 +∞、速度 NaN 或 ∞ 时
+    /// 主 BPM 那一类找不到段，First() 抛 InvalidOperationException，进关卡时整个读关卡失败。
+    /// 一拍、起止时间不是有限数就不画；速度、变速时间、砖块时间不是有限数的那一项跳过，其余照常。
+    /// </summary>
+    [Fact]
+    public void NonFiniteInputsDoNotThrow()
+    {
+        var hits = Run(0.5, 32, 0.5, 0.5);
+        var one = new[] { (0.0, 1.0) };
+        var normal = BeatGrid.Infer(hits, one, 0.5, 0, 18);
+
+        foreach (var crotchet in new[] { double.PositiveInfinity, double.NaN, 0, -0.5 })
+        {
+            Assert.Empty(BeatGrid.Infer(hits, one, crotchet, 0, 18).Lines);
+        }
+
+        Assert.Empty(BeatGrid.Infer(hits, one, 0.5, double.NegativeInfinity, 18).Lines);
+        Assert.Empty(BeatGrid.Infer(hits, one, 0.5, 0, double.PositiveInfinity).Lines);
+        Assert.Empty(BeatGrid.Infer(hits, one, 0.5, 0, double.NaN).Lines);
+
+        // 只有一个变速点、而且是坏的：当成没有变速
+        foreach (var speed in new[] { double.PositiveInfinity, double.NaN })
+        {
+            Assert.Equal(normal.Lines, BeatGrid.Infer(hits, new[] { (0.0, speed) }, 0.5, 0, 18).Lines);
+        }
+
+        // 中间一个坏的变速点：跳过它，前一段接着用
+        Assert.Equal(normal.Lines, BeatGrid.Infer(hits, new[] { (0.0, 1.0), (5.0, double.NaN), (6.0, 1.0) }, 0.5, 0, 18).Lines);
+        Assert.Equal(normal.Lines, BeatGrid.Infer(hits, new[] { (0.0, 1.0), (double.NaN, 2.0) }, 0.5, 0, 18).Lines);
+
+        // 坏的砖块时间：那一块不算
+        var broken = hits.Select((h, i) => i == 5 ? h with { Time = double.NaN } : i == 9 ? h with { Time = double.PositiveInfinity } : h).ToList();
+        broken.Add(new TileHit(999, double.NegativeInfinity));
+        Assert.Equal(BeatGrid.Infer(hits.Where((_, i) => i != 5 && i != 9).ToList(), one, 0.5, 0, 18).Lines, BeatGrid.Infer(broken, one, 0.5, 0, 18).Lines);
+    }
+
+    /// <summary>
     /// 本机的真实谱面（不进仓库）：设置 RHYTHMHINT_WORKSHOP（创意工坊 977950 文件夹）、RHYTHMHINT_TUF（TUF 校准谱文件夹，含 levels/）才运行。
-    /// 每张谱：主 BPM、每秒节拍线最多几条、不满或超出 4 拍的小节最多几个、要按的砖落在拍网（1/16 以内）上至少多少。
+    /// 每张谱：主 BPM、每秒节拍线最多几条、不满或超出 4 拍的小节最多几个、要按的砖落在拍网（1/64 以内）上至少多少。
     /// </summary>
     [Theory]
     [InlineData("RHYTHMHINT_WORKSHOP", "2802147583/main.adofai", 126.375, 1)] // Camellia - Hello (BPM) 2022：旧算法 32352 BPM、每秒 90 条
@@ -239,5 +276,54 @@ public class BeatGridTests
         var pos = (t - lines[k].Time) / spb;
         return new[] { 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64 }.Where(d => d == 1 || spb / d >= 0.006)
             .Any(d => Math.Abs((pos * d) - Math.Round(pos * d)) * spb / d <= Math.Min(0.002, 0.05 * spb / d));
+    }
+}
+
+/// <summary>量耗时的测试单独跑（不和别的测试同时跑，免得抢 CPU 量不准）。</summary>
+[CollectionDefinition(nameof(TimingTests), DisableParallelization = true)]
+public sealed class TimingTests
+{
+}
+
+/// <summary>
+/// 节拍线进关卡时在主线程上算，变速点再多也要快。复现（2026-11-19 评审）：×1 / ×2 在不落在整拍的位置来回切（同一类速度，每段都要看要不要重新起拍），
+/// 每段都往后扫完所有同一类速度的段，1.6 万个变速点 0.76 秒、6.7 万个 8.5 秒；每个变速点一个互不同类的速度时，主 BPM 那一类按段数 × 类数（最多约 2500 类）找。
+/// </summary>
+[Collection(nameof(TimingTests))]
+public class BeatGridTimingTests
+{
+    /// <summary>每 0.37 秒一个变速点（不落在整拍上），速度由 speedOf 给；砖很稀（每 40 秒一块），只剩按变速点算的那部分。</summary>
+    private static (List<TileHit> Hits, List<(double Time, double Speed)> Speeds, double End) DenseSpeeds(int count, Func<int, double> speedOf)
+    {
+        var speeds = Enumerable.Range(0, count).Select(k => (0.37 * k, speedOf(k))).ToList();
+        var end = 0.37 * count;
+        var hits = new List<TileHit>();
+        for (var t = 1.0; t < end; t += 40)
+        {
+            hits.Add(new TileHit(hits.Count + 1, t, 0, 180));
+        }
+
+        return (hits, speeds, end);
+    }
+
+    /// <summary>Debug 下：4 万个同一类的变速点原来 15 秒、15 万个互不同类的原来 3.3 秒，现在两个加起来不到 0.4 秒。</summary>
+    [Fact]
+    public void ManySpeedChangesStayFast()
+    {
+        var toggles = DenseSpeeds(40000, k => k % 2 == 0 ? 1 : 2);
+        var rng = new Random(1);
+        var distinct = DenseSpeeds(150000, _ => 1 + (rng.NextDouble() * 0.9));
+        BeatGrid.Infer(toggles.Hits, toggles.Speeds.Take(300).ToList(), 0.5, 0, 111); // 先编译一遍，不算进时间
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var map = BeatGrid.Infer(toggles.Hits, toggles.Speeds, 0.5, 0, toggles.End);
+        var togglesTime = watch.Elapsed;
+        watch.Restart();
+        BeatGrid.Infer(distinct.Hits, distinct.Speeds, 0.5, 0, distinct.End);
+        var distinctTime = watch.Elapsed;
+
+        Assert.Equal(120, map.MainBpm, 6);
+        Assert.True(togglesTime < TimeSpan.FromSeconds(1) && distinctTime < TimeSpan.FromSeconds(1),
+            $"4 万个同一类的变速点用了 {togglesTime.TotalMilliseconds:F0} 毫秒，15 万个互不同类的用了 {distinctTime.TotalMilliseconds:F0} 毫秒");
     }
 }

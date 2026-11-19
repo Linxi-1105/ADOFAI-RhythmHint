@@ -1,0 +1,94 @@
+// 1.3.1 原样，不能改：git show v1.3.1:src/RhythmHint.Core/Models.cs，只把命名空间 RhythmHint.Core 换成 RhythmHint131.Core
+// （1.3.0 的这个文件和 1.3.1 一字不差）。是 1.3.1 的 CustomFingering.Parse 用到的 TileHit、PlannedNote、Lanes，见同目录的 CustomFingering.cs。
+using System.Collections.Generic;
+
+namespace RhythmHint131.Core;
+
+/// <summary>四键模式下的轨道数。</summary>
+public static class Lanes
+{
+    public const int Count = 4;
+
+    /// <summary>轨道属于哪只手：0、1 左手，2、3 右手。</summary>
+    public static int HandOf(int lane) => lane < 2 ? 0 : 1;
+
+    /// <summary>食指所在的轨道：左手 1，右手 2。</summary>
+    public static int IndexLane(int hand) => hand == 0 ? 1 : 2;
+
+    /// <summary>同一只手的另一根手指：0↔1，2↔3。</summary>
+    public static int Partner(int lane) => lane switch
+    {
+        0 => 1,
+        1 => 0,
+        2 => 3,
+        _ => 2,
+    };
+}
+
+/// <summary>关卡里一次需要按键的砖块。</summary>
+/// <param name="TileIndex">砖块序号（scrFloor.seqID）。</param>
+/// <param name="Time">到达时间，秒，和游戏的歌曲进度同一时间轴。</param>
+/// <param name="HoldSeconds">长按砖的持续时间，普通砖为 0。</param>
+/// <param name="Angle">
+/// 从上一块要按的砖到这块，星球转过的角度（度，180° 是一拍）。谱师把要同时按的砖画成很小的转角，
+/// 用它分辨多押和极快的连打。NaN 表示不知道（这时只看时间）。
+/// </param>
+public readonly record struct TileHit(int TileIndex, double Time, double HoldSeconds = 0, double Angle = double.NaN);
+
+/// <summary>最终画到屏幕上的一个音符。</summary>
+public sealed class PlannedNote
+{
+    public PlannedNote(int tileIndex, double time)
+    {
+        TileIndex = tileIndex;
+        LastTileIndex = tileIndex;
+        Time = time;
+    }
+
+    /// <summary>这个音符的第一块砖。</summary>
+    public int TileIndex { get; }
+
+    /// <summary>这个音符的最后一块砖（伪双押由两块挨着的砖组成）。这块砖被按过后音符消失。</summary>
+    public int LastTileIndex { get; set; }
+
+    public double Time { get; }
+
+    /// <summary>这一下要按的轨道及各自的长按时长（0 为普通音符）。</summary>
+    public SortedDictionary<int, double> Lanes { get; } = new();
+
+    /// <summary>复制一份（轨道和长按一起复制）。</summary>
+    public PlannedNote Clone()
+    {
+        var copy = new PlannedNote(TileIndex, Time) { LastTileIndex = LastTileIndex };
+        foreach (var kv in Lanes)
+        {
+            copy.Lanes[kv.Key] = kv.Value;
+        }
+
+        return copy;
+    }
+
+    /// <summary>同时按两个及以上轨道。</summary>
+    public bool IsChord => Lanes.Count > 1;
+
+    /// <summary>三押、四押（同时按三个及以上轨道），画成紫色；双押是蓝色。</summary>
+    public bool IsMultiChord => Lanes.Count > 2;
+
+    /// <summary>
+    /// 按两个键的那只手（0 左、1 右）：双押就是它那只手；三押是按两个键的那只手（另一只手只补一个键）；
+    /// 四押两只手都按两个，算右手。单押是它那只手。
+    /// </summary>
+    public int PairHand
+    {
+        get
+        {
+            var right = 0;
+            foreach (var lane in Lanes.Keys)
+            {
+                right += Core.Lanes.HandOf(lane);
+            }
+
+            return right * 2 >= Lanes.Count ? 1 : 0;
+        }
+    }
+}

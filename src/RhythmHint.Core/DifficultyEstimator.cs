@@ -66,6 +66,12 @@ public static class DifficultyEstimator
     /// <summary>算「多少音符在大滚键组里」时，至少这么多个音才算大组（超过一只手 4 个手指）。</summary>
     private const int BigRoll = 5;
 
+    /// <summary>
+    /// 第一下到最后一下超过这么多秒（2^40 秒，约 3.5 万年）是坏数据，「最难几段的节奏种类」不算：
+    /// 秒数大了浮点误差跟着变大，窗口按秒往后挪、往后跳都不准。
+    /// </summary>
+    private const double MaxSeconds = 1099511627776;
+
     public static DifficultyEstimate Estimate(IReadOnlyList<TileHit> hits, double playbackRate = 1)
     {
         var features = Measure(hits, playbackRate);
@@ -309,15 +315,23 @@ public static class DifficultyEstimator
     /// 最难几段的节奏种类：从第一下起每隔 1 秒取一个 4 秒窗口（至少 4 下），
     /// 窗口里的间隔（不算多押）按 1/6 个八度分组数有几种，乘以每秒几下；取所有窗口的 95% 分位。
     /// 又密又杂才高：整齐的连打种类少，节奏花但慢的密度低。
+    /// 不到 4 下的窗口不算，所以遇到空的一段直接跳到下一个可能凑满 4 下的窗口（结果和一秒一秒数一样）。
+    /// 复现（2026-11-19 评审）：原来一秒一秒往后数，一块砖在 1e9 秒要 1.36 秒，在 +∞ 死循环。
     /// </summary>
     private static double PeakVariety(double[] t, double[] gaps)
     {
+        var first = t[0];
+        if (!(t[t.Length - 1] - first < MaxSeconds))
+        {
+            return 0; // 有 NaN、无穷大（NaN 排在最前，原来也是一个窗口都不数），或者长到按秒数不过来：坏数据
+        }
+
         var values = new List<double>();
         var kinds = new HashSet<long>();
         int lo = 0, hi = 0;
-        for (var k = 0; t[0] + k < t[t.Length - 1]; k++)
+        for (var k = 0.0; first + k < t[t.Length - 1]; k++)
         {
-            var start = t[0] + k;
+            var start = first + k;
             while (lo < t.Length && t[lo] < start)
             {
                 lo++;
@@ -331,6 +345,13 @@ public static class DifficultyEstimator
 
             if (hi - lo < 4)
             {
+                if (lo + 3 >= t.Length)
+                {
+                    break; // 后面不到 4 下，再往后的窗口也凑不满
+                }
+
+                // 往后的窗口要凑满 4 下，第 lo + 3 下得在窗口里：起点要晚于它 − 4 秒。少跳一两秒，浮点误差也不会跳过该数的窗口
+                k = Math.Max(k, Math.Floor(t[lo + 3] - first - 4) - 2);
                 continue;
             }
 

@@ -59,6 +59,9 @@ internal static class BeatInference
     /// <summary>同一类 BPM（差 2 的整数次幂）的容差，按 log2 算（约 0.014%，只容得下小数位的舍入）。</summary>
     private const double ClassTolerance = 2e-4;
 
+    /// <summary>MainClass 按 log2 的小数部分分几个桶（见 ClassBucket）。</summary>
+    private const int ClassBuckets = 1024;
+
     /// <summary>认细分时试的分母，越靠前越「整」；一格短于 MinStep 的不试（慢拍子里的 1/64 也算，快拍子里不算）。</summary>
     private static readonly int[] Divisions = { 1, 2, 4, 3, 8, 6, 16, 12, 32, 24, 64, 48 };
 
@@ -86,11 +89,15 @@ internal static class BeatInference
     /// <summary>关卡的一个变速段；FromTiles 表示 Spb 不是关卡写的，是从砖块间隔推出来的。</summary>
     private readonly record struct Segment(double Start, double End, double Spb, bool FromTiles = false);
 
+    /// <summary>
+    /// 一拍、起止时间不是有限数时不画；变速点、砖块时间不是有限数的那一项跳过（Segments、Onsets）。
+    /// 复现（2026-11-19 评审）：一拍 +∞、速度 NaN 或 ∞ 时主 BPM 那一类找不到段，First() 抛 InvalidOperationException。
+    /// </summary>
     internal static BeatMap Infer(IReadOnlyList<TileHit> hits, IReadOnlyList<(double Time, double Speed)> speeds, double crotchet, double start, double end)
     {
         var map = new BeatMap();
         var onsets = Onsets(hits);
-        if (onsets.Count == 0 || !(crotchet > 0) || end <= start)
+        if (onsets.Count == 0 || !(crotchet > 0) || !IsFinite(crotchet) || !IsFinite(start) || !IsFinite(end) || end <= start)
         {
             return map;
         }
@@ -121,6 +128,11 @@ internal static class BeatInference
         double groupStart = 0, last = double.NegativeInfinity;
         foreach (var h in hits)
         {
+            if (!IsFinite(h.Time))
+            {
+                continue; // 坏数据：画不出来，也不能让它打乱二分查找
+            }
+
             var same = onsets.Count > 0 && (h.Time - groupStart < SameTime || (double.IsNaN(h.Angle)
                 ? h.Time - groupStart < o.ChordWindow
                 : h.Angle <= o.ChordAngle + 1e-3 && h.Time - last <= o.ChordMaxGap + 1e-6));
@@ -141,20 +153,32 @@ internal static class BeatInference
         return onsets;
     }
 
-    /// <summary>关卡的变速段（每段一个砖块速度）；第一块要按的砖之前的段并进后面那段。</summary>
-    private static List<Segment> Segments(IReadOnlyList<(double Time, double Speed)> speeds, double crotchet, double start, double end, double firstOnset)
+    /// <summary>
+    /// 关卡的变速段（每段一个砖块速度）；第一块要按的砖之前的段并进后面那段。
+    /// 时间或速度不是有限数的变速点当作没有；算出的每拍秒数不是正的有限数（速度太大、太小）的段跳过。
+    /// </summary>
+    private static List<Segment> Segments(IReadOnlyList<(double Time, double Speed)> levelSpeeds, double crotchet, double start, double end, double firstOnset)
     {
+        var speeds = new List<(double Time, double Speed)>(levelSpeeds.Count);
+        foreach (var s in levelSpeeds)
+        {
+            if (IsFinite(s.Time) && IsFinite(s.Speed))
+            {
+                speeds.Add(s);
+            }
+        }
+
         var segments = new List<Segment>();
         for (var i = 0; i < speeds.Count; i++)
         {
             var (time, speed) = speeds[i];
             var next = i + 1 < speeds.Count ? speeds[i + 1].Time : end;
-            if (speed <= 0 || next <= start || time >= end)
+            var spb = crotchet / speed;
+            if (speed <= 0 || next <= start || time >= end || !(spb > 0) || double.IsInfinity(spb))
             {
                 continue;
             }
 
-            var spb = crotchet / speed;
             var from = Math.Max(start, time);
             if (segments.Count > 0 && (from <= firstOnset + 1e-6 || Math.Abs(Math.Log(spb / segments[segments.Count - 1].Spb)) < 1e-9))
             {
@@ -216,11 +240,14 @@ internal static class BeatInference
         return best;
     }
 
-    /// <summary>最常见的三种相邻间隔（相差 0.3% 以内算一种，取平均），50 ms–2.5 s 之外的不算。</summary>
+    /// <summary>
+    /// 最常见的三种相邻间隔（相差 0.3% 以内算一种，取平均），50 ms–2.5 s 之外的不算。
+    /// 和 FromTiles 算比例一样只看前 256 下（2026-11-19 起；工坊和 TUF 的 866 张谱推出的节拍线和原来看整段的逐条一样）。
+    /// </summary>
     private static IEnumerable<double> CommonGaps(List<Onset> onsets)
     {
         var gaps = new List<double>();
-        for (var i = 1; i < onsets.Count; i++)
+        for (var i = 1; i < Math.Min(onsets.Count, 256); i++)
         {
             var gap = onsets[i].Time - onsets[i - 1].Time;
             if (gap >= 0.05 && gap <= 2.5)
@@ -232,13 +259,21 @@ internal static class BeatInference
         gaps.Sort();
         var clusters = new List<(double Sum, int Count)>();
         var from = 0;
-        for (var i = 1; i <= gaps.Count; i++)
+        var sum = 0.0;
+        for (var i = 0; i < gaps.Count; i++)
         {
-            if (i == gaps.Count || gaps[i] > gaps[from] * 1.003)
+            if (gaps[i] > gaps[from] * 1.003)
             {
-                clusters.Add((gaps.Skip(from).Take(i - from).Sum(), i - from));
-                from = i;
+                clusters.Add((sum, i - from));
+                (from, sum) = (i, 0.0);
             }
+
+            sum += gaps[i]; // 按顺序从 0 加起，和 Enumerable.Sum 的顺序一样；不用 Skip().Take()：游戏的 Mono 上 Skip 每次都从头数
+        }
+
+        if (gaps.Count > 0)
+        {
+            clusters.Add((sum, gaps.Count - from));
         }
 
         return clusters.OrderByDescending(c => c.Count).Take(3).Select(c => c.Sum / c.Count);
@@ -251,15 +286,49 @@ internal static class BeatInference
         return Share(onsets, from, to, (from - anchor) / spb, spb);
     }
 
-    /// <summary>按持续时长选主 BPM 那一类（差 2 的整数次幂算同一类）的一个关卡每拍秒数。</summary>
+    /// <summary>
+    /// 按持续时长选主 BPM 那一类（差 2 的整数次幂算同一类）的一个关卡每拍秒数。每一段归进第一个和它同一类的类（按出现的先后）。
+    /// 同一类的两个数 log2 的小数部分相差不到 ClassTolerance，按小数部分分成 ClassBuckets 个桶，只和自己、左右两个桶里的类比；
+    /// 原来和所有类逐个比，段数 × 类数（类数最多约 2500，2026-11-19 评审）。
+    /// </summary>
     private static double MainClass(List<Segment> segments)
     {
         var classes = new List<(double Spb, double Duration)>();
+        var buckets = new Dictionary<int, List<int>>();
         foreach (var s in segments)
         {
-            var k = classes.FindIndex(c => SameClass(c.Spb, s.Spb));
+            var bucket = ClassBucket(s.Spb);
+            var k = -1;
+            for (var b = bucket - 1; b <= bucket + 1; b++)
+            {
+                if (!buckets.TryGetValue((b + ClassBuckets) % ClassBuckets, out var members))
+                {
+                    continue;
+                }
+
+                foreach (var c in members) // 按出现的先后排着
+                {
+                    if (k >= 0 && c >= k)
+                    {
+                        break;
+                    }
+
+                    if (SameClass(classes[c].Spb, s.Spb))
+                    {
+                        k = c;
+                        break;
+                    }
+                }
+            }
+
             if (k < 0)
             {
+                if (!buckets.TryGetValue(bucket, out var members))
+                {
+                    buckets[bucket] = members = new List<int>();
+                }
+
+                members.Add(classes.Count);
                 classes.Add((s.Spb, s.End - s.Start));
             }
             else
@@ -292,6 +361,18 @@ internal static class BeatInference
         return Math.Abs(d - Math.Round(d)) < ClassTolerance;
     }
 
+    /// <summary>
+    /// MainClass 分桶用：log2(每拍秒数) 的小数部分落在第几个桶。一个桶宽 1/1024，比 ClassTolerance 宽近 5 倍，
+    /// 同一类的两个数（小数部分相差不到 ClassTolerance，加上浮点误差也远小于一个桶）一定在同一个或相邻的桶里（首尾两个桶相邻）。
+    /// </summary>
+    private static int ClassBucket(double spb)
+    {
+        var log = Math.Log(spb, 2);
+        return (int)((log - Math.Floor(log)) * ClassBuckets);
+    }
+
+    private static bool IsFinite(double value) => !double.IsNaN(value) && !double.IsInfinity(value);
+
     /// <summary>按 2 的整数次幂把每拍秒数折到离 target 最近（log 意义下，即 target 的 0.71–1.41 倍之间）的那个。</summary>
     private static double Fold(double spb, double target)
     {
@@ -311,8 +392,9 @@ internal static class BeatInference
         var first = segments[0];
         var curLevel = first.Spb;
         var spb0 = SameClass(first.Spb, mainLevel) ? mainSpb : Nearest(first.Spb, mainSpb);
-        var firstOnset = Range(onsets, first.Start, double.PositiveInfinity).First().Time;
+        var firstOnset = Range(onsets, first.Start, double.PositiveInfinity).Select(o => o.Time).DefaultIfEmpty(first.Start).First(); // 变速点全在砖块后面时没有
         sections.Add(new TempoSection(first.Start, ChoosePhase(onsets, first.Start, first.End, spb0, firstOnset), spb0, false));
+        var runs = SameClassRuns(segments);
         for (var i = 1; i < segments.Count; i++)
         {
             var seg = segments[i];
@@ -336,7 +418,7 @@ internal static class BeatInference
             // 接着数：这一拍剩下的部分按新速度走完
             var onBeat = Math.Abs(beat - Math.Round(beat)) * cur.SecondsPerBeat <= Tolerance(cur.SecondsPerBeat, 1);
             var next = onBeat ? cur.Anchor + (Math.Round(beat) * cur.SecondsPerBeat) : seg.Start + ((Math.Ceiling(beat) - beat) * spb);
-            if ((!onBeat || !Same(spb, cur.SecondsPerBeat)) && Restart(segments, i, onsets, spb, next) is double anchor)
+            if ((!onBeat || !Same(spb, cur.SecondsPerBeat)) && Restart(segments, i, runs, onsets, spb, next) is double anchor)
             {
                 sections.Add(new TempoSection(seg.Start, anchor, spb, true));
             }
@@ -352,15 +434,11 @@ internal static class BeatInference
     /// 换个拍点（这一段前几下砖之一）后整拍、半拍上的砖（重音加权）比接着数多出三成以上才换，返回新的拍点。
     /// 加速、减速那种一块砖一个速度的段看不出来，接着数。
     /// </summary>
-    private static double? Restart(List<Segment> segments, int i, List<Onset> onsets, double spb, double next)
+    /// <param name="runs">每段往后同一类速度连到哪段为止（SameClassRuns）。</param>
+    private static double? Restart(List<Segment> segments, int i, int[] runs, List<Onset> onsets, double spb, double next)
     {
         var seg = segments[i];
-        var until = seg.End;
-        for (var j = i + 1; j < segments.Count && SameClass(segments[j].Spb, seg.Spb); j++)
-        {
-            until = segments[j].End;
-        }
-
+        var until = segments[runs[i] - 1].End;
         var window = Range(onsets, seg.Start, Math.Min(until, seg.Start + (64 * spb)) + 1e-5).Take(256).ToList();
         if (window.Count < 6)
         {
@@ -369,6 +447,36 @@ internal static class BeatInference
 
         var best = ChoosePhase(onsets, seg.Start, Math.Min(until, seg.Start + (64 * spb)) + 1e-5, spb, next);
         return PhaseScore(window, best, spb) >= (1.3 * PhaseScore(window, next, spb)) + 1 ? best : null;
+    }
+
+    /// <summary>
+    /// 每段往后、和这一段同一类速度的段连到哪段为止：第一个不是同一类的段的下标（都是就是段数）。
+    /// 同样的每拍秒数记住上一次扫到哪，那里还在后面就直接用（中间的段都和它同一类），不用再扫。
+    /// 复现（2026-11-19 评审）：×1 / ×2 在不落在整拍的位置来回切时每段都要看要不要重新起拍，原来每段都往后扫完所有同一类速度的段，
+    /// 1.6 万个变速点 0.76 秒、6.7 万个 8.5 秒。
+    /// </summary>
+    private static int[] SameClassRuns(List<Segment> segments)
+    {
+        var runs = new int[segments.Count];
+        var scanned = new Dictionary<double, int>();
+        for (var i = 0; i < segments.Count; i++)
+        {
+            var spb = segments[i].Spb;
+            if (!scanned.TryGetValue(spb, out var j) || j <= i)
+            {
+                j = i + 1;
+                while (j < segments.Count && SameClass(segments[j].Spb, spb))
+                {
+                    j++;
+                }
+
+                scanned[spb] = j;
+            }
+
+            runs[i] = j;
+        }
+
+        return runs;
     }
 
     /// <summary>

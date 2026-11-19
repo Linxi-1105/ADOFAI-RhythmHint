@@ -48,6 +48,7 @@ List<TileHit> Run(double gap, int count, double start = 1) =>
     Enumerable.Range(0, count).Select(i => new TileHit(i + 1, start + i * gap)).ToList();
 var thresholdGaps = new[] { .035 - 1e-7, .035, .035 + 1e-7, .046875, .060 - 2e-6, .060,
     .060 + 2e-6, 1.0 / 15, .0825 - 2e-6, .0825, .0825 + 2e-6,
+    .065 - 2e-6, .065, .065 + 2e-6, .13 - 2e-6, .13, .13 + 2e-6,
     .15 - 2e-6, .15, .15 + 2e-6, .165 - 2e-6, .165, .165 + 2e-6, .45, .6 };
 foreach (var style in Enum.GetValues<FingeringStyle>())
 {
