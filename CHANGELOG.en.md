@@ -17,7 +17,6 @@ What changed in each version, newest first.
 - The four-lane panel can go on the right and the taiko bar at the bottom
 - With the taiko bar off, its whole strip is gone and the game view no longer makes room for it; BPM and time left stay in the four-lane panel's column
 - The on-screen keyboard for custom keys adds the numpad, F1–F12, editing keys such as Insert and Home, and mouse side buttons; the hotkey that opens the settings window can be customized the same way
-- Buttons in the settings window now show their result right below them
 
 ## 1.2.1 · 2026-11-18
 
