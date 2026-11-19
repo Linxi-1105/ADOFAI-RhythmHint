@@ -146,6 +146,7 @@ public static class SessionLibrary
                 if (item.Audio.Length > 0)
                 {
                     keep.Add(item.Audio);
+                    keep.Add(AudioScript.PathFor(item.Audio)); // 同一首歌另存的脚本，有就一起留着
                 }
             }
 

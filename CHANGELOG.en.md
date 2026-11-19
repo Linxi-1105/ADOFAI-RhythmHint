@@ -4,6 +4,10 @@
 
 What changed in each version, newest first.
 
+## Unreleased
+
+- Fixed: in the fingering editor, music and notes fell out of sync after pausing and resuming or scrolling during playback (OGG and MP3 songs of custom levels). The song is now decoded in full before it plays, so every jump lands exactly, and custom levels get a waveform too. For levels opened before, click Edit this level's fingering in the game once more
+
 ## 1.3.0 · 2026-11-19
 
 - The settings window is redesigned: F8 opens it with pages on the left (Overview, Appearance, Fingering, Custom fingering, Calibration, General, About), icons and animations; a short guide plays the first time it opens, and the question mark in the top right shows it again. The window sits in the middle of the area the hint panels leave free and moves aside when they switch sides

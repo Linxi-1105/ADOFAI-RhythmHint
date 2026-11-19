@@ -154,6 +154,7 @@
     player.load(doc.audio && doc.audio.file ? doc.audio.file + '?v=' + Date.now() : '')
       .then(renderAudioName)
       .catch(e => { renderAudioName(); toast(state.t('audio.failed', e.message), 'error'); });
+    if (doc.audio && doc.audio.script) loadDecoded(doc);
     renderKeymap();
     edited(true);
     restoreDraft();
@@ -196,6 +197,35 @@
 
   // ---------- 音乐 ----------
   let manualAudio = '';
+  /**
+   * Mod 另存的歌曲数据（file:// 下读不了音乐文件的字节，只能用 <script> 载入）：整首解码后换给播放器，跳转才准。
+   * 解码好之前先用 <audio> 播；旧版本导出的历史没有这份数据、解码失败时一直用 <audio>。
+   */
+  function loadDecoded(doc) {
+    const key = doc.audio.file, tag = document.createElement('script');
+    const take = () => {
+      const all = window.RHYTHMHINT_AUDIO || {}, text = all[key];
+      delete all[key]; // 字节交给解码后就不再留着这份文本
+      return text;
+    };
+    tag.src = doc.audio.script + '?v=' + Date.now();
+    tag.onload = async () => {
+      tag.remove();
+      const text = take();
+      if (typeof text !== 'string' || state.doc !== doc) return;
+      try {
+        const buffer = await window.EditorPlayer.decode(window.EditorPlayer.bytesFromBase64(text), player.ctx && player.ctx.sampleRate);
+        if (state.doc !== doc || manualAudio) return; // 解码期间换了关卡或手动选了音乐
+        player.useBuffer(buffer);
+        if (!state.waveform) state.waveform = window.peaksFromBuffer(buffer, 100); // 自制关卡游戏里读不到采样，这里补上波形
+        renderAudioName();
+      } catch (e) {
+        console.warn('RhythmHint: decoding the song failed, keeping <audio>', e);
+      }
+    };
+    tag.onerror = () => tag.remove(); // 文件不在了：继续用 <audio>
+    document.head.appendChild(tag);
+  }
   async function loadAudioFile(file) {
     try {
       const url = URL.createObjectURL(file);
@@ -203,8 +233,10 @@
       manualAudio = file.name;
       state.audioOffset = player.offset;
       renderAudioName();
-      const peaks = await window.peaksFromFile(file, 100);
-      if (peaks && player.el.src === url) state.waveform = peaks;
+      const buffer = await window.EditorPlayer.decode(new Uint8Array(await file.arrayBuffer()), player.ctx && player.ctx.sampleRate);
+      if (manualAudio !== file.name || player.el.src !== url) return; // 解码期间又换了音乐
+      player.useBuffer(buffer);
+      state.waveform = window.peaksFromBuffer(buffer, 100);
     } catch (e) {
       toast(state.t('audio.failed', errorText(e)), 'error');
     }

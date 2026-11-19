@@ -1,8 +1,12 @@
-/* 播放：有音乐时跟着 <audio> 走（音乐里的位置 = 谱面时间 + 偏移），没有音乐时用自己的时钟。
- * <audio>.currentTime 更新得不够勤，两次更新之间按经过的时间往前推，画面才顺。
+/* 播放：有音乐时跟着音乐走（音乐里的位置 = 谱面时间 + 偏移），没有音乐时用自己的时钟。
+ * 有 Mod 另存的歌曲数据时整首解码，用 Web Audio 从采样里直接放（useBuffer）：浏览器在 OGG、VBR MP3 里跳播放位置不准，
+ * Edge 实测播放中连续跳转后差 0.08–2.3 秒（2026-11-19 用户：暂停、滚动后音画不同步），WAV 和整首解码都准。
+ * 没有时用 <audio>：它的 currentTime 更新得不够勤，两次更新之间按经过的时间往前推，画面才顺。
  * 打拍声用这一关游戏里的打击声（Mod 读出来放进 session.js）；没有时用 WebAudio 现合成一个（file:// 下读不了音效文件）。 */
 (function (root) {
   'use strict';
+
+  const START_LEAD = 0.02; // 解码好的音乐提前 20 毫秒排好再放：起点准确落在排定的采样上
 
   class Player {
     constructor(el) {
@@ -29,6 +33,10 @@
       this.scheduledUntil = null;
       this.clockOffset = null;
       this.volume = 0.8;
+      this.buffer = null; // 整首解码好的音乐（AudioBuffer）；有它时不用 <audio>
+      this.source = null; // 正在放的声源
+      this.gain = null;
+      this.anchor = null; // 声源的起点：AudioContext 时间 at 放到音乐位置 pos，每秒走 rate
       this.onSeekFail = null; // 音乐文件跳不了播放位置时通知界面（比如服务器不支持分段读取）
       el.addEventListener('waiting', () => this.cancelClicks());
       el.addEventListener('ended', () => { if (this.playing) this.pause(); });
@@ -37,11 +45,16 @@
     get offset() { return this.baseOffset + this.userOffsetMs / 1000 + this.calibration; }
 
     /** 音乐的长度换算成谱面时间（没有音乐为 0）。 */
-    get end() { return this.hasAudio && Number.isFinite(this.el.duration) ? this.el.duration - this.offset : 0; }
+    get end() {
+      if (this.buffer) return this.buffer.duration - this.offset;
+      return this.hasAudio && Number.isFinite(this.el.duration) ? this.el.duration - this.offset : 0;
+    }
 
     load(url) {
       this.pause();
       if (this.cancelLoad) this.cancelLoad();
+      this.stopSource();
+      this.buffer = null;
       this.hasAudio = false;
       if (this.el.src.startsWith('blob:')) URL.revokeObjectURL(this.el.src);
       if (!url) {
@@ -79,6 +92,7 @@
     time() {
       const now = performance.now();
       if (!this.playing) return this.clock;
+      if (this.buffer) return this.bufferPosition() - this.offset;
       if (!this.hasAudio || this.preroll) {
         const t = this.clock + (now - this.clockAt) / 1000 * this.rate;
         if (this.preroll && t + this.offset >= 0) this.startAudio(t);
@@ -102,6 +116,10 @@
       this.cancelClicks(t);
       this.clock = t;
       this.clockAt = performance.now();
+      if (this.buffer) {
+        if (this.playing) this.startSource(t + this.offset);
+        return;
+      }
       if (this.hasAudio) {
         const target = t + this.offset;
         if (target < 0) {
@@ -124,6 +142,7 @@
       this.cancelClicks(this.clock);
       this.playing = true;
       this.clockAt = performance.now();
+      if (this.buffer) { this.startSource(this.clock + this.offset); return; }
       if (!this.hasAudio) return;
       const target = this.clock + this.offset;
       if (target < 0) { this.preroll = true; return; }
@@ -152,10 +171,16 @@
     pause() {
       this.cancelClicks();
       if (!this.playing) return;
-      this.clock = this.time();
+      if (this.buffer) {
+        this.clock = this.time();
+        this.stopSource();
+      } else {
+        // 先停 <audio> 再记位置：停住后 time() 就是它真正停的地方，原地继续时不用再跳一次（跳一次在 OGG、MP3 里就可能错位）
+        this.el.pause();
+        this.clock = this.time();
+      }
       this.playing = false;
       this.preroll = false;
-      this.el.pause();
     }
 
     setRate(practiceSpeed, pitch = 1) {
@@ -166,9 +191,86 @@
       this.el.playbackRate = this.rate;
       this.clock = t;
       this.clockAt = performance.now();
+      if (this.buffer && this.playing) this.startSource(t + this.offset);
     }
 
-    setVolume(v) { this.volume = v; this.el.volume = v; }
+    setVolume(v) {
+      this.volume = v;
+      this.el.volume = v;
+      if (this.gain) this.gain.gain.value = v;
+    }
+
+    /**
+     * 换成整首解码好的音乐：之后播放、跳转都从采样里直接来，不再经过 <audio>。
+     * 正在播时从画面所在的位置接上。
+     */
+    useBuffer(buffer) {
+      const t = this.time(), wasPlaying = this.playing;
+      if (this.cancelLoad) this.cancelLoad();
+      this.el.pause();
+      if (this.el.src && this.el.src.startsWith('blob:')) URL.revokeObjectURL(this.el.src);
+      this.el.removeAttribute('src');
+      this.el.load();
+      this.buffer = buffer;
+      this.hasAudio = true;
+      this.preroll = false;
+      this.mediaStart = null;
+      this.clock = t;
+      this.cancelClicks(t);
+      if (wasPlaying) this.startSource(t + this.offset);
+    }
+
+    /** 声卡此刻放出来的是 AudioContext 时间轴上的哪一刻（比正在生成的采样晚一个输出延迟）。 */
+    audibleTime() {
+      const ctx = this.ctx;
+      const stamp = ctx.getOutputTimestamp && ctx.getOutputTimestamp();
+      return stamp && stamp.performanceTime > 0
+        ? stamp.contextTime + (performance.now() - stamp.performanceTime) / 1000
+        : ctx.currentTime - (ctx.baseLatency || 0) - (ctx.outputLatency || 0);
+    }
+
+    /** 解码好的音乐此刻听到的位置；声音还没出来时停在起点。 */
+    bufferPosition() {
+      const a = this.anchor;
+      if (!a || !this.ctx) return this.clock + this.offset;
+      return a.pos + Math.max(0, this.audibleTime() - a.at) * a.rate;
+    }
+
+    /** 从音乐位置 pos 开始放解码好的音乐（pos 为负：排到那时再从头放）。 */
+    startSource(pos) {
+      this.stopSource();
+      this.ensureContext();
+      const ctx = this.ctx;
+      if (!ctx) return;
+      if (ctx.state === 'suspended') ctx.resume();
+      if (!this.gain) {
+        this.gain = ctx.createGain();
+        this.gain.gain.value = this.volume;
+        this.gain.connect(ctx.destination);
+      }
+      const at = ctx.currentTime + START_LEAD;
+      const source = ctx.createBufferSource();
+      source.buffer = this.buffer;
+      source.playbackRate.value = this.rate;
+      source.connect(this.gain);
+      if (pos < 0) source.start(at - pos / this.rate, 0);
+      else source.start(at, pos);
+      source.onended = () => {
+        if (this.source !== source) return; // 跳转、暂停时换掉的旧声源
+        this.source = null;
+        if (this.playing) this.pause(); // 放到了歌曲末尾
+      };
+      this.source = source;
+      this.anchor = { at, pos, rate: this.rate };
+    }
+
+    stopSource() {
+      const source = this.source;
+      if (!source) return;
+      this.source = null;
+      try { source.stop(); } catch (e) { /* 已经停了：不用管 */ }
+      source.disconnect();
+    }
 
     ensureContext() {
       if (this.ctx || !(root.AudioContext || root.webkitAudioContext)) return;
@@ -204,15 +306,12 @@
     scheduleClicks(visualTime, notes, firstNoteAt, loopEnd = Infinity) {
       const ctx = this.ctx;
       if (!this.playing || !ctx || ctx.state !== 'running') return;
-      if (this.hasAudio && !this.preroll && (this.mediaStart !== null || this.el.seeking || this.el.paused || this.el.readyState < 3)) return;
+      if (!this.buffer && this.hasAudio && !this.preroll && (this.mediaStart !== null || this.el.seeking || this.el.paused || this.el.readyState < 3)) return;
 
       const musicTime = visualTime + (this.hasAudio ? this.calibration : 0);
       const renderTime = ctx.currentTime;
-      const stamp = ctx.getOutputTimestamp && ctx.getOutputTimestamp();
       // currentTime 是正在生成的采样。扬声器正在播的采样比它早，两者相差设备的输出延迟。
-      const audible = stamp && stamp.performanceTime > 0
-        ? stamp.contextTime + (performance.now() - stamp.performanceTime) / 1000
-        : renderTime - (ctx.baseLatency || 0) - (ctx.outputLatency || 0);
+      const audible = this.audibleTime();
       const sample = musicTime - audible * this.rate;
       // OGG 的媒体位置在相邻画面间有几毫秒抖动。定位、暂停和换速都会丢掉旧锚点。
       this.clockOffset = this.clockOffset === null ? sample : this.clockOffset + (sample - this.clockOffset) * 0.05;
@@ -273,28 +372,35 @@
     }
   }
 
-  /** 从玩家手动选的音乐文件算波形（每秒 perSecond 个峰值，0–255）。 */
-  async function peaksFromFile(file, perSecond) {
-    const Ctx = root.AudioContext || root.webkitAudioContext;
-    if (!Ctx) return null;
-    const ctx = new Ctx();
-    try {
-      const buffer = await ctx.decodeAudioData(await file.arrayBuffer());
-      const frames = Math.max(1, Math.floor(buffer.sampleRate / perSecond));
-      const out = new Uint8Array(Math.ceil(buffer.length / frames));
-      for (let c = 0; c < buffer.numberOfChannels; c++) {
-        const data = buffer.getChannelData(c);
-        for (let i = 0; i < data.length; i++) {
-          const k = (i / frames) | 0, v = Math.round(Math.sqrt(Math.min(1, Math.abs(data[i]))) * 255);
-          if (v > out[k]) out[k] = v;
-        }
+  /** Mod 另存的歌曲数据（base64 文本）换回字节。 */
+  Player.bytesFromBase64 = function (text) {
+    const binary = atob(text), out = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+    return out;
+  };
+
+  /** 整首解码（离线的 AudioContext，不用等玩家点一下页面；解出来的声音哪个 AudioContext 都能放）。 */
+  Player.decode = function (bytes, sampleRate) {
+    const Offline = root.OfflineAudioContext || root.webkitOfflineAudioContext;
+    if (!Offline) return Promise.reject(new Error('Web Audio unavailable'));
+    const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    return new Offline(2, 1, sampleRate || 48000).decodeAudioData(data);
+  };
+
+  /** 从解码好的音乐算波形（每秒 perSecond 个峰值，0–255）。 */
+  function peaksFromBuffer(buffer, perSecond) {
+    const frames = Math.max(1, Math.floor(buffer.sampleRate / perSecond));
+    const out = new Uint8Array(Math.ceil(buffer.length / frames));
+    for (let c = 0; c < buffer.numberOfChannels; c++) {
+      const data = buffer.getChannelData(c);
+      for (let i = 0; i < data.length; i++) {
+        const k = (i / frames) | 0, v = Math.round(Math.sqrt(Math.min(1, Math.abs(data[i]))) * 255);
+        if (v > out[k]) out[k] = v;
       }
-      return { peaks: out, perSecond: buffer.sampleRate / frames };
-    } finally {
-      ctx.close();
     }
+    return { peaks: out, perSecond: buffer.sampleRate / frames };
   }
 
   root.EditorPlayer = Player;
-  root.peaksFromFile = peaksFromFile;
+  root.peaksFromBuffer = peaksFromBuffer;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

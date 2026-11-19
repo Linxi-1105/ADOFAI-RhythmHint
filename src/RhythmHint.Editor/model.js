@@ -114,7 +114,10 @@
       path: Array.isArray(s.path) ? s.path.filter(p => Array.isArray(p) && finite(p[0]) && finite(p[1]) && finite(p[2])).map((p, i) => ({ x: p[0], y: p[1], time: p[2], hit: p[3] === 1, tile: int(p[4]) ? p[4] : i,
         entry: finite(p[5]) ? p[5] : null, exit: finite(p[6]) ? p[6] : null })) : [], // 进出方向：数学角、弧度，游戏里读的或由离线读谱的原始方向算出
       audio: s.audio && typeof s.audio.file === 'string' ? {
-        file: s.audio.file, offset: finite(s.audio.offset) ? s.audio.offset : 0,
+        file: s.audio.file,
+        // 同一首歌另存的脚本（整首解码后播，跳转才准）：只认 recent/ 下的 .js，别的地方的脚本不载入
+        script: typeof s.audio.script === 'string' && /^recent\/[^\\/]+\.js$/.test(s.audio.script) ? s.audio.script : '',
+        offset: finite(s.audio.offset) ? s.audio.offset : 0,
         pitch: finite(s.audio.pitch) && s.audio.pitch > 0 ? s.audio.pitch : 1,
         calibration: finite(s.audio.calibration) ? s.audio.calibration : 0, // 游戏的画面校准（秒）：编辑器照样补
         peaksPerSecond: int(s.audio.peaksPerSecond) ? s.audio.peaksPerSecond : 0, peaks: decodePeaks(s.audio.peaks),

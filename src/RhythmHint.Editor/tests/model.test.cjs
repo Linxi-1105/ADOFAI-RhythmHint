@@ -185,3 +185,14 @@ test('file names are safe and readable', () => {
   assert.equal(M.suggestedFileName({ song: '<color=#f00>A/B</color>', artist: 'X:Y' }), 'X_Y - A_B.json');
   assert.equal(M.suggestedFileName({ song: '', artist: '' }), 'fingering.json');
 });
+
+test('the song script is only taken from the history folder', () => {
+  const input = session();
+  const scriptOf = script => { input.audio = { file: 'recent/a.ogg', script }; return M.fromSession(input).audio.script; };
+  assert.equal(scriptOf('recent/a.ogg.js'), 'recent/a.ogg.js');
+  assert.equal(scriptOf(undefined), ''); // 1.3.0 导出的历史：没有，用 <audio> 播
+  assert.equal(scriptOf('recent/../../evil.js'), '');
+  assert.equal(scriptOf('https://example.com/x.js'), '');
+  assert.equal(scriptOf('recent/a.ogg'), '');
+});
+

@@ -249,6 +249,7 @@ internal static class EditorLauncher
             {
                 audio.File = SessionLibrary.AudioFile(Folder, id, Path.GetExtension(info.SongFile));
                 File.Copy(info.SongFile, Path.Combine(Folder, audio.File), overwrite: true);
+                WriteAudioScript(info.SongFile, audio);
                 var hasPeaks = readable && TryDump(clip!, null, audio);
                 if (!hasPeaks && string.Equals(Path.GetExtension(info.SongFile), ".mp3", StringComparison.OrdinalIgnoreCase))
                 {
@@ -445,6 +446,35 @@ internal static class EditorLauncher
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// 歌曲另存一份成脚本，编辑器整首解码后播（浏览器在 OGG、VBR MP3 里跳播放位置不准，见 <see cref="AudioScript"/>）。
+    /// 写不出来只是退回用 &lt;audio&gt; 播，不影响打开编辑器。
+    /// </summary>
+    private static void WriteAudioScript(string songFile, SessionAudio audio)
+    {
+        var length = new FileInfo(songFile).Length;
+        if (!AudioScript.Wanted(Path.GetExtension(songFile), length))
+        {
+            return;
+        }
+
+        var script = AudioScript.PathFor(audio.File);
+        try
+        {
+            using (var source = File.OpenRead(songFile))
+            using (var target = new FileStream(Path.Combine(Folder, script), FileMode.Create, FileAccess.Write))
+            {
+                AudioScript.Write(source, target, audio.File);
+            }
+
+            audio.Script = script;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Main.Mod.Logger.Warning($"编辑器：另存歌曲数据失败（{ex.Message}），编辑器里跳转播放位置可能不准");
+        }
     }
 
     /// <returns>读不出采样时 false（日志里写明），这时没有波形、官方关卡也没有音乐。</returns>

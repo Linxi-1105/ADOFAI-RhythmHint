@@ -78,6 +78,33 @@ public class SessionLibraryTests : IDisposable
         Assert.Equal(5, Directory.GetFiles(Recent).Length); // index.js + 两关各一个会话、一首音乐，第一关的旧音乐删掉了
     }
 
+    /// <summary>歌曲另存的脚本（<see cref="AudioScript"/>）跟着它的音乐：留着时一起留，换新的时一起删。</summary>
+    [Fact]
+    public void TheSongScriptStaysAndGoesWithItsSong()
+    {
+        EditorSession ExportWithScript(DateTimeOffset when)
+        {
+            var session = Level("First");
+            session.Id = SessionLibrary.IdOf(session.Fingering);
+            var audio = SessionLibrary.AudioFile(_folder, session.Id, ".ogg");
+            File.WriteAllText(Path.Combine(_folder, audio), "music");
+            File.WriteAllText(Path.Combine(_folder, AudioScript.PathFor(audio)), "script");
+            session.Audio = new SessionAudio { File = audio, Script = AudioScript.PathFor(audio) };
+            SessionLibrary.Save(_folder, session, when);
+            return session;
+        }
+
+        var first = ExportWithScript(T0);
+        Assert.True(File.Exists(Path.Combine(_folder, first.Audio!.Script)));
+
+        var again = ExportWithScript(T0.AddMinutes(1));
+        Assert.NotEqual(first.Audio.File, again.Audio!.File);
+        Assert.False(File.Exists(Path.Combine(_folder, first.Audio.File)));
+        Assert.False(File.Exists(Path.Combine(_folder, first.Audio.Script)));
+        Assert.True(File.Exists(Path.Combine(_folder, again.Audio.Script)));
+        Assert.Equal(4, Directory.GetFiles(Recent).Length); // index.js、会话、音乐、音乐的脚本
+    }
+
     [Fact]
     public void KeepsTenLevelsAndDeletesTheRest()
     {

@@ -106,6 +106,29 @@ public class EditorContractTests
         Assert.Equal(File.ReadAllText(path).TrimEnd('\n').Replace("\r\n", "\n"), json);
     }
 
+    /// <summary>歌曲另存的脚本（audio-script.js）：0–255 每个字节一个，编辑器的 node 测试载入后要还原出同样的字节。</summary>
+    [Fact]
+    public void AudioScriptFixtureIsCurrent()
+    {
+        var bytes = new byte[256];
+        for (var i = 0; i < bytes.Length; i++)
+        {
+            bytes[i] = (byte)i;
+        }
+
+        using var target = new MemoryStream();
+        AudioScript.Write(new MemoryStream(bytes), target, "recent/sample.ogg");
+        var script = System.Text.Encoding.ASCII.GetString(target.ToArray());
+        var path = Path.Combine(Fixtures, "audio-script.js");
+        if (Environment.GetEnvironmentVariable("RHYTHMHINT_UPDATE_FIXTURES") == "1")
+        {
+            File.WriteAllText(path, script);
+        }
+
+        Assert.True(File.Exists(path), "缺 " + path + "：设 RHYTHMHINT_UPDATE_FIXTURES=1 重跑生成");
+        Assert.Equal(File.ReadAllText(path).Replace("\r\n", "\n"), script);
+    }
+
     [Fact]
     public void ModReadsWhatTheEditorSaved()
     {

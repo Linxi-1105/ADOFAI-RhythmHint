@@ -19,6 +19,12 @@ public sealed class SessionAudio
     /// <summary>相对编辑器目录的文件，比如 recent/968-…-20261118-093000-123.ogg（<see cref="SessionLibrary.AudioFile"/>）。</summary>
     public string File { get; set; } = string.Empty;
 
+    /// <summary>
+    /// 同一首歌另存成的脚本（<see cref="AudioScript"/>，比如 recent/968-…-123.ogg.js），编辑器整首解码后播；
+    /// 没有为空（官方关卡的 WAV、太大的歌曲），编辑器直接用 &lt;audio&gt; 播 <see cref="File"/>。
+    /// </summary>
+    public string Script { get; set; } = string.Empty;
+
     /// <summary>音乐文件里的位置 = 砖块时间 + Offset；二者都在原始歌曲时间轴上。</summary>
     public double Offset { get; set; }
 
@@ -196,6 +202,7 @@ public sealed class EditorSession
             {
                 w.WriteStartObject();
                 Prop(w, "file", Audio.File);
+                Prop(w, "script", Audio.Script);
                 w.WritePropertyName("offset");
                 w.WriteValue(Math.Round(Audio.Offset, 6));
                 w.WritePropertyName("pitch");
