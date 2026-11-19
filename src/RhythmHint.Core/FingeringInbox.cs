@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 
 namespace RhythmHint.Core;
 
@@ -49,9 +50,12 @@ public static class FingeringInbox
         return false;
     }
 
+    /// <summary>同名的另一首谱的手序最多编到几号（「名字 (99).json」），再多就不存了。</summary>
+    public const int MaxNumbered = 99;
+
     /// <summary>
-    /// 把 <paramref name="inbox"/> 里的 .json 搬进 <paramref name="target"/>（同名的覆盖）。
-    /// 搬不动的（浏览器正在写、被占用）留到下次。返回搬过去的文件名。
+    /// 把 <paramref name="inbox"/> 里的 .json 搬进 <paramref name="target"/>，文件名按 <see cref="SaveName"/> 选（不覆盖别的谱的手序）。
+    /// 搬不动的（浏览器正在写、被占用）留到下次。返回搬过去后的文件名。
     /// </summary>
     public static List<string> MoveInto(string inbox, string target)
     {
@@ -64,9 +68,9 @@ public static class FingeringInbox
         Directory.CreateDirectory(target);
         foreach (var source in Directory.GetFiles(inbox, "*.json"))
         {
-            var name = Path.GetFileName(source);
             try
             {
+                var name = SaveName(target, Path.GetFileName(source), File.ReadAllText(source, Encoding.UTF8));
                 File.Copy(source, Path.Combine(target, name), overwrite: true);
                 File.Delete(source);
                 moved.Add(name);
@@ -83,6 +87,56 @@ public static class FingeringInbox
 
         return moved;
     }
+
+    /// <summary>
+    /// 存进 <paramref name="folder"/> 用哪个文件名：<paramref name="name"/> 没人用、或用着的是同一关的手序（认得同一份谱面指纹，玩家重新保存）就用它；
+    /// 用着的是另一首谱的（同一首歌不同谱师、别人分享的）或读不出来的，依次试「名字 (2).json」「名字 (3).json」……，不覆盖别人的手序。
+    /// 复现（2026-11-19 评审）：建议名只有「曲师 - 曲名」，原来同名直接覆盖。编辑器直接存进文件夹时按同样的规则（model.js）。
+    /// </summary>
+    /// <param name="text">要存的手序文件内容；它读不出来时不覆盖任何已有的文件。</param>
+    public static string SaveName(string folder, string name, string text)
+    {
+        var charts = ChartsOf(text);
+        for (var k = 1; k <= MaxNumbered; k++)
+        {
+            var candidate = Numbered(name, k);
+            var path = Path.Combine(folder, candidate);
+            if (!File.Exists(path) || SameLevel(path, charts))
+            {
+                return candidate;
+            }
+        }
+
+        throw new IOException($"同名的手序已有 {MaxNumbered} 份，{name} 没有存进去");
+    }
+
+    /// <summary>第 k 个候选文件名：Song.json、Song (2).json、Song (3).json……</summary>
+    public static string Numbered(string name, int k)
+    {
+        if (k <= 1)
+        {
+            return name;
+        }
+
+        var stem = name.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ? name.Substring(0, name.Length - 5) : name;
+        return $"{stem} ({k}).json";
+    }
+
+    private static HashSet<string> ChartsOf(string text)
+    {
+        try
+        {
+            return new HashSet<string>(CustomFingering.Parse(text).Charts, StringComparer.Ordinal);
+        }
+        catch (FormatException)
+        {
+            return new HashSet<string>(); // 读不出来的手序：和谁都不算同一关
+        }
+    }
+
+    private static bool SameLevel(string path, HashSet<string> charts) =>
+        charts.Count > 0 && new FileInfo(path).Length <= CustomFingering.MaxFileBytes
+        && ChartsOf(File.ReadAllText(path, Encoding.UTF8)).Overlaps(charts);
 
     private static string? Normalize(string? path)
     {

@@ -1132,6 +1132,17 @@
     return dir;
   }
 
+  /** 文件夹里这个文件的文字；没有这个文件为 null。同名的是个文件夹时给空串（读不出来，这个名字不能用）。 */
+  async function existingText(dir, name) {
+    try {
+      return await (await (await dir.getFileHandle(name)).getFile()).text();
+    } catch (e) {
+      if (e && e.name === 'NotFoundError') return null;
+      if (e && e.name === 'TypeMismatchError') return '';
+      throw e;
+    }
+  }
+
   async function saveToGame() {
     const doc = state.doc;
     if (!doc) return;
@@ -1146,11 +1157,16 @@
     try {
       const dir = await fingeringsFolder();
       if (!dir) return;
-      const writable = await (await dir.getFileHandle(doc.fileName, { create: true })).createWritable();
+      // 同名的是另一首谱的手序时另起名字，不覆盖（M.saveName，和 Mod 搬中转文件夹时同一规则）
+      const name = await M.saveName(doc, n => existingText(dir, n));
+      if (!name) { toast(state.t('save.tooMany', doc.fileName), 'error', null, 12000); return; }
+      const renamed = name !== doc.fileName;
+      const writable = await (await dir.getFileHandle(name, { create: true })).createWritable();
       await writable.write(text);
       await writable.close();
+      if (renamed) { doc.fileName = name; renderFilePanel(); }
       saved();
-      toast(state.t('save.done', doc.fileName), 'ok', null, 6000);
+      toast(state.t(renamed ? 'save.renamed' : 'save.done', name), 'ok', null, renamed ? 12000 : 6000);
     } catch (e) {
       if (e && e.name === 'AbortError') return; // 玩家在选文件夹时点了取消
       toast(state.t('save.failed', errorText(e)), 'error');

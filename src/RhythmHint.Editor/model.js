@@ -183,6 +183,35 @@
     return (name.length > 80 ? name.slice(0, 80) : name) + '.json';
   }
 
+  const MAX_NUMBERED = 99; // 同 Mod 的 FingeringInbox.MaxNumbered
+
+  /** 第 k 个候选文件名：Song.json、Song (2).json、Song (3).json……（同 FingeringInbox.Numbered） */
+  function numberedFileName(name, k) {
+    return k <= 1 ? name : name.replace(/\.json$/i, '') + ' (' + k + ').json';
+  }
+
+  /** 已有的这份文件是不是这一关的手序：认得同一份谱面指纹（charts 有重合）。读不出来的不算。 */
+  function sameLevelFile(doc, text) {
+    let obj;
+    try { obj = JSON.parse(text); } catch (e) { return false; } // 读不出来的不是这一关的：不覆盖
+    const mine = new Set(doc.meta.charts || []);
+    return !!obj && obj.format === FILE_FORMAT && Array.isArray(obj.charts) && obj.charts.some(c => mine.has(c));
+  }
+
+  /**
+   * 存进手序文件夹用哪个文件名（和 Mod 的 FingeringInbox.SaveName 同一规则，2026-11-19 评审：同一首歌不同谱师的手序原来会被直接覆盖）：
+   * 没人用、是游戏这一关正用着的那份、或认得同一份谱面指纹就用它；别的谱的或读不出来的，依次试「名字 (2).json」……。
+   * readExisting(name) 给出文件夹里这个文件的文字，没有这个文件给 null。都被占了返回 null。
+   */
+  async function saveName(doc, readExisting) {
+    for (let k = 1; k <= MAX_NUMBERED; k++) {
+      const name = numberedFileName(doc.fileName, k);
+      const text = await readExisting(name);
+      if (text === null || (doc.usedFile && name === doc.usedFile) || sameLevelFile(doc, text)) return name;
+    }
+    return null;
+  }
+
   /** 这一关砖块的指纹（草稿按它存）。 */
   function signature(hits) {
     let h = 2166136261 >>> 0;
@@ -387,7 +416,7 @@
 
   return {
     FILE_FORMAT, SESSION_FORMAT, FingeringError, parseFingering, fromSession, fromFileText, toFileText, parseRecent,
-    suggestedFileName, signature, ops, History, jacks, noteValue, secondsPerBeat, stats, refLanes, laneKey,
+    suggestedFileName, numberedFileName, sameLevelFile, saveName, signature, ops, History, jacks, noteValue, secondsPerBeat, stats, refLanes, laneKey,
     isChanged, handOf, draftOf, draftChange, plain,
   };
 });

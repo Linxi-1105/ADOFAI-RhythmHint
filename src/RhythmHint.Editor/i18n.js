@@ -189,6 +189,8 @@
     'save.done': ['已保存：{0}，游戏内立即生效。', '已儲存：{0}，遊戲內立即生效。', 'Saved {0}. It takes effect in the game immediately.', '{0} 저장됨. 게임에 즉시 적용됩니다.', '{0} を保存しました。ゲームに即時反映されます。'],
     'save.downloaded': ['已下载 {0}，请放入：{1}', '已下載 {0}，請放入：{1}', 'Downloaded {0}. Put it in: {1}', '{0}을(를) 내려받았습니다. 다음 폴더에 넣으세요: {1}', '{0} をダウンロードしました。次のフォルダーに入れてください：{1}'],
     'save.wrongFolder': ['所选文件夹为「{0}」而非 Fingerings，仍要保存到此处吗？', '所選資料夾為「{0}」而非 Fingerings，仍要儲存到此處嗎？', 'The chosen folder is "{0}", not Fingerings. Save here anyway?', '선택한 폴더가 Fingerings가 아니라 "{0}"입니다. 그래도 저장할까요?', '選択したフォルダーは Fingerings ではなく「{0}」です。ここに保存しますか？'],
+    'save.renamed': ['已保存为 {0}：文件夹里的同名文件是另一首谱的手序，未覆盖。', '已儲存為 {0}：資料夾裡的同名檔案是另一首譜的手序，未覆蓋。', 'Saved as {0}: the file with the same name in the folder is a fingering for another chart and was kept.', '{0}(으)로 저장했습니다. 폴더에 있는 같은 이름의 파일은 다른 채보의 운지라서 덮어쓰지 않았습니다.', '{0} として保存しました。フォルダー内の同名ファイルは別の譜面の運指のため、上書きしていません。'],
+    'save.tooMany': ['文件夹里已有太多名为 {0} 的其他手序，未保存。请在文件面板修改文件名。', '資料夾裡已有太多名為 {0} 的其他手序，未儲存。請在檔案面板修改檔名。', 'Not saved: the folder already has too many other fingerings named {0}. Change the file name in the File panel.', '저장하지 않았습니다. 폴더에 {0} 이름의 다른 운지가 너무 많습니다. 파일 패널에서 파일 이름을 바꿔 주세요.', '保存していません。フォルダーに {0} という名前の別の運指が多すぎます。ファイルパネルでファイル名を変更してください。'],
     'save.failed': ['保存失败：{0}', '儲存失敗：{0}', 'Save failed: {0}', '저장 실패: {0}', '保存に失敗しました：{0}'],
     'saveAs.done': ['已下载 {0}，可用于分享。', '已下載 {0}，可用於分享。', 'Downloaded {0} for sharing.', '{0}을(를) 내려받았습니다. 공유할 수 있습니다.', '{0} をダウンロードしました。共有に使えます。'],
 

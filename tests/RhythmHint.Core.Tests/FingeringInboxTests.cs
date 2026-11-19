@@ -34,6 +34,12 @@ public class FingeringInboxTests : IDisposable
         Assert.True(FingeringInbox.BrowserBlocks(Path.Combine(programFiles, "Steam", "Mods"), FingeringInbox.WindowsBlockedRoots()));
     }
 
+    /// <summary>一份能读的手序：认得 chart 这份谱面指纹，tiles 块砖（砖数不同，自带的指纹也不同）。</summary>
+    private static string Fingering(string chart, int tiles, string author = "") =>
+        "{\"format\":\"rhythmhint-fingering\",\"schemaVersion\":1,\"author\":\"" + author + "\",\"charts\":[\"" + chart + "\"],\"hits\":["
+        + string.Join(",", Enumerable.Range(1, tiles).Select(i => $"[{i},{i},0,180]")) + "],\"notes\":["
+        + string.Join(",", Enumerable.Range(1, tiles).Select(i => $"[{i},{i},[[2,0]]]")) + "]}";
+
     [Fact]
     public void MovesSavedFingeringsIntoTheGameFolder()
     {
@@ -41,17 +47,44 @@ public class FingeringInboxTests : IDisposable
         var game = Path.Combine(_root, "Game", "Fingerings");
         Directory.CreateDirectory(inbox);
         Directory.CreateDirectory(game);
-        File.WriteAllText(Path.Combine(game, "Old.json"), "old");
-        File.WriteAllText(Path.Combine(inbox, "Old.json"), "new");
-        File.WriteAllText(Path.Combine(inbox, "Song.json"), "song");
+        File.WriteAllText(Path.Combine(game, "Old.json"), Fingering("1-a", 3, "old"));
+        File.WriteAllText(Path.Combine(inbox, "Old.json"), Fingering("1-a", 3, "new")); // 同一关重新保存：覆盖
+        File.WriteAllText(Path.Combine(inbox, "Song.json"), Fingering("2-b", 4));
         File.WriteAllText(Path.Combine(inbox, "Song.json.crswap"), "half written"); // 浏览器写到一半的临时文件不碰
 
         var moved = FingeringInbox.MoveInto(inbox, game);
 
         Assert.Equal(new[] { "Old.json", "Song.json" }, moved.OrderBy(n => n));
-        Assert.Equal("new", File.ReadAllText(Path.Combine(game, "Old.json")));
-        Assert.Equal("song", File.ReadAllText(Path.Combine(game, "Song.json")));
+        Assert.Contains("\"new\"", File.ReadAllText(Path.Combine(game, "Old.json")));
+        Assert.Equal(Fingering("2-b", 4), File.ReadAllText(Path.Combine(game, "Song.json")));
         Assert.Equal(new[] { "Song.json.crswap" }, Directory.GetFiles(inbox).Select(Path.GetFileName));
+    }
+
+    /// <summary>
+    /// 同名的是另一首谱的手序（同一首歌不同谱师、别人分享的）时不覆盖，另存成「名字 (2).json」；之后再存这一关，覆盖的是 (2) 那份。
+    /// 复现（2026-11-19 评审）：建议名只有「曲师 - 曲名」，原来直接覆盖，玩家自己的手序没了。
+    /// </summary>
+    [Fact]
+    public void AnotherChartWithTheSameNameIsKept()
+    {
+        var inbox = Path.Combine(_root, "inbox");
+        var game = Path.Combine(_root, "game");
+        Directory.CreateDirectory(inbox);
+        Directory.CreateDirectory(game);
+        File.WriteAllText(Path.Combine(game, "Artist - Song.json"), Fingering("1-a", 3, "charter A"));
+        File.WriteAllText(Path.Combine(game, "Broken.json"), "{ not a fingering");
+
+        File.WriteAllText(Path.Combine(inbox, "Artist - Song.json"), Fingering("2-b", 4, "charter B"));
+        File.WriteAllText(Path.Combine(inbox, "Broken.json"), Fingering("3-c", 5));
+        Assert.Equal(new[] { "Artist - Song (2).json", "Broken (2).json" }, FingeringInbox.MoveInto(inbox, game).OrderBy(n => n));
+        Assert.Contains("charter A", File.ReadAllText(Path.Combine(game, "Artist - Song.json")));
+        Assert.Equal("{ not a fingering", File.ReadAllText(Path.Combine(game, "Broken.json"))); // 读不出来的也不盖掉
+
+        File.WriteAllText(Path.Combine(inbox, "Artist - Song.json"), Fingering("2-b", 4, "charter B again"));
+        Assert.Equal(new[] { "Artist - Song (2).json" }, FingeringInbox.MoveInto(inbox, game));
+        Assert.Contains("charter B again", File.ReadAllText(Path.Combine(game, "Artist - Song (2).json")));
+        Assert.Contains("charter A", File.ReadAllText(Path.Combine(game, "Artist - Song.json")));
+        Assert.False(File.Exists(Path.Combine(game, "Artist - Song (3).json")));
     }
 
     /// <summary>搬走不是复制：玩家在游戏的文件夹里删掉一份手序，下一秒不会又出现。</summary>

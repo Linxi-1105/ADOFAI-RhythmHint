@@ -181,6 +181,25 @@ test('reads the history list the mod writes and ignores anything odd', () => {
   assert.deepEqual(M.parseRecent({ format: 'other', items: [] }), []);
 });
 
+test('saving does not overwrite another chart\'s fingering with the same name', async () => {
+  // 复现（2026-11-19 评审）：建议名只有「曲师 - 曲名」，同一首歌另一位谱师的手序会被直接覆盖。规则和 Mod 的 FingeringInbox.SaveName 一样
+  const doc = M.fromSession(session());
+  doc.usedFile = '';
+  const mine = M.toFileText(doc);
+  const other = mine.replace(/"charts":\[[^\]]*\]/, '"charts":["9-other"]');
+  const folder = files => async name => (name in files ? files[name] : null);
+  const base = doc.fileName, second = base.replace(/\.json$/, ' (2).json'), third = base.replace(/\.json$/, ' (3).json');
+
+  assert.equal(await M.saveName(doc, folder({})), base);
+  assert.equal(await M.saveName(doc, folder({ [base]: mine })), base, 'same level: overwrite');
+  assert.equal(await M.saveName(doc, folder({ [base]: other })), second, 'another chart: keep it');
+  assert.equal(await M.saveName(doc, folder({ [base]: '{ broken' })), second, 'unreadable: keep it');
+  assert.equal(await M.saveName(doc, folder({ [base]: other, [second]: mine })), second, 'saved as (2) before: overwrite that one');
+  assert.equal(await M.saveName(doc, folder({ [base]: other, [second]: other })), third);
+  doc.usedFile = base;
+  assert.equal(await M.saveName(doc, folder({ [base]: '{ broken' })), base, 'the file the game uses for this level');
+});
+
 test('file names are safe and readable', () => {
   assert.equal(M.suggestedFileName({ song: '<color=#f00>A/B</color>', artist: 'X:Y' }), 'X_Y - A_B.json');
   assert.equal(M.suggestedFileName({ song: '', artist: '' }), 'fingering.json');
