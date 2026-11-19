@@ -64,6 +64,25 @@ test('edits keep note count, times and holds; invalid edits change nothing', () 
   assert.deepEqual(lanesOf(single), [0]);
 });
 
+test('a different edit after saving and undoing still counts as unsaved', () => {
+  // 复现（2026-11-19 评审）：只数改了几步时，改 A → 保存 → 撤销 → 改 B 回到保存时的步数，显示已保存，其实游戏里还是 A
+  const doc = M.fromSession(session());
+  const h = new M.History(doc);
+  const [a, b] = doc.notes.filter(n => n.lanes.length === 1);
+  const next = n => (lanesOf(n)[0] + 1) % doc.keys;
+
+  assert.ok(h.apply(M.ops.toLane(doc, [a], next(a))));
+  h.markSaved();
+  assert.ok(!h.dirty);
+  h.undo();
+  assert.ok(h.dirty, 'undoing the saved edit');
+  h.redo();
+  assert.ok(!h.dirty, 'redo comes back to exactly what was saved');
+  h.undo();
+  assert.ok(h.apply(M.ops.toLane(doc, [b], next(b))));
+  assert.ok(h.dirty, 'same number of steps, different edit');
+});
+
 test('references apply only where the grouping matches', () => {
   const doc = M.fromSession(session());
   const change = M.ops.reference(doc, doc.notes, 'alternate');

@@ -286,9 +286,13 @@
     revert: (doc, notes) => plan(doc, notes, n => n.orig.map(l => l.slice())),
   };
 
-  /** 撤销、重做：每一步记下改了哪些音符、改之前和改之后。 */
+  /**
+   * 撤销、重做：每一步记下改了哪些音符、改之前和改之后。
+   * 每一步有自己的编号（step.id），「现在的样子」= 撤销栈顶那一步；保存时记下它，之后比的是同一步而不是步数
+   * （只数步数时，改 A → 保存 → 撤销 → 改 B 会显示已保存）。
+   */
   class History {
-    constructor(doc) { this.doc = doc; this.undoStack = []; this.redoStack = []; this.version = 0; this.savedVersion = 0; }
+    constructor(doc) { this.doc = doc; this.undoStack = []; this.redoStack = []; this.lastId = 0; this.savedId = 0; }
     apply(change) {
       if (!change || change.size === 0) return false;
       const step = [];
@@ -297,25 +301,26 @@
         step.push([id, note.lanes, lanes]);
         note.lanes = lanes;
       });
+      step.id = ++this.lastId;
       this.undoStack.push(step);
       this.redoStack = [];
-      this.version++;
       return true;
     }
-    undo() { return this.move(this.undoStack, this.redoStack, 1, -1); }
-    redo() { return this.move(this.redoStack, this.undoStack, 2, 1); }
-    move(from, to, pick, dv) {
+    undo() { return this.move(this.undoStack, this.redoStack, 1); }
+    redo() { return this.move(this.redoStack, this.undoStack, 2); }
+    move(from, to, pick) {
       const step = from.pop();
       if (!step) return null;
       step.forEach(([id, before, after]) => { this.doc.notes[id].lanes = pick === 1 ? before : after; });
       to.push(step);
-      this.version += dv;
       return step.map(s => s[0]);
     }
+    /** 现在停在哪一步（0 = 打开时的样子）。 */
+    get current() { return this.undoStack.length ? this.undoStack[this.undoStack.length - 1].id : 0; }
     get canUndo() { return this.undoStack.length > 0; }
     get canRedo() { return this.redoStack.length > 0; }
-    get dirty() { return this.version !== this.savedVersion; }
-    markSaved() { this.savedVersion = this.version; }
+    get dirty() { return this.current !== this.savedId; }
+    markSaved() { this.savedId = this.current; }
   }
 
   // ---------- 参考信息 ----------
