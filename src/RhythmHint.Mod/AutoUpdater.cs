@@ -45,6 +45,9 @@ internal static class AutoUpdater
 
     private static bool _started;
 
+    /// <summary>正在进行的网络请求：Mod 关掉时协程跟着停，要靠它停掉请求（见 <see cref="Abort"/>）。</summary>
+    private static UnityWebRequest? _request;
+
     public static UpdateState State { get; private set; } = UpdateState.Idle;
 
     /// <summary>正在下载、已经装好的版本。</summary>
@@ -66,7 +69,67 @@ internal static class AutoUpdater
         }
 
         _started = true;
-        host.StartCoroutine(Run(now));
+        host.StartCoroutine(Guarded(Run(now)));
+    }
+
+    /// <summary>
+    /// Overlay 销毁（玩家在 UMM 里关掉 Mod）时调用：协程跟着停了，停掉没下完的请求（下了一半的文件随之删掉），
+    /// 把卡在「检查中」「正在下载」的状态复位，重新启用后照常再查，「重试」也点得动。
+    /// </summary>
+    public static void Abort()
+    {
+        var request = _request;
+        _request = null;
+        if (request != null)
+        {
+            request.Abort();
+            request.Dispose();
+        }
+
+        if (Busy)
+        {
+            State = UpdateState.Idle;
+            _started = false;
+            Main.Mod.Logger.Log("自动更新：Mod 已关闭，中断了检查或下载，重新启用后再查");
+        }
+    }
+
+    /// <summary>
+    /// 一步一步代跑 <paramref name="steps"/>：协程里没接住的异常只会让 Unity 记一条日志、停掉协程，
+    /// 状态就一直停在「检查中」「正在下载」，「重试」也因为 Busy 点不动。哪一步抛出都走 <see cref="Fail"/>。
+    /// 这是协程最外层的兜底，所以接住所有异常（完整记进日志），和 Overlay.Update 的兜底一样。
+    /// </summary>
+    private static IEnumerator Guarded(IEnumerator steps)
+    {
+        try
+        {
+            while (true)
+            {
+                object? current;
+                try
+                {
+                    if (!steps.MoveNext())
+                    {
+                        break;
+                    }
+
+                    current = steps.Current;
+                }
+                catch (Exception ex)
+                {
+                    Fail(Lang.M("发生意外错误，详见 Unity Mod Manager 日志"), ex.Message);
+                    Main.Mod.Logger.LogException(ex);
+                    break;
+                }
+
+                yield return current;
+            }
+        }
+        finally
+        {
+            _request = null;
+            (steps as IDisposable)?.Dispose();
+        }
     }
 
     private static IEnumerator Run(bool now)
@@ -101,8 +164,10 @@ internal static class AutoUpdater
         string text;
         using (var request = UnityWebRequest.Get(url))
         {
+            _request = request;
             request.timeout = ManifestTimeoutSeconds;
             yield return request.SendWebRequest();
+            _request = null;
             if (request.result != UnityWebRequest.Result.Success)
             {
                 Fail(Lang.M("连不上更新服务器"), url + ": " + request.error);
@@ -130,12 +195,23 @@ internal static class AutoUpdater
         Version = manifest.Version;
         State = UpdateState.Downloading;
         Main.Mod.Logger.Log($"自动更新：下载 {manifest.Version}（{manifest.Url}）");
-        Directory.CreateDirectory(WorkFolder);
+        try
+        {
+            Directory.CreateDirectory(WorkFolder);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Fail(Lang.M("安装失败"), WorkFolder + ": " + ex.Message);
+            yield break;
+        }
+
         var zip = Path.Combine(WorkFolder, "download.zip");
         using (var request = new UnityWebRequest(manifest.Url, UnityWebRequest.kHttpVerbGET, new DownloadHandlerFile(zip) { removeFileOnAbort = true }, null))
         {
+            _request = request;
             request.timeout = DownloadTimeoutSeconds;
             yield return request.SendWebRequest();
+            _request = null;
             if (request.result != UnityWebRequest.Result.Success)
             {
                 Fail(Lang.M("下载失败"), manifest.Url + ": " + request.error);
@@ -161,6 +237,11 @@ internal static class AutoUpdater
             var files = ModUpdate.Install(zip, Main.Mod.Path, WorkFolder, Main.Mod.Info.Id);
             State = UpdateState.Installed;
             Main.Mod.Logger.Log($"自动更新：已装好 {manifest.Version}（{files.Count} 个文件），重启游戏后生效；旧文件备份在 {Path.Combine(WorkFolder, "backup")}");
+            var staging = Path.Combine(WorkFolder, "new");
+            if (Directory.Exists(staging))
+            {
+                Main.Mod.Logger.Warning($"自动更新：临时文件夹 {staging} 没删掉（被占用），不影响新版，下次更新时会重建");
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
         {

@@ -34,6 +34,11 @@ public class ModUpdateTests : IDisposable
     [InlineData("{\"format\":\"rhythmhint-update\",\"version\":\"1.3.1\",\"url\":\"http://a/b.zip\",\"sha256\":\"" + Sha + "\"}")] // 只认 https
     [InlineData("{\"format\":\"rhythmhint-update\",\"version\":\"1.3.1\",\"url\":\"https://a/b.zip\",\"sha256\":\"abc\"}")]
     [InlineData("{\"format\":\"rhythmhint-update\",\"version\":\"1.3.1\",\"sha256\":\"" + Sha + "\"}")]
+    [InlineData("[1, 2]")] // 不是对象
+    // 字段类型不对：Newtonsoft 转字符串时抛 ArgumentException，原来没接住，协程中断、状态一直停在「检查中」
+    [InlineData("{\"format\":\"rhythmhint-update\",\"version\":{\"major\":1},\"url\":\"https://a/b.zip\",\"sha256\":\"" + Sha + "\"}")]
+    [InlineData("{\"format\":\"rhythmhint-update\",\"version\":\"1.3.1\",\"url\":[\"https://a/b.zip\"],\"sha256\":\"" + Sha + "\"}")]
+    [InlineData("{\"format\":[\"rhythmhint-update\"],\"version\":\"1.3.1\",\"url\":\"https://a/b.zip\",\"sha256\":\"" + Sha + "\"}")]
     public void RejectsBrokenManifests(string? text) => Assert.Null(UpdateManifest.Parse(text));
 
     [Fact]
@@ -125,6 +130,7 @@ public class ModUpdateTests : IDisposable
     [InlineData("RhythmHint/../evil.dll")] // 写到 Mod 文件夹外面
     [InlineData("RhythmHint/../../Mods/Other/x.dll")]
     [InlineData("Other/RhythmHint.dll")] // 不是本 Mod 的文件夹
+    [InlineData("RhythmHint/bad\0name.js")] // 非法字符：原来 ArgumentException 漏出去，自动更新卡在「正在下载」
     public void RefusesPathsOutsideTheModFolder(string evil)
     {
         var (mod, work) = Installed();
@@ -159,5 +165,158 @@ public class ModUpdateTests : IDisposable
         Assert.Equal("old dll", Read(mod, "RhythmHint.dll"));
         Assert.Equal("old app", Read(mod, "Editor", "app.js"));
         Assert.False(File.Exists(Path.Combine(mod, "Editor", "new.js")));
+    }
+
+    /// <summary>复制到一半失败、目标已经被截断（磁盘满、杀毒软件干扰）：写了一半的文件写进目标，然后抛出。</summary>
+    private static Action<string, string> FailHalfwayAt(string name) => (from, to) =>
+    {
+        if (Path.GetFileName(to) == name)
+        {
+            File.WriteAllText(to, "half");
+            throw new IOException("磁盘空间不足");
+        }
+
+        File.Copy(from, to, overwrite: true);
+    };
+
+    /// <summary>
+    /// 复现：1.3.1 的包里第二个就是 RhythmHint.dll，它复制到一半失败时没被还原（只还原复制完的），
+    /// Info.json 却换回了旧的：DLL 是坏的，UMM 下次整个 Mod 都加载不了。
+    /// </summary>
+    [Fact]
+    public void TheFileThatFailedHalfwayIsPutBackToo()
+    {
+        var (mod, work) = Installed();
+        var zip = Zip(("RhythmHint/Info.json", "new info"), ("RhythmHint/RhythmHint.dll", "new dll"), ("RhythmHint/Editor/app.js", "new app"));
+
+        Assert.Throws<IOException>(() => ModUpdate.Install(zip, mod, work, "RhythmHint", FailHalfwayAt("RhythmHint.dll")));
+
+        Assert.Equal("old info", Read(mod, "Info.json"));
+        Assert.Equal("old dll", Read(mod, "RhythmHint.dll"));
+        Assert.Equal("old app", Read(mod, "Editor", "app.js"));
+    }
+
+    [Fact]
+    public void ANewFileThatFailedHalfwayIsRemoved()
+    {
+        var (mod, work) = Installed();
+        var zip = Zip(("RhythmHint/Info.json", "new info"), ("RhythmHint/RhythmHint.dll", "new dll"), ("RhythmHint/Editor/brand/new.js", "brand new"));
+
+        Assert.Throws<IOException>(() => ModUpdate.Install(zip, mod, work, "RhythmHint", FailHalfwayAt("new.js")));
+
+        Assert.Equal("old info", Read(mod, "Info.json"));
+        Assert.Equal("old dll", Read(mod, "RhythmHint.dll"));
+        Assert.False(File.Exists(Path.Combine(mod, "Editor", "brand", "new.js")));
+    }
+
+    [Fact]
+    public void ALeftoverStagingFolderIsNotAFailedInstall()
+    {
+        // 复现：全部覆盖成功后删临时文件夹 .update\new 失败（文件被占用），原来会被报成「安装失败」，其实新版已经装好
+        var (mod, work) = Installed();
+        var zip = Zip(("RhythmHint/Info.json", "new info"), ("RhythmHint/RhythmHint.dll", "new dll"));
+        var locks = new List<FileStream>();
+        try
+        {
+            var files = ModUpdate.Install(zip, mod, work, "RhythmHint", (from, to) =>
+            {
+                File.Copy(from, to, overwrite: true);
+                locks.Add(new FileStream(from, FileMode.Open, FileAccess.Read, FileShare.Read)); // 一直占着，删不掉
+            });
+
+            Assert.Equal(2, files.Count);
+            Assert.Equal("new info", Read(mod, "Info.json"));
+            Assert.Equal("new dll", Read(mod, "RhythmHint.dll"));
+        }
+        finally
+        {
+            locks.ForEach(l => l.Dispose());
+        }
+    }
+
+    // ---------- 已发布的安装代码装现在的包 ----------
+
+    private static readonly string RepoRoot = FindRoot();
+
+    private static string FindRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "Directory.Build.props")))
+        {
+            dir = dir.Parent;
+        }
+
+        return dir?.FullName ?? throw new InvalidOperationException("找不到仓库根目录（Directory.Build.props）");
+    }
+
+    /// <summary>Mod 项目文件里的一个属性（打包用的模板）。</summary>
+    private static string Property(System.Xml.Linq.XDocument project, string name) =>
+        project.Descendants(name).Select(e => e.Value).FirstOrDefault() ?? throw new InvalidOperationException("项目文件里没有 " + name);
+
+    /// <summary>
+    /// 1.3.1 → 下一版这一跳永远由 1.3.1 已经发布的代码执行（Frozen/ModUpdate131.cs 是它的原样副本）：
+    /// 照 RhythmHint.Mod.csproj 的 PackageForUmm 打出现在的包和 update.json，交给 1.3.1 的代码读清单、核对、安装，要一路走通。
+    /// 改打包方式（包里的文件夹、update.json 的字段、清单地址）时这里会失败：那样已经装了 1.3.1 的玩家就再也自动更新不了。
+    /// </summary>
+    [Fact]
+    public void TheReleasedInstallerStillInstallsTodaysPackage()
+    {
+        var project = System.Xml.Linq.XDocument.Load(Path.Combine(RepoRoot, "src", "RhythmHint.Mod", "RhythmHint.Mod.csproj"));
+        var modId = Property(project, "ModId");
+        var repoUrl = Property(project, "RepoUrl");
+        const string version = "1.3.2"; // 下一版（比 1.3.1 新就行）
+
+        // 包的结构：RhythmHint/RhythmHint.dll、RhythmHint/Info.json、RhythmHint/Editor/编辑器文件（照 PackageForUmm 的 Copy）
+        var targets = project.Descendants("Target").Single(t => (string?)t.Attribute("Name") == "PackageForUmm");
+        var copies = targets.Elements("Copy").Select(c => ((string?)c.Attribute("SourceFiles"), (string?)c.Attribute("DestinationFolder"))).ToList();
+        Assert.Contains(("$(OutDir)$(AssemblyName).dll;$(OutDir)Info.json", "$(PackageStageDir)$(ModId)"), copies);
+        Assert.Contains(("@(EditorFile)", "$(PackageStageDir)$(ModId)\\Editor"), copies);
+        Assert.Equal("RhythmHint", modId);
+
+        var stage = Path.Combine(_root, "stage");
+        Directory.CreateDirectory(Path.Combine(stage, modId, "Editor"));
+        File.WriteAllText(Path.Combine(stage, modId, modId + ".dll"), "new dll");
+        File.WriteAllText(Path.Combine(stage, modId, "Info.json"), "new info");
+        var editor = Path.Combine(RepoRoot, "src", "RhythmHint.Editor");
+        var editorFiles = Directory.GetFiles(editor).Where(f => (f.EndsWith(".html") || f.EndsWith(".css") || f.EndsWith(".js") || Path.GetFileName(f) == "icon.ico")
+            && Path.GetFileName(f) != "session.js").ToList();
+        Assert.NotEmpty(editorFiles);
+        foreach (var file in editorFiles)
+        {
+            File.Copy(file, Path.Combine(stage, modId, "Editor", Path.GetFileName(file)));
+        }
+
+        var zip = Path.Combine(_root, $"{modId}-{version}.zip");
+        ZipFile.CreateFromDirectory(stage, zip); // MSBuild 的 ZipDirectory 就是它
+        var url = Property(project, "PackageUrl").Replace("$(RepoUrl)", repoUrl).Replace("$(Version)", version).Replace("$(ModId)", modId);
+        var manifestText = Property(project, "UpdateJsonText").Replace("$(Version)", version).Replace("$(PackageUrl)", url)
+            .Replace("$(PackageSha256.ToLowerInvariant())", Frozen.V131.ModUpdate.Sha256Of(zip));
+        var repository = Property(project, "DefaultModRepository").Replace("$(RepoUrl)", repoUrl);
+
+        // 1.3.1 怎么找清单、读清单、决定装不装
+        Assert.Equal(repoUrl + "/releases/latest/download/update.json", Frozen.V131.ModUpdate.ManifestUrl(repository));
+        var manifest = Frozen.V131.UpdateManifest.Parse(manifestText);
+        Assert.NotNull(manifest);
+        Assert.Equal(version, manifest!.Version);
+        Assert.StartsWith("https://", manifest.Url);
+        Assert.Equal(Frozen.V131.ModUpdate.Sha256Of(zip), manifest.Sha256);
+        Assert.True(Frozen.V131.ModUpdate.ShouldInstall(manifest.Version, "1.3.1"));
+
+        // 1.3.1 怎么装：只换包里有的文件，设置和手序不动
+        var (mod, work) = Installed();
+        var files = Frozen.V131.ModUpdate.Install(zip, mod, work, modId);
+
+        Assert.Equal(2 + editorFiles.Count, files.Count);
+        Assert.Equal("new info", Read(mod, "Info.json"));
+        Assert.Equal("new dll", Read(mod, "RhythmHint.dll"));
+        Assert.Equal(File.ReadAllText(editorFiles[0]), Read(mod, "Editor", Path.GetFileName(editorFiles[0])));
+        Assert.Equal("my settings", Read(mod, "Settings.xml"));
+        Assert.Equal("my fingering", Read(mod, "Fingerings", "Song.json"));
+
+        // 现在的代码读同一份清单、装同一个包也一样
+        Assert.Equal(manifest.Sha256, UpdateManifest.Parse(manifestText)!.Sha256);
+        var (mod2, work2) = (Path.Combine(_root, "Mods2", "RhythmHint"), Path.Combine(_root, "Mods2", "RhythmHint", ".update"));
+        Directory.CreateDirectory(mod2);
+        Assert.Equal(files.Count, ModUpdate.Install(zip, mod2, work2, modId).Count);
     }
 }

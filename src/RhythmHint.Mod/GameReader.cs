@@ -236,14 +236,17 @@ internal static class GameReader
         return result.Points;
     }
 
-    /// <summary>变速点：砖块速度倍率（相对关卡起始 BPM）变化的地方各记一个点。</summary>
+    /// <summary>
+    /// 变速点：砖块速度倍率（相对关卡起始 BPM）变化的地方各记一个点。速度不是正的有限数、时间不是有限数的砖跳过
+    /// （关卡数据异常时可能有 NaN、无穷大，节拍线推算拿到它们会出错）。
+    /// </summary>
     public static List<(double Time, double Speed)> ReadSpeeds(LevelState level)
     {
         var speeds = new List<(double, double)>();
         var lastSpeed = float.NaN;
         foreach (var f in level.Floors)
         {
-            if (f == null || f.speed <= 0 || f.speed == lastSpeed)
+            if (f == null || !(f.speed > 0) || float.IsInfinity(f.speed) || f.speed == lastSpeed || !IsFinite(f.entryTime))
             {
                 continue;
             }
@@ -255,12 +258,23 @@ internal static class GameReader
         return speeds;
     }
 
-    /// <summary>关卡起始 BPM 下一拍的秒数。</summary>
+    /// <summary>
+    /// 关卡起始 BPM 下一拍的秒数，总是正的有限数：crotchetAtStart 不是正的有限数时按 BPM 算，BPM 也不对（不到 1、NaN、无穷大）时按 1 BPM 算
+    /// （和原来 BPM 不到 1 时一样），免得节拍线推算拿到 0 或 NaN 出错。
+    /// </summary>
     public static double Crotchet(LevelState level)
     {
         var crotchet = level.Conductor.crotchetAtStart;
-        return crotchet > 0 ? crotchet : 60.0 / System.Math.Max(1f, level.Conductor.bpm);
+        if (crotchet > 0 && IsFinite(crotchet))
+        {
+            return crotchet;
+        }
+
+        var bpm = level.Conductor.bpm;
+        return 60.0 / (bpm >= 1 && IsFinite(bpm) ? bpm : 1f);
     }
+
+    private static bool IsFinite(double value) => !double.IsNaN(value) && !double.IsInfinity(value);
 
     /// <summary>当前砖块的显示 BPM（起始 BPM × 速度倍率 × 歌曲变速）。</summary>
     public static float CurrentBpm(LevelState level)

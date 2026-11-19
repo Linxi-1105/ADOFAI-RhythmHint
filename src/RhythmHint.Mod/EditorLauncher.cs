@@ -347,9 +347,13 @@ internal static class EditorLauncher
 
     private static float _nextHitSoundTry;
 
+    /// <summary>读失败过的打击声和那一关的指纹：同一关、同一种打击声不再重试（每次重试都要新分配约 350 KB 的采样数组）。</summary>
+    private static (string Name, (int, int, int, double) Level)? _hitSoundFailed;
+
     /// <summary>
     /// 打歌时调用（每秒最多真做一次）：游戏已经载入这一关的打击声、还没存过时，写成 Editor/hitsound-名字.wav。
-    /// 还没按键开始时游戏没载入打击声，那时打开编辑器就用存下的这份。每种打击声只存一次。
+    /// 还没按键开始时游戏没载入打击声，那时打开编辑器就用存下的这份。每种打击声只存一次；
+    /// 读失败了这一关不再重试，换关卡或这一关换了打击声再试。
     /// </summary>
     public static void RememberHitSound(LevelState level)
     {
@@ -371,11 +375,22 @@ internal static class EditorLauncher
             return;
         }
 
+        var print = GameReader.Fingerprint(level);
+        if (_hitSoundFailed is { } failed && failed.Name == name && failed.Level == print)
+        {
+            return;
+        }
+
         // 打歌中只查 AudioManager.audioLib（字典），不在内存里翻所有音频，免得卡顿
-        var wav = ReadHitSound(name, searchAll: false);
+        var wav = ReadHitSound(name, searchAll: false, out var tried);
         if (wav.Length > 0)
         {
             SaveHitSound(name, wav);
+        }
+        else if (tried)
+        {
+            _hitSoundFailed = (name, print);
+            Main.Mod.Logger.Warning($"编辑器：读游戏的打击声 {name} 失败，这一关不再重试（打开编辑器时打拍声用合成的）");
         }
     }
 
@@ -407,14 +422,19 @@ internal static class EditorLauncher
 
     /// <summary>从游戏已经载入的音频读打击声（最长一秒的 WAV）；没载入或读不出来为空。</summary>
     /// <param name="searchAll">audioLib 里没有时再按名字找内存里所有的 AudioClip（慢，打歌中不用）。</param>
-    private static byte[] ReadHitSound(string name, bool searchAll)
+    private static byte[] ReadHitSound(string name, bool searchAll) => ReadHitSound(name, searchAll, out _);
+
+    /// <param name="tried">找到了已经载入的音频、真的读过一遍（读失败也是 true；没找到、没载入为 false，过一会儿可能就有了）。</param>
+    private static byte[] ReadHitSound(string name, bool searchAll, out bool tried)
     {
+        tried = false;
         var clip = FindLoadedClip(name, searchAll);
         if (clip == null || GetData == null || clip.loadState != AudioDataLoadState.Loaded)
         {
             return Array.Empty<byte>();
         }
 
+        tried = true;
         var frames = Math.Min(clip.samples, clip.frequency);
         var samples = new float[frames * clip.channels];
         return GetData(clip, samples, 0) ? AudioDump.ShortWav(samples, clip.channels, clip.frequency, maxSeconds: 1) : Array.Empty<byte>();

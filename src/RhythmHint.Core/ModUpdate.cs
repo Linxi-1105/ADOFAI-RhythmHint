@@ -53,10 +53,20 @@ public sealed class UpdateManifest
             return null; // 下回来的不是 JSON（比如被网络劫持成网页）：当作没有清单
         }
 
-        var version = (string?)json["version"];
-        var url = (string?)json["url"];
-        var sha = (string?)json["sha256"];
-        if ((string?)json["format"] != Format || !ModUpdate.TryParseVersion(version, out _) || url == null || sha == null || !Sha256Pattern.IsMatch(sha))
+        string? format, version, url, sha;
+        try
+        {
+            format = (string?)json["format"];
+            version = (string?)json["version"];
+            url = (string?)json["url"];
+            sha = (string?)json["sha256"];
+        }
+        catch (ArgumentException)
+        {
+            return null; // 字段是对象、数组（转不成字符串时 Newtonsoft 抛这个）：当作清单格式不对
+        }
+
+        if (format != Format || !ModUpdate.TryParseVersion(version, out _) || url == null || sha == null || !Sha256Pattern.IsMatch(sha))
         {
             return null;
         }
@@ -157,7 +167,13 @@ public static class ModUpdate
     /// 必须有 Info.json 和 DLL），再把要换掉的旧文件备份到 <paramref name="workFolder"/>/backup，最后覆盖过去。
     /// 中途失败就从备份还原再抛出。只换压缩包里有的文件：设置、手序、编辑器历史不动。返回换掉的文件（相对 Mod 文件夹）。
     /// </summary>
-    public static List<string> Install(string zipPath, string modFolder, string workFolder, string modId)
+    public static List<string> Install(string zipPath, string modFolder, string workFolder, string modId) =>
+        Install(zipPath, modFolder, workFolder, modId, (from, to) => File.Copy(from, to, overwrite: true));
+
+    /// <param name="overwrite">
+    /// 把一个新文件复制到 Mod 文件夹（from, to；目标所在的文件夹已经建好）。平时就是 File.Copy；测试用它模拟复制到一半失败（磁盘满、杀毒软件干扰）。
+    /// </param>
+    public static List<string> Install(string zipPath, string modFolder, string workFolder, string modId, Action<string, string> overwrite)
     {
         var staging = Path.Combine(workFolder, "new");
         var backup = Path.Combine(workFolder, "backup");
@@ -177,22 +193,34 @@ public static class ModUpdate
             }
         }
 
-        var done = new List<string>();
+        // 动手之前先记下：复制到一半失败时，目标可能已经被截断（1.3.1 的包里第二个就是 DLL，没还原的话 UMM 下次整个 Mod 都加载不了），
+        // 所以失败的那一个也要还原（原来没有的删掉）
+        var touched = new List<string>();
         try
         {
             foreach (var file in files)
             {
-                CopyFile(Path.Combine(staging, file), Path.Combine(modFolder, file));
-                done.Add(file);
+                var target = Path.Combine(modFolder, file);
+                touched.Add(file);
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                overwrite(Path.Combine(staging, file), target);
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Restore(done, modFolder, backup);
+            Restore(touched, modFolder, backup);
             throw;
         }
 
-        Directory.Delete(staging, recursive: true);
+        try
+        {
+            Directory.Delete(staging, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // 新版已经全部装好，临时文件夹删不掉（被占用）不算失败：下次更新解包前会整个重建；调用方看到它还在会记日志
+        }
+
         return files;
     }
 
@@ -218,7 +246,17 @@ public static class ModUpdate
             }
 
             var relative = name.Substring(prefix.Length).Replace('/', Path.DirectorySeparatorChar);
-            var target = Path.GetFullPath(Path.Combine(staging, relative));
+            string target;
+            try
+            {
+                target = Path.GetFullPath(Path.Combine(staging, relative));
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+            {
+                // .NET Framework / Mono 遇到路径里有非法字符（| < > " 或盘符那种冒号）抛这两种：当作坏包，和别的坏包一样报「安装失败」
+                throw new InvalidDataException("压缩包里有非法的路径：" + name, ex);
+            }
+
             if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidDataException("压缩包里的路径会写到 Mod 文件夹外面：" + name);
@@ -237,9 +275,10 @@ public static class ModUpdate
         return files;
     }
 
-    private static void Restore(List<string> done, string modFolder, string backup)
+    /// <summary>把动过的文件换回备份；备份里没有的（新版才有的文件，可能只写了一半）删掉。</summary>
+    private static void Restore(List<string> touched, string modFolder, string backup)
     {
-        foreach (var file in done)
+        foreach (var file in touched)
         {
             var saved = Path.Combine(backup, file);
             try

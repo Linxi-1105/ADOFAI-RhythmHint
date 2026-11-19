@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Settings xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <ShowPreview>false</ShowPreview>
+  <PreviewSound>false</PreviewSound>
+  <PreviewVolume>0.35</PreviewVolume>
+  <ShrinkGameView>false</ShrinkGameView>
+  <ShowLanes>false</ShowLanes>
+  <RoundNotes>true</RoundNotes>
+  <ShowTaiko>false</ShowTaiko>
+  <ShowBpm>false</ShowBpm>
+  <ShowDifficulty>false</ShowDifficulty>
+  <LanesOnRight>true</LanesOnRight>
+  <TaikoAtBottom>true</TaikoAtBottom>
+  <UiScale>1.25</UiScale>
+  <LaneSpeed>1.85</LaneSpeed>
+  <TaikoSpeed>0.7</TaikoSpeed>
+  <PanelOpacity>0.55</PanelOpacity>
+  <VisualOffsetMs>-37</VisualOffsetMs>
+  <KeyLabels>S D K L</KeyLabels>
+  <LightKeysOnPress>false</LightKeysOnPress>
+  <SettingsHotkey>F9</SettingsHotkey>
+  <Language>ja</Language>
+  <LatestVersion>1.3.1</LatestVersion>
+  <AutoUpdate>false</AutoUpdate>
+  <GuideVersion>1</GuideVersion>
+  <ChordAngleDeg>15</ChordAngleDeg>
+  <ResetWindowMs>180</ResetWindowMs>
+  <ChordFocusMs>300</ChordFocusMs>
+  <JackWindowMs>120</JackWindowMs>
+  <UseRoll>false</UseRoll>
+  <OuterRoll>false</OuterRoll>
+  <Style>ReviewPreferenceV1</Style>
+  <DefaultsRevision>2</DefaultsRevision>
+  <ReviewShortMinGapMs>55</ReviewShortMinGapMs>
+  <ReviewShortMaxGapMs>72.5</ReviewShortMaxGapMs>
+  <ReviewShortMinNotes>3</ReviewShortMinNotes>
+  <ReviewShortMaxNotes>7</ReviewShortMaxNotes>
+  <ReviewTimingToleranceMs>2.5</ReviewTimingToleranceMs>
+  <UseCustomFingering>false</UseCustomFingering>
+  <FingeringChoices>812-3f9a0c1b2d4e5f60718293a4	Song (2).json
+95-0a1b2c3d4e5f60718293a4b5	</FingeringChoices>
+  <LeftHanded>true</LeftHanded>
+  <ChordsOnOtherHand>true</ChordsOnOtherHand>
+</Settings>

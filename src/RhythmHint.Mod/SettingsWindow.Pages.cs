@@ -25,6 +25,7 @@ internal sealed partial class SettingsWindow
     private void HomePage(Settings s, Overlay overlay)
     {
         Hero();
+        SettingsNoticeCard();
         StatusCard(s, overlay);
         Tiles(s);
 
@@ -69,6 +70,26 @@ internal sealed partial class SettingsWindow
         Label(new Rect(r.x + 28, r.y + 62, textW, th), text, 14, Text2, wrap: true, anchor: TextAnchor.UpperLeft);
         Logo(new Rect(r.xMax - 108, r.y + 26, 72, 64), 1);
         _ui.Gap(Ui.CardGap);
+    }
+
+    /// <summary>启动时读设置文件出了问题（见 Main.Load）：说清哪些改回了默认值、原文件另存在哪，玩家点「知道了」后不再显示。</summary>
+    private void SettingsNoticeCard()
+    {
+        var notice = Main.SettingsNotice;
+        if (notice.Source.Length == 0)
+        {
+            return;
+        }
+
+        var label = Lang.T("知道了");
+        _ui.BeginCard("settingsNotice", fill: new Color(0.17f, 0.12f, 0.115f), border: With(Danger, 0.35f));
+        var r = _ui.Row("alert", Lang.T("设置文件读取出错"), Lang.T(notice), Ui.ButtonWidth(label, "check"), 36);
+        if (_ui.Button("settingsNoticeOk", r, label, "check"))
+        {
+            Main.SettingsNotice = Message.Empty;
+        }
+
+        _ui.EndCard();
     }
 
     /// <summary>现在的状态：关卡里写曲名和正在用的手序，关卡外写演示；右边是排法和画面偏移。</summary>

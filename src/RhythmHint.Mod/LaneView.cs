@@ -28,6 +28,19 @@ internal static class LaneView
         Painter.Rect(panel, Painter.PanelColor.WithAlpha(Mathf.Clamp01(s.PanelOpacity)));
 
         GUI.BeginGroup(panel);
+        try
+        {
+            DrawInside(f, l, s, panel);
+        }
+        finally
+        {
+            // 画到一半出错时也要关上裁剪组，否则后面画的东西（设置窗口）都被裁进这块面板里
+            GUI.EndGroup();
+        }
+    }
+
+    private static void DrawInside(OverlayFrame f, OverlayLayout l, Settings s, Rect panel)
+    {
         var judgeY = l.JudgeY - l.PanelY;
         var bottom = panel.height;
 
@@ -52,8 +65,6 @@ internal static class LaneView
             DrawNotes(f, l, judgeY, speed, lookAhead);
             DrawJudgeAndKeys(f, l, judgeY, holds);
         }
-
-        GUI.EndGroup();
     }
 
     private static void DrawLaneBackground(OverlayLayout l, float height)

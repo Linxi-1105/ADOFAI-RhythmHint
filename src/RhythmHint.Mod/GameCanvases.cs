@@ -62,8 +62,8 @@ internal sealed class GameCanvases
     public bool Owns(Camera cam) => _camera && cam == _camera;
 
     /// <param name="freed">四边被面板占掉的像素（四轨面板在左或右，太鼓条在上或下）。</param>
-    /// <param name="gameCameras">游戏在用的摄像机：自己的摄像机要排在它们全部之后画。</param>
-    public void Apply(ScreenMargins freed, IReadOnlyList<Camera> gameCameras)
+    /// <param name="gameCameras">游戏在用的摄像机：自己的摄像机要排在它们全部之后画（用 List 而不是接口，每帧遍历不装箱）。</param>
+    public void Apply(ScreenMargins freed, List<Camera> gameCameras)
     {
         var screen = new Vector2Int(Screen.width, Screen.height);
         if (screen != _screen)
@@ -139,7 +139,8 @@ internal sealed class GameCanvases
     }
 
     /// <summary>
-    /// 每帧找一次：暂停菜单这类界面是按下按键时才显示的，晚一帧就会先全屏闪一下。
+    /// 每帧找一次：暂停菜单这类界面是按下按键时才显示的，晚一帧就会先全屏闪一下。所以不降频；
+    /// FindObjectsByType 每次新建一个数组（几十个引用，一两百字节），Unity 没有不分配的版本，只能留着。
     /// 返回没转换的画布指定的摄像机里最高的 depth（没有时很小），自己的摄像机要高过它。
     /// </summary>
     private float Scan(Camera cam)

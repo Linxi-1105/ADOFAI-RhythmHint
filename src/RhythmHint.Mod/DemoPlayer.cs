@@ -23,7 +23,8 @@ internal sealed class DemoPlayer
     private DemoChart _demo = DemoChart.Build(FallbackBpm);
     private double[] _tileTimes = Array.Empty<double>();
     private int _nextSource;
-    private string _builtFor = string.Empty;
+    private double _builtBpm = double.NaN; // 演示谱按哪个 BPM（取到 0.001）和哪组排键设置排的，两样都没变就不重排
+    private string _builtKey = string.Empty;
     private bool _running;
     private bool _followingMusic;
     private double _startDsp;
@@ -49,6 +50,11 @@ internal sealed class DemoPlayer
         ? Lang.M("跟随菜单音乐，{0:0.#} BPM", 60 / _demo.SecondsPerBeat)
         : Lang.M("内置节拍，{0:0} BPM", FallbackBpm);
 
+    /// <summary><see cref="Mode"/> 取决于这两样：每帧比它们，变了才拼 Mode（见 Overlay.ReportScreen）。</summary>
+    public bool FollowingMusic => _followingMusic;
+
+    public double SecondsPerBeat => _demo.SecondsPerBeat;
+
     /// <param name="sound">是否放嗒声（演示正在滑出时不放）。</param>
     public void Tick(OverlayFrame frame, Settings settings, bool sound)
     {
@@ -60,7 +66,7 @@ internal sealed class DemoPlayer
             _startDsp = AudioSettings.dspTime + 0.1;
             _clickIndex = 0;
             _clickLoop = 0;
-            _builtFor = string.Empty;
+            _builtKey = string.Empty;
         }
 
         Rebuild(frame, settings, music ? bpm : FallbackBpm);
@@ -112,7 +118,8 @@ internal sealed class DemoPlayer
         songPosition = 0;
         bpm = 0;
         var conductor = ADOBase.conductor;
-        if (conductor == null || conductor.song == null || !conductor.song.isPlaying || conductor.bpm <= 0)
+        // BPM 不是正的有限数（不该发生）时用内置节拍
+        if (conductor == null || conductor.song == null || !conductor.song.isPlaying || !(conductor.bpm > 0) || float.IsInfinity(conductor.bpm))
         {
             return false;
         }
@@ -125,13 +132,16 @@ internal sealed class DemoPlayer
     /// <summary>BPM 或排键参数变了就重排演示谱，改完立刻能看到新键位。</summary>
     private void Rebuild(OverlayFrame frame, Settings settings, double bpm)
     {
-        var key = $"{bpm:0.###}/{settings.FingeringKey}";
-        if (key == _builtFor)
+        // 每帧调用：先比 BPM 和排键设置的指纹（设置没变时是同一个字符串），都没变就不重排，也不拼字符串
+        var rounded = Math.Round(bpm, 3, MidpointRounding.AwayFromZero);
+        var key = settings.FingeringKey;
+        if (rounded.Equals(_builtBpm) && key == _builtKey)
         {
             return;
         }
 
-        _builtFor = key;
+        _builtBpm = rounded;
+        _builtKey = key;
         _demo = DemoChart.BuildForSettings(bpm, settings.Style);
         var tiles = DemoChart.Repeat(_demo, Loops);
         _tileTimes = tiles.ConvertAll(t => t.Time).ToArray();

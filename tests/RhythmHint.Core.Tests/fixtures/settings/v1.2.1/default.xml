@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Settings xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <ShowPreview>true</ShowPreview>
+  <PreviewSound>true</PreviewSound>
+  <PreviewVolume>0.6</PreviewVolume>
+  <ShrinkGameView>true</ShrinkGameView>
+  <ShowLanes>true</ShowLanes>
+  <RoundNotes>false</RoundNotes>
+  <ShowTaiko>true</ShowTaiko>
+  <ShowBpm>true</ShowBpm>
+  <UiScale>1</UiScale>
+  <LaneSpeed>1</LaneSpeed>
+  <TaikoSpeed>1</TaikoSpeed>
+  <PanelOpacity>0.92</PanelOpacity>
+  <VisualOffsetMs>0</VisualOffsetMs>
+  <KeyLabels>D F J K</KeyLabels>
+  <LightKeysOnPress>true</LightKeysOnPress>
+  <SettingsHotkey>F8</SettingsHotkey>
+  <Language />
+  <LatestVersion />
+  <ChordAngleDeg>30</ChordAngleDeg>
+  <ResetWindowMs>165</ResetWindowMs>
+  <ChordFocusMs>450</ChordFocusMs>
+  <JackWindowMs>150</JackWindowMs>
+  <UseRoll>true</UseRoll>
+  <OuterRoll>true</OuterRoll>
+  <LeftHanded>false</LeftHanded>
+  <ChordsOnOtherHand>false</ChordsOnOtherHand>
+</Settings>

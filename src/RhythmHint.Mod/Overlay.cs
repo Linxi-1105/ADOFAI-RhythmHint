@@ -48,6 +48,10 @@ internal sealed class Overlay : MonoBehaviour
     private Message _caption = Message.Empty;
     private float _captionUntil;
     private string _captionShownFor = string.Empty;
+    private bool _beatsFailed;      // 节拍线推算出过错（只记一次日志）
+    private bool _difficultyFailed; // 难度估算出过错（同上）
+    private bool _drawFailed;       // 画面板出过错（同上）
+    private ScreenKey _screenKey;   // 画面状态的原因（见 ReportScreen），变了才拼成文字
 
     internal OverlayFrame Frame { get; } = new();
 
@@ -98,9 +102,10 @@ internal sealed class Overlay : MonoBehaviour
         {
             Report(EditorArea, EditorLauncher.Open(snapshot, level, _fingerings));
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or ArgumentException)
         {
-            // 写不了编辑器目录（权限、磁盘满），或者这一关的数据凑不成一份手序：告诉玩家，提示面板照常工作
+            // 写不了编辑器目录（权限、磁盘满），这一关的数据凑不成一份手序，或者排键参数不合法（编辑器两种排法都排一遍，
+            // 读设置时已修正过，这里兜底）、路径里有非法字符：告诉玩家，提示面板照常工作
             Report(EditorArea, (Lang.M("打开手序编辑器失败：{0}", ex.Message), false));
             Main.Mod.Logger.LogException(ex);
         }
@@ -171,8 +176,9 @@ internal sealed class Overlay : MonoBehaviour
 
     private void OnDestroy()
     {
-        // Mod 被关掉时把游戏画面还原
+        // Mod 被关掉时把游戏画面还原；自动更新的协程跟着停了，把卡在中间的状态复位
         _viewport.Restore();
+        AutoUpdater.Abort();
     }
 
     private void Update()
@@ -325,10 +331,7 @@ internal sealed class Overlay : MonoBehaviour
         // 离开关卡后面板还在滑出时也继续跟着，滑完为止
         _uiFollowing = levelShown || (_uiFollowing && Frame.Presence > 0);
         _viewport.Apply(Frame.Presence, settings, _uiFollowing);
-        Report(pausedHide ? Lang.M("已暂停，面板收起")
-            : levelShown ? Lang.M("显示关卡（{0}）", level.StateName)
-            : preview ? Lang.M("显示演示（{0}）", _demo.Mode)
-            : Lang.M("隐藏（{0}）", reason));
+        ReportScreen(pausedHide, levelShown, level, preview, reason);
         _keys.Read(settings, Frame);
     }
 
@@ -400,9 +403,7 @@ internal sealed class Overlay : MonoBehaviour
         var speeds = GameReader.ReadSpeeds(level);
         var crotchet = GameReader.Crotchet(level);
         var tempo = BeatGrid.MusicalTempo(speeds, crotchet);
-        var grid = BeatGrid.Infer(hits, speeds, crotchet, level.Floors[0].entryTime, end + 2);
-        var beats = grid.Lines;
-        Main.Mod.Logger.Log($"节拍线：{grid.Summary()}");
+        var beats = InferBeats(hits, speeds, crotchet, tempo, level.Floors[0].entryTime, end + 2);
         var settings = Main.Settings;
         var auto = NotePlanner.Plan(hits, settings.ToFingering());
         var info = GameReader.ReadInfo(level);
@@ -411,6 +412,56 @@ internal sealed class Overlay : MonoBehaviour
             : new FingeringResult(auto, new List<bool>(), string.Empty, null, Message.Empty, Message.Empty);
         var bpm = tempo.ConvertAll(t => (t.Time, 60 / t.SecondsPerBeat));
         return new LevelSnapshot(hits, chosen, info, beats, bpm);
+    }
+
+    /// <summary>
+    /// 节拍线和小节（BeatGrid.Infer）。只是画出来看的：推算出错（关卡数据异常）时退回按关卡变速直接画（BeatGrid.Build），
+    /// 不让它停用整个 Mod；只在第一次出错时记日志，免得每次重排都刷一遍。
+    /// </summary>
+    private List<BeatLine> InferBeats(List<TileHit> hits, List<(double Time, double Speed)> speeds, double crotchet,
+        List<(double Time, double SecondsPerBeat)> tempo, double start, double end)
+    {
+        try
+        {
+            var grid = BeatGrid.Infer(hits, speeds, crotchet, start, end);
+            Main.Mod.Logger.Log($"节拍线：{grid.Summary()}");
+            return grid.Lines;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or ArithmeticException or IndexOutOfRangeException)
+        {
+            // 纯计算遇到异常数据会抛的这几种（空序列、参数越界、溢出）：节拍线改用关卡变速直接画
+            if (!_beatsFailed)
+            {
+                _beatsFailed = true;
+                Main.Mod.Logger.Warning($"节拍线推算出错，改按关卡变速画（之后再出错不再记录）：{ex.Message}");
+                Main.Mod.Logger.LogException(ex);
+            }
+
+            return BeatGrid.Build(tempo, start, end);
+        }
+    }
+
+    /// <summary>估算难度（试验性）：出错时不显示难度徽章，只在第一次出错时记日志。</summary>
+    private int EstimateTier(List<TileHit> hits, double pitch)
+    {
+        try
+        {
+            var difficulty = DifficultyEstimator.Estimate(hits, pitch);
+            Main.Mod.Logger.Log($"难度估算：{DifficultyTiers.Name(difficulty.Tier)}（{difficulty.Score:F1}，音高 {pitch:0.##}）");
+            return hits.Count > 1 ? difficulty.Tier : 0;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or ArithmeticException or IndexOutOfRangeException)
+        {
+            // 同 InferBeats：只是一个参考徽章，算不出来就不画
+            if (!_difficultyFailed)
+            {
+                _difficultyFailed = true;
+                Main.Mod.Logger.Warning($"难度估算出错，这一关不显示难度（之后再出错不再记录）：{ex.Message}");
+                Main.Mod.Logger.LogException(ex);
+            }
+
+            return 0;
+        }
     }
 
     /// <summary>
@@ -456,9 +507,7 @@ internal sealed class Overlay : MonoBehaviour
         // 难度估算：只看这一关的砖块。按关卡设定的音高换算成实际播放的时间，不算练习时临时调的速度（TUF 按原速评级）
         var data = GameReader.LevelData();
         var pitch = data != null && data.pitch > 0 ? data.pitch / 100.0 : 1;
-        var difficulty = DifficultyEstimator.Estimate(hits, pitch);
-        Frame.DifficultyTier = hits.Count > 1 ? difficulty.Tier : 0;
-        Main.Mod.Logger.Log($"难度估算：{DifficultyTiers.Name(difficulty.Tier)}（{difficulty.Score:F1}，音高 {pitch:0.##}）");
+        Frame.DifficultyTier = EstimateTier(hits, pitch);
 
         // 对不上、差别太大：开局在面板上提醒一下（同一首歌、同一个结果只提醒一次，重开不再提醒）
         var captionKey = $"{info.Artist}|{info.Song}|{chosen.UsedFile}|{chosen.Caption.Source}";
@@ -487,6 +536,61 @@ internal sealed class Overlay : MonoBehaviour
         Main.Mod.Logger.Log(_levelStatus.ToString());
     }
 
+    /// <summary>
+    /// 这一帧画面状态的原因（只有值）：每帧比一次，变了才拼成消息和文字（原来每帧拼一次约 270 字节）。
+    /// Kind：1 暂停收起、2 显示关卡、3 显示演示、4 隐藏（隐藏的原因另外按内容比，见 <see cref="SameMessage"/>）。
+    /// </summary>
+    private readonly record struct ScreenKey(int Kind, States State, bool Editor, bool EditorPlaying, bool Music, double SecondsPerBeat);
+
+    private Message _hiddenReason = Message.Empty;
+
+    private void ReportScreen(bool pausedHide, bool levelShown, LevelState level, bool preview, Message reason)
+    {
+        var key = pausedHide ? new ScreenKey(1, default, false, false, false, 0)
+            : levelShown ? new ScreenKey(2, level.State, ADOBase.isLevelEditor, level.EditorPlaying, false, 0)
+            : preview ? new ScreenKey(3, default, false, false, _demo.FollowingMusic, _demo.SecondsPerBeat)
+            : new ScreenKey(4, default, false, false, false, 0);
+        if (key == _screenKey && (key.Kind != 4 || SameMessage(reason, _hiddenReason)))
+        {
+            return;
+        }
+
+        _screenKey = key;
+        _hiddenReason = reason;
+        Report(key.Kind switch
+        {
+            1 => Lang.M("已暂停，面板收起"),
+            2 => Lang.M("显示关卡（{0}）", level.StateName),
+            3 => Lang.M("显示演示（{0}）", _demo.Mode),
+            _ => Lang.M("隐藏（{0}）", reason),
+        });
+    }
+
+    /// <summary>两句话的原文和参数都一样（参数里的消息也逐层比），不用拼成文字就能比。</summary>
+    private static bool SameMessage(Message a, Message b)
+    {
+        if (ReferenceEquals(a, b))
+        {
+            return true;
+        }
+
+        if (a.Source != b.Source || a.Args.Length != b.Args.Length)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < a.Args.Length; i++)
+        {
+            var same = a.Args[i] is Message x && b.Args[i] is Message y ? SameMessage(x, y) : Equals(a.Args[i], b.Args[i]);
+            if (!same)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     /// <summary>画面状态（显示什么 / 为什么隐藏）变化时记一行日志，方便查「为什么没显示」。</summary>
     private void Report(Message state)
     {
@@ -506,7 +610,21 @@ internal sealed class Overlay : MonoBehaviour
         GUI.depth = 100; // 让 UMM 设置窗口等其它界面盖在上面
         if (Frame.Presence > 0 && Event.current.type == EventType.Repaint)
         {
-            DrawOverlay();
+            try
+            {
+                DrawOverlay();
+            }
+            catch (Exception ex) when (ex is not ExitGUIException)
+            {
+                // 画到一半出错（不该发生）：这一帧不画完，下一帧照常再画；完整日志只记一次，免得每帧刷错误拖慢游戏。
+                // 画面板用的裁剪组（GUI.BeginGroup）要在 try/finally 里关上，否则后面的设置窗口也会被裁进去
+                if (!_drawFailed)
+                {
+                    _drawFailed = true;
+                    Main.Mod.Logger.Error($"画提示面板出错（之后再出错不再记录）：{ex.Message}");
+                    Main.Mod.Logger.LogException(ex);
+                }
+            }
         }
 
         // 设置窗口要处理鼠标、键盘等所有事件，不能只在 Repaint 时画；关掉后还要画完淡出动画

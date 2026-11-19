@@ -1,4 +1,4 @@
-using System.Linq;
+using System.Collections.Generic;
 using RhythmHint.Core;
 using UnityEngine;
 
@@ -18,6 +18,8 @@ internal sealed class GameViewport
         cam => cam); // Unity 里已销毁的对象转成 bool 是 false
 
     private readonly GameCanvases _canvases;
+    private readonly List<Camera> _cameras = new();
+    private Camera[] _all = new Camera[8];
 
     /// <param name="own">Mod 自己的对象：界面文字用的摄像机挂在它下面。</param>
     public GameViewport(Transform own) => _canvases = new GameCanvases(own);
@@ -40,7 +42,7 @@ internal sealed class GameViewport
         var bar = Mathf.Round(layout.StripHeight * presence);
         Freed = new ScreenMargins(layout.LanesRight ? 0 : lanes, layout.LanesRight ? lanes : 0, layout.TaikoBottom ? 0 : bar, layout.TaikoBottom ? bar : 0);
         var f = Freed;
-        var cameras = Camera.allCameras.Where(cam => !_canvases.Owns(cam)).ToList();
+        var cameras = GameCameras();
         _shrinker.Apply(cameras, new ScreenMargins(f.Left / Screen.width, f.Right / Screen.width, f.Top / Screen.height, f.Bottom / Screen.height));
 
         if (shrinkUi)
@@ -58,6 +60,31 @@ internal sealed class GameViewport
         _shrinker.Restore();
         _canvases.Restore();
         Freed = default;
+    }
+
+    /// <summary>
+    /// 正在用的摄像机（不含界面文字用的那台自己的），每帧调用：Camera.allCameras 每次新建数组，
+    /// 这里用 GetAllCameras 填进复用的数组和列表，不每帧分配。
+    /// </summary>
+    private List<Camera> GameCameras()
+    {
+        if (_all.Length < Camera.allCamerasCount)
+        {
+            _all = new Camera[Camera.allCamerasCount + 4];
+        }
+
+        var count = Camera.GetAllCameras(_all);
+        _cameras.Clear();
+        for (var i = 0; i < count; i++)
+        {
+            if (!_canvases.Owns(_all[i]))
+            {
+                _cameras.Add(_all[i]);
+            }
+        }
+
+        System.Array.Clear(_all, 0, count); // 不留着已经不用的摄像机的引用
+        return _cameras;
     }
 
     private static Rect ToRect(ViewRect r) => new((float)r.X, (float)r.Y, (float)r.Width, (float)r.Height);

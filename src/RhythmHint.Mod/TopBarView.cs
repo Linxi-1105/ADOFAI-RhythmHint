@@ -75,6 +75,19 @@ internal static class TopBarView
     private static void DrawTrack(OverlayFrame f, OverlayLayout l, Settings s, Rect area)
     {
         GUI.BeginGroup(area);
+        try
+        {
+            DrawTrackInside(f, l, s, area);
+        }
+        finally
+        {
+            // 画到一半出错时也要关上裁剪组，否则后面画的东西（设置窗口）都被裁进太鼓条里（同 LaneView）
+            GUI.EndGroup();
+        }
+    }
+
+    private static void DrawTrackInside(OverlayFrame f, OverlayLayout l, Settings s, Rect area)
+    {
         var cy = area.height / 2;
         var judgeX = 84 * l.Scale;
         var speed = BaseSpeed * Mathf.Max(0.2f, s.TaikoSpeed) * l.Scale;
@@ -102,7 +115,6 @@ internal static class TopBarView
 
         Painter.Text(new Rect(judgeX - (40 * l.Scale), area.height - (24 * l.Scale), 80 * l.Scale, 20 * l.Scale),
             f.NextNote.ToString(), Mathf.RoundToInt(15 * l.Scale), new Color(0.75f, 0.75f, 0.8f));
-        GUI.EndGroup();
     }
 
     private static void DrawJudgeCircle(OverlayFrame f, OverlayLayout l, Vector2 c)

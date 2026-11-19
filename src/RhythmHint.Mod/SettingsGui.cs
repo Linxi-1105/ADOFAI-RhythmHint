@@ -11,6 +11,12 @@ internal static class SettingsGui
     {
         Lang.Update(s); // Mod 没启用时 Overlay 不跑，这里也要跟上游戏语言
         GUILayout.Label(Lang.T("状态：{0}", overlay?.Status ?? Lang.T("Mod 未启用")));
+        if (Main.SettingsNotice.Source.Length > 0)
+        {
+            // 读设置文件出了问题（见 Main.Load）：这里一直显示，设置窗口概览页里点「知道了」后不再显示
+            GUILayout.Label(Lang.T("设置文件读取出错：{0}", Main.SettingsNotice));
+        }
+
         GUILayout.Space(6);
         if (overlay == null)
         {
