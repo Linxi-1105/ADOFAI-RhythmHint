@@ -1,0 +1,11 @@
+# 文本文件一律用 LF（和 .editorconfig 一致）。Windows 上 core.autocrlf=true 时如果检出成 CRLF，
+# dotnet format 会报行尾，编辑器约定测试（EditorContractTests）拿样例文件比对也会失败。
+* text=auto eol=lf
+
+# 图片、图标、音频按二进制处理，不转换
+*.png binary
+*.webp binary
+*.ico binary
+*.ogg binary
+*.wav binary
+*.zip binary
