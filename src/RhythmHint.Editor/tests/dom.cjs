@@ -1,4 +1,4 @@
-// 测试用的小页面：照 index.html 建出元素树，app.js 里的 getElementById、querySelectorAll、closest、innerHTML 都按真的来。
+// 测试用的小页面：照 index.html 建出元素树，界面层（app-*.js、app.js）里的 getElementById、querySelectorAll、closest、innerHTML 都按真的来。
 // 只支持编辑器用到的选择器：标签、#id、.类名、[属性]、[属性="值"]、后代（空格）、逗号；用到别的写法直接报错，不悄悄返回空。
 // 没有的属性就是 undefined（不像万能桩那样处处为真）；<audio> 有媒体元素的那几个属性，测试里自己推进 currentTime、发事件。
 'use strict';
@@ -245,7 +245,7 @@ function parseInto(page, parent, html) {
 
 /**
  * 照 index.html 建一个页面。size(el) 给出元素的 [宽, 高]（画布尺寸、布局）；onScript(el) 在插入 <script> 时调用（模拟载入）。
- * 返回 { document, page, $ }：$ 是 getElementById，找不到的 id 返回 null（app.js 用了页面上没有的 id 会直接出错）。
+ * 返回 { document, page, $ }：$ 是 getElementById，找不到的 id 返回 null（界面层用了页面上没有的 id 会直接出错）。
  */
 function createPage({ size = () => [1600, 900] } = {}) {
   const page = { size, layoutReads: 0, textWrites: {}, onScript: null, document: null };
@@ -275,4 +275,13 @@ function createPage({ size = () => [1600, 900] } = {}) {
   return { page, document, Option, $: document.getElementById };
 }
 
-module.exports = { createPage, Element, Media, matches, ED };
+// Mod 运行时写进编辑器文件夹的脚本（游戏导出的最近一关、历史列表）：仓库里没有，测试各自给假的
+const MOD_WRITTEN = new Set(['session.js', 'recent/index.js']);
+
+/** index.html 按顺序载入的编辑器脚本（不含 Mod 运行时写的）：测试照这个顺序载入，和页面永远一致，不再手写清单。 */
+function pageScripts() {
+  const { document } = createPage();
+  return document.querySelectorAll('script').map(el => el.getAttribute('src')).filter(src => src && !MOD_WRITTEN.has(src));
+}
+
+module.exports = { createPage, pageScripts, Element, Media, matches, ED };

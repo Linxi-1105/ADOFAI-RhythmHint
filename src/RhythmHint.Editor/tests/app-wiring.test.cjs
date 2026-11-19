@@ -3,9 +3,31 @@
 // 运行：node --test src/RhythmHint.Editor/tests/
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { boot, fakeFile, fakeBuffer, session, lanesOf, allLanes, otherLevel, recentOf, T, hasToast } = require('./app-harness.cjs');
+const fs = require('node:fs');
+const { boot, fakeFile, fakeBuffer, session, lanesOf, allLanes, otherLevel, recentOf, T, hasToast, ED } = require('./app-harness.cjs');
+const { pageScripts } = require('./dom.cjs');
 
 const panelShown = h => h.document.querySelectorAll('[data-panel-body]').filter(el => !el.hidden).map(el => el.dataset.panelBody);
+
+// ---------- 页面载入的脚本 ----------
+
+test('index.html loads every script in the editor folder, the interface layer last and app.js at the very end', () => {
+  // 自动更新只覆盖包里有的文件、不删旧文件：页面少载了一个、载了一个不存在的，只有在玩家那里打开才看得出来
+  const scripts = pageScripts();
+  // 和打包（RhythmHint.Mod.csproj 的 EditorFile）一样不算游戏运行时写的 session.js、session-audio*
+  const onDisk = fs.readdirSync(ED).filter(f => f.endsWith('.js') && f !== 'session.js' && !f.startsWith('session-audio')).sort();
+  assert.deepEqual([...scripts].sort(), onDisk);
+  const app = scripts.filter(f => /^app(-[a-z]+)?\.js$/.test(f));
+  assert.ok(app.length > 1);
+  assert.deepEqual(scripts.slice(-app.length), app, 'the interface layer comes after the libraries it uses');
+  assert.equal(app[0], 'app-common.js', 'app-common.js sets up the namespace first');
+  assert.equal(app[app.length - 1], 'app.js', 'app.js starts the editor once everything is loaded');
+});
+
+test('the interface layer adds no global besides its namespace', () => {
+  const h = boot({ session: session() });
+  assert.deepEqual(Array.from(h.appGlobals), ['EditorApp']);
+});
 
 test('the rail opens one panel at a time and closes it again', () => {
   const h = boot({ session: session(), prefs: { wayBackTold: true } });

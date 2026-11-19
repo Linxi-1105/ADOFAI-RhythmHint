@@ -1,12 +1,17 @@
-// 编辑器界面层测试用的假页面：在 vm 里跑 app.js 原文（不开浏览器）。
-// 页面照 index.html 建（dom.cjs），按钮、面板、innerHTML 生成的元素都能查、能点；model.js、i18n.js、about.js、view.js 照原样载入。
-// 播放器换成假的（FakePlayer：接口和 audio.js 的 EditorPlayer 一一对上，app-harness.test 里核对），轨道预览换成假的。
-// app.js 末尾临时挂出几个内部状态（window.__t），只在这里拼，仓库里的 app.js 不带。
+// 编辑器界面层测试用的假页面：在 vm 里跑界面层（app-*.js、app.js）原文（不开浏览器）。
+// 页面照 index.html 建（dom.cjs），按钮、面板、innerHTML 生成的元素都能查、能点；脚本照 index.html 的顺序原样载入，
+// 只有播放器换成假的（FakePlayer：接口和 audio.js 的 EditorPlayer 一一对上，app-harness.test 里核对），轨道预览、下拉菜单换成假的。
+// 内部状态从界面层的命名空间 window.EditorApp 读（boot 返回的 t），不往脚本里拼代码。
 // 沿用 2026-11-19 评审的复现脚本（scratchpad/review-logic/harness.cjs）。
 const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
-const { createPage, ED } = require('./dom.cjs');
+const { createPage, pageScripts, ED } = require('./dom.cjs');
+
+// 换成替身的脚本：播放器（FakePlayer）、轨道预览（FakeTrack）、下拉菜单（ctx.EditorDropdown）
+const FAKED = new Set(['audio.js', 'trackfx.js', 'track.js', 'dropdown.js']);
+/** 界面层的脚本：app-*.js 和入口 app.js。 */
+const isInterface = f => /^app(-[a-z]+)?\.js$/.test(f);
 
 const LOOP_MIN = 0.05; // 同 audio.js 的 LOOP_MIN（app-harness.test 核对）
 
@@ -114,7 +119,7 @@ function fakeDir(name, { files = new Map(), permission = 'granted' } = {}) {
   return dir;
 }
 
-/** 假的 IndexedDB（只够 app.js 存文件夹句柄用）：store 是 键 → 值。 */
+/** 假的 IndexedDB（只够 app-save.js 存文件夹句柄用）：store 是 键 → 值。 */
 function fakeIndexedDb(store = new Map()) {
   const later = f => setImmediate(f);
   return {
@@ -221,13 +226,20 @@ function boot({ session, storage = new Map(), recent, sessions = {}, audioScript
     if (!entry) { timer(() => el.onerror && el.onerror(), 0); return; }
     timer(() => { ctx.RHYTHMHINT_SESSION = entry.data; if (el.onload) el.onload(); }, entry.delay || 0);
   };
-  for (const f of ['model.js', 'i18n.js', 'about.js', 'view.js']) vm.runInContext(fs.readFileSync(path.join(ED, f), 'utf8'), ctx, { filename: f });
-  let app = fs.readFileSync(path.join(ED, 'app.js'), 'utf8');
-  const tail = app.lastIndexOf('})();');
-  app = app.slice(0, tail) + '  window.__t = { state, get metaDirty() { return metaDirty; }, capture: lane => { capturing = lane; } };\n' + app.slice(tail);
-  vm.runInContext(app, ctx, { filename: 'app.js' });
+  let before = null; // 载入界面层之前已有的全局名字：界面层自己只该多出 EditorApp（appGlobals）
+  for (const f of pageScripts().filter(f => !FAKED.has(f))) {
+    if (!before && isInterface(f)) before = new Set(Object.keys(ctx));
+    vm.runInContext(fs.readFileSync(path.join(ED, f), 'utf8'), ctx, { filename: f });
+  }
+  const appGlobals = Object.keys(ctx).filter(k => !before.has(k));
 
-  const t = ctx.__t;
+  // 界面层的内部状态；capture(lane)：点键位面板里第 lane 条轨道，开始录新键（再点一次是取消）
+  const App = ctx.EditorApp;
+  const t = {
+    state: App.state,
+    get metaDirty() { return App.metaDirty; },
+    capture: lane => $('keymap').querySelector('[data-key-lane="' + lane + '"]').click(),
+  };
   const frames = n => { for (let i = 0; i < n; i++) { const f = rafs.shift(); if (f) f(); } };
   const fire = (type, e) => (winListeners[type] || []).forEach(f => f(e));
   const keyEvent = (k, extra = {}) => {
@@ -256,7 +268,7 @@ function boot({ session, storage = new Map(), recent, sessions = {}, audioScript
   /** 打开一份手序文件（文件选择框选好了）。 */
   const openFile = (name, text) => $('openInput').dispatch('change', { target: { files: [fakeFile(name, text)], value: '' } });
   return {
-    ctx, t, el: $, $, document, page, frames, key, keyUp, fire, wait, until, select, clickHistory, railButton, openFile,
+    ctx, t, appGlobals, el: $, $, document, page, frames, key, keyUp, fire, wait, until, select, clickHistory, railButton, openFile,
     storage, storageEvents, used, setQuota: n => { limit = n; }, toasts, pickerCalls, audio: control,
   };
 }

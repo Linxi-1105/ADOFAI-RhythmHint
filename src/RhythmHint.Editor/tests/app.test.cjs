@@ -1,4 +1,4 @@
-// 手序编辑器的界面层：在假页面里跑 app.js 原文（tests/app-harness.cjs），复现 2026-11-19 评审找到的交互问题。
+// 手序编辑器的界面层：在假页面里跑界面层（app-*.js、app.js）原文（tests/app-harness.cjs），复现 2026-11-19 评审找到的交互问题。
 // 草稿的问题在 app-draft.test.cjs，按钮、面板、音乐的接线在 app-wiring.test.cjs。
 // 运行：node --test src/RhythmHint.Editor/tests/
 const { test } = require('node:test');

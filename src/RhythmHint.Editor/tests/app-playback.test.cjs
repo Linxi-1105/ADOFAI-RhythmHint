@@ -1,4 +1,4 @@
-// 界面接线（app.js）和真的播放器（audio.js）：在照 index.html 建的假页面（dom.cjs）里载入编辑器的全部脚本，
+// 界面接线（app-*.js、app.js）和真的播放器（audio.js）：在照 index.html 建的假页面（dom.cjs）里照 index.html 的顺序载入编辑器的脚本，
 // 按按钮、一帧帧往前走，看播放按钮、循环、画布尺寸，以及有音乐时 <audio> 后备和整首解码两条路怎么播。
 // <audio> 的播放位置、AudioContext 的时间都由测试推进；没有写到的属性就是没有（不再处处为真）。
 const { test } = require('node:test');
@@ -6,10 +6,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { createPage } = require('./dom.cjs');
+const { createPage, pageScripts } = require('./dom.cjs');
 
 const dir = path.join(__dirname, '..');
-const SCRIPTS = ['i18n.js', 'model.js', 'audio.js', 'view.js', 'trackfx.js', 'track.js', 'about.js', 'app.js'];
+const SCRIPTS = pageScripts().filter(f => f !== 'dropdown.js'); // 下拉菜单换成假的（sandbox.EditorDropdown）
 const SIZES = { chart: [1600, 900], minimap: [268, 46], track: [300, 200] };
 const near = (actual, expected, eps = 0.002) => assert.ok(Math.abs(actual - expected) < eps, actual + ' vs ' + expected);
 const session = () => JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'session.json'), 'utf8'));

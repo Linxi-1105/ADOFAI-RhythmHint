@@ -261,6 +261,13 @@
 <script src="session.js"></script>
 <script src="recent/index.js"></script>
 <script src="about.js"></script>
+<!-- 界面层：按这个顺序载入，app.js 最后、负责启动（分工见 app-common.js 开头；测试照这里的顺序载入） -->
+<script src="app-common.js"></script>
+<script src="app-open.js"></script>
+<script src="app-edit.js"></script>
+<script src="app-play.js"></script>
+<script src="app-save.js"></script>
+<script src="app-draft.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
