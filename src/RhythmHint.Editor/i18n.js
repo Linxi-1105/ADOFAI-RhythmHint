@@ -171,7 +171,7 @@
     'map.title': ['全曲概览（点击或拖动以跳转）', '全曲概覽（點擊或拖動以跳轉）', 'Overview (click or drag to jump)', '전체 보기(클릭하거나 끌어서 이동)', '全体表示（クリックまたはドラッグで移動）'],
 
     'empty.title': ['未打开手序', '未開啟手序', 'No fingering open', '열린 운지 없음', '運指が開かれていません'],
-    'empty.body': ['在游戏中按 F8 → 排键 → 编辑本关手序即可打开当前关卡；也可从左侧历史继续编辑，或打开他人分享的手序文件。', '在遊戲中按 F8 → 排鍵 → 編輯本關手序即可開啟目前關卡；也可從左側歷史繼續編輯，或開啟他人分享的手序檔案。', "In the game, press F8 → Fingering → Edit this level's fingering to open the current level. You can also continue from History on the left or open a shared fingering file.", '게임에서 F8 → 운지 → 이 레벨 운지 편집을 누르면 현재 레벨이 열립니다. 왼쪽 기록에서 이어서 편집하거나 공유받은 운지 파일을 열 수도 있습니다.', 'ゲームで F8 → 運指 → このレベルの運指を編集 を押すと現在のレベルが開きます。左の履歴から再開したり、共有された運指ファイルを開いたりすることもできます。'],
+    'empty.body': ['在游戏中按 F8 → 专属手序 → 编辑本关手序即可打开当前关卡；也可从左侧历史继续编辑，或打开他人分享的手序文件。', '在遊戲中按 F8 → 專屬手序 → 編輯本關手序即可開啟目前關卡；也可從左側歷史繼續編輯，或開啟他人分享的手序檔案。', "In the game, press F8 → Custom fingering → Edit this level's fingering to open the current level. You can also continue from History on the left or open a shared fingering file.", '게임에서 F8 → 전용 운지 → 이 레벨 운지 편집을 누르면 현재 레벨이 열립니다. 왼쪽 기록에서 이어서 편집하거나 공유받은 운지 파일을 열 수도 있습니다.', 'ゲームで F8 → 専用運指 → このレベルの運指を編集 を押すと現在のレベルが開きます。左の履歴から再開したり、共有された運指ファイルを開いたりすることもできます。'],
 
     'col.current': ['当前手序', '目前手序', 'Current', '현재 운지', '現在の運指'],
     'col.standard': ['标准', '標準', 'Standard', '표준', '標準'],
