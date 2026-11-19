@@ -229,13 +229,46 @@ internal sealed class FingeringSource
         }
 
         var sb = new StringBuilder();
-        foreach (var path in Directory.GetFiles(Folder, "*.json"))
+        foreach (var path in JsonFiles())
         {
-            var info = new FileInfo(path);
-            sb.Append(info.Name).Append('|').Append(info.LastWriteTimeUtc.Ticks).Append('|').Append(info.Length).Append(';');
+            if (TryStat(path, out var info))
+            {
+                sb.Append(info.Name).Append('|').Append(info.LastWriteTimeUtc.Ticks).Append('|').Append(info.Length).Append(';');
+            }
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>文件夹里的 .json；文件夹刚好被删、被改名时当成空的，下一秒再看。</summary>
+    private static string[] JsonFiles()
+    {
+        try
+        {
+            return Directory.GetFiles(Folder, "*.json");
+        }
+        catch (IOException)
+        {
+            return Array.Empty<string>(); // DirectoryNotFoundException 也是 IOException：文件夹没了就当没有手序
+        }
+    }
+
+    /// <summary>
+    /// 读出文件的修改时间和大小（FileInfo 读一次后会记住）。列出来之后文件刚好被删、被改名（浏览器保存、玩家整理文件夹）时
+    /// 返回 false，这一份下一秒再看；原来 Length 抛的 FileNotFoundException 会漏到 Overlay 的兜底，整个 Mod 停用。
+    /// </summary>
+    private static bool TryStat(string path, out FileInfo info)
+    {
+        info = new FileInfo(path);
+        try
+        {
+            _ = info.Length;
+            return true;
+        }
+        catch (IOException)
+        {
+            return false; // FileNotFoundException：刚被删掉，跳过
+        }
     }
 
     private List<FingeringCandidate> Load(out List<string> broken)
@@ -249,10 +282,14 @@ internal sealed class FingeringSource
         }
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var path in Directory.GetFiles(Folder, "*.json"))
+        foreach (var path in JsonFiles())
         {
+            if (!TryStat(path, out var info))
+            {
+                continue;
+            }
+
             seen.Add(path);
-            var info = new FileInfo(path);
             if (!_files.TryGetValue(path, out var entry) || entry.Time != info.LastWriteTimeUtc || entry.Size != info.Length)
             {
                 entry = Read(info);

@@ -4,6 +4,11 @@
 
 What changed in each version, newest first.
 
+## Unreleased
+
+- Fixed: one broken fingering file in the folder (for example a field of the wrong type or a number that is too large) disabled the whole mod, again on every launch. Now only that file is skipped and listed on the Custom Fingering page
+- Fixed: the mod could not read a fingering whose author or comment happened to be a date and time (for example 2026-11-18T00:00:00Z)
+
 ## 1.3.1 · 2026-11-19
 
 - Automatic updates: when the game starts, the mod checks for a new version, downloads and installs it in the background, and the update takes effect after you restart the game; your settings and fingerings are kept. You can turn it off on F8 → General. If the download fails, the About page lets you retry, or you can update from the group files or the download page as before. Update checks used to rely on UMM, which often never ran on some networks; the mod now checks by itself

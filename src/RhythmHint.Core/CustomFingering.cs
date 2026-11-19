@@ -217,16 +217,46 @@ public sealed class CustomFingering
     /// <summary>读一份手序文件。格式不对时抛 <see cref="FormatException"/>，消息说明哪里不对（写日志用）。</summary>
     public static CustomFingering Parse(string json)
     {
-        JObject root;
         try
         {
-            root = JObject.Parse(json);
+            return Read(Load(json));
+        }
+        catch (Exception ex) when (ex is ArgumentException or OverflowException or InvalidCastException)
+        {
+            // Newtonsoft 强转类型不对的值时抛这几种（数组当文字、超出 long 的整数）：一样只算这份文件格式不对，
+            // 不能漏到外面（FingeringSource 只跳过 FormatException 这类，漏出去会让整个 Mod 停用）
+            throw new FormatException("字段类型不对或数字太大：" + ex.Message, ex);
+        }
+    }
+
+    /// <summary>
+    /// 解析 JSON。不让 Newtonsoft 把像日期的文字自动转成日期（作者、说明恰好写成日期时间时原来整份拒绝）；
+    /// 注释、结尾多余的逗号照旧接受，JSON 后面多出别的内容照旧拒绝（同 JObject.Parse）。
+    /// </summary>
+    private static JObject Load(string json)
+    {
+        try
+        {
+            using var reader = new JsonTextReader(new StringReader(json)) { DateParseHandling = DateParseHandling.None };
+            var root = JObject.Load(reader);
+            while (reader.Read())
+            {
+                if (reader.TokenType != JsonToken.Comment)
+                {
+                    throw new FormatException("不是有效的 JSON：结尾还有多余的内容");
+                }
+            }
+
+            return root;
         }
         catch (JsonException ex)
         {
             throw new FormatException("不是有效的 JSON：" + ex.Message, ex);
         }
+    }
 
+    private static CustomFingering Read(JObject root)
+    {
         if ((string?)root["format"] != Format)
         {
             throw new FormatException("不是 RhythmHint 专属手序文件（format 不是 " + Format + "）");

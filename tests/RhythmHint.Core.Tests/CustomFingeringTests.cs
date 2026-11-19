@@ -119,6 +119,34 @@ public class CustomFingeringTests
         Assert.Contains(because, ex.Message);
     }
 
+    /// <summary>
+    /// 类型不对、数字超出 long 的文件也只算格式不对（FormatException，读的地方跳过这一份）。
+    /// 复现（2026-11-19 评审）：Newtonsoft 强转时抛 ArgumentException / OverflowException，漏过 FingeringSource 的 catch，整个 Mod 停用，每次开游戏都重来。
+    /// </summary>
+    [Theory]
+    [InlineData("""{"format":[],"schemaVersion":1,"hits":[[1,1,0,180]],"notes":[[1,1,[[2,0]]]]}""")]
+    [InlineData("""{"format":"rhythmhint-fingering","schemaVersion":1,"updatedAt":{},"hits":[[1,1,0,180]],"notes":[[1,1,[[2,0]]]]}""")]
+    [InlineData("""{"format":"rhythmhint-fingering","schemaVersion":99999999999999999999,"hits":[[1,1,0,180]],"notes":[[1,1,[[2,0]]]]}""")]
+    [InlineData("""{"format":"rhythmhint-fingering","schemaVersion":1,"hits":[[99999999999999999999,1,0,180]],"notes":[[1,1,[[2,0]]]]}""")]
+    [InlineData("""{"format":"rhythmhint-fingering","schemaVersion":1,"keys":[],"hits":[[1,1,0,180]],"notes":[[1,1,[[2,0]]]]}""")]
+    public void WrongTypesAreFormatErrors(string json)
+    {
+        Assert.Throws<FormatException>(() => CustomFingering.Parse(json));
+    }
+
+    /// <summary>作者、说明恰好写成日期时间也照文字读（Newtonsoft 默认会把它认成日期，原来整份拒绝；编辑器照常能存出这样的文件）。</summary>
+    [Fact]
+    public void TextThatLooksLikeADateStaysText()
+    {
+        var json = """{"format":"rhythmhint-fingering","schemaVersion":1,"author":"2026-11-18T00:00:00Z","comment":"2020-01-01T12:00:00","updatedAt":"2026-11-18T08:30:00Z","hits":[[1,1,0,180]],"notes":[[1,1,[[2,0]]]]}""";
+
+        var file = CustomFingering.Parse(json);
+
+        Assert.Equal("2026-11-18T00:00:00Z", file.Author);
+        Assert.Equal("2020-01-01T12:00:00", file.Comment);
+        Assert.Equal(new DateTimeOffset(2026, 11, 18, 8, 30, 0, TimeSpan.Zero), file.UpdatedAt);
+    }
+
     [Fact]
     public void SameLevelUsesTheWholeFingering()
     {
