@@ -21,15 +21,16 @@
     try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; } // 隐私模式下 localStorage 不可用：当作没有
   }
   /** 存进 localStorage；存不了（写满了、隐私模式）返回 false，要不要告诉玩家由调用的地方决定。 */
-  function writeJson(key, value) {
+  function writeText(key, text) {
     try {
-      localStorage.setItem(key, JSON.stringify(value));
+      localStorage.setItem(key, text);
       return true;
     } catch (e) {
       console.warn('RhythmHint: cannot write ' + key, e);
       return false;
     }
   }
+  const writeJson = (key, value) => writeText(key, JSON.stringify(value));
   function removeKey(key) {
     try { localStorage.removeItem(key); } catch (e) { console.warn('RhythmHint: cannot remove ' + key, e); } // 删不掉只是多占点地方
   }
@@ -154,6 +155,8 @@
     resetView();
     applyNoteStyle();
     M.remember(doc); // 打开文件时文件名是在读出来之后才换的
+    // 草稿按「历史」里的 Id 存；打开的是手序文件时按谱面签名加文件内容（两份不同的文件各有各的草稿）
+    doc.draftKey = DRAFT_PREFIX + (doc.sessionId || M.fileDraftId(doc));
     state.time = doc.notes.length ? doc.notes[0].time - 1.2 : 0;
     view.setDoc(doc);
     track.setDoc(doc);
@@ -164,6 +167,7 @@
     $('offset').value = String(extra);
     $('offsetOut').textContent = String(extra);
     manualAudio = '';
+    audioSeq++; // 上一关还在载入、解码的音乐（包括手动选的）回来时不再用
     player.hasAudio = false;
     player.setRate(prefs.speed, doc.audio?.pitch ?? 1);
     player.baseOffset = doc.audio ? doc.audio.offset : 0;
@@ -180,6 +184,7 @@
     renderLoop();
     renderPlayButton();
     edited(true);
+    renderFilePanel(); // 文件面板、参考面板（有没有自动排键参考）跟着这一关（原来只在开着文件面板时更新，参考面板的卡片一直藏着）
     restoreDraft();
     if (openPanel === 'history') renderHistory();
     tellClashes();
@@ -213,7 +218,7 @@
         d.fileName = name || d.fileName;
         return d;
       }, 'file');
-      toast(state.t('toast.opened', doc.fileName), 'ok');
+      toast(state.t('toast.opened', doc.opened.fileName), 'ok'); // 打开的那个文件（草稿里记的文件名可能不一样）
     } catch (e) {
       toast(state.t('toast.openFailed', errorText(e)), 'error');
     }
@@ -258,50 +263,80 @@
 
   // ---------- 音乐 ----------
   let manualAudio = '';
+  // 每换一次音乐（打开关卡、手动选歌）加一：还在载入、解码的旧音乐回来时认得出自己过时了
+  // （2026-11-19 评审：刚打开关卡时拖入一首歌，关卡的歌先解完就把手动那首换掉了，没有提示）
+  let audioSeq = 0;
+
+  // 整首解码一次只解一首（一首 5 分钟立体声解出来约 110 MB 采样）：正在解的时候换了关卡，新关卡排队等它解完；
+  // 排队时又换了，还没开始的直接丢掉。正在解的没法中途停下，解完的结果作废、不留引用（2026-11-19 评审：连点几关几首同时解码）
+  let decodeBusy = false, decodeNext = null;
   /**
    * Mod 另存的歌曲数据（file:// 下读不了音乐文件的字节，只能用 <script> 载入）：整首解码后换给播放器，跳转才准。
    * 解码好之前先用 <audio> 播；旧版本导出的历史没有这份数据、解码失败时一直用 <audio>。
    */
   function loadDecoded(doc) {
-    const key = doc.audio.file, tag = document.createElement('script');
-    const take = () => {
-      const all = window.RHYTHMHINT_AUDIO || {}, text = all[key];
-      delete all[key]; // 字节交给解码后就不再留着这份文本
-      return text;
-    };
-    tag.src = doc.audio.script + '?v=' + Date.now();
-    tag.onload = async () => {
-      tag.remove();
-      let text = take();
-      if (typeof text !== 'string' || state.doc !== doc) return;
+    decodeNext = { doc, seq: audioSeq };
+    if (!decodeBusy) runDecode();
+  }
+  async function runDecode() {
+    decodeBusy = true;
+    while (decodeNext) {
+      const job = decodeNext;
+      decodeNext = null;
+      const current = () => state.doc === job.doc && audioSeq === job.seq; // 还是这一关、也没手动换过音乐
+      if (!current()) continue;
       try {
-        const bytes = window.EditorPlayer.bytesFromBase64(text);
-        text = null; // 换成字节后不再留着几十 MB 的文本，解码期间就能回收
-        const buffer = await window.EditorPlayer.decode(bytes, player.ctx && player.ctx.sampleRate);
-        if (state.doc !== doc || manualAudio) return; // 解码期间换了关卡或手动选了音乐
-        player.useBuffer(buffer);
-        if (!state.waveform) startWaveform(buffer); // 自制关卡游戏里读不到采样，这里补上波形
-        renderAudioName();
+        const buffer = await decodeSong(job.doc, current);
+        if (buffer && current()) { // 过时的结果直接丢掉
+          player.useBuffer(buffer);
+          if (!state.waveform) startWaveform(buffer); // 自制关卡游戏里读不到采样，这里补上波形
+          renderAudioName();
+        }
       } catch (e) {
         console.warn('RhythmHint: decoding the song failed, keeping <audio>', e);
       }
-    };
-    tag.onerror = () => tag.remove(); // 文件不在了：继续用 <audio>
-    document.head.appendChild(tag);
+    }
+    decodeBusy = false;
+  }
+  /** 载入这一关的歌曲脚本、整首解码；脚本不在了、载入期间换了关卡为 null。 */
+  function decodeSong(doc, current) {
+    return new Promise((resolve, reject) => {
+      const key = doc.audio.file, tag = document.createElement('script');
+      tag.src = doc.audio.script + '?v=' + Date.now();
+      tag.onload = () => {
+        tag.remove();
+        const all = window.RHYTHMHINT_AUDIO || {};
+        let text = all[key];
+        delete all[key]; // 字节交给解码后就不再留着这份文本
+        if (typeof text !== 'string' || !current()) { resolve(null); return; }
+        try {
+          let bytes = window.EditorPlayer.bytesFromBase64(text);
+          text = null; // 换成字节后不再留着几十 MB 的文本，解码期间就能回收
+          const decoding = window.EditorPlayer.decode(bytes, player.ctx && player.ctx.sampleRate);
+          bytes = null;
+          decoding.then(resolve, reject);
+        } catch (e) {
+          reject(e);
+        }
+      };
+      tag.onerror = () => { tag.remove(); resolve(null); }; // 文件不在了：继续用 <audio>
+      document.head.appendChild(tag);
+    });
   }
   async function loadAudioFile(file) {
+    const seq = ++audioSeq; // 之后关卡自己的歌解完也不再换上去
     try {
       const url = URL.createObjectURL(file);
-      if (!await player.load(url)) return;
+      if (!await player.load(url) || seq !== audioSeq) return; // 载入期间又换了音乐（换关卡、又选了一首）
       manualAudio = file.name;
       state.audioOffset = player.offset;
       renderAudioName();
       const buffer = await window.EditorPlayer.decode(new Uint8Array(await file.arrayBuffer()), player.ctx && player.ctx.sampleRate);
-      if (manualAudio !== file.name || player.el.src !== url) return; // 解码期间又换了音乐
+      if (seq !== audioSeq) return; // 解码期间又换了音乐
       player.useBuffer(buffer);
       startWaveform(buffer);
     } catch (e) {
-      toast(state.t('audio.failed', errorText(e)), 'error');
+      if (seq === audioSeq) toast(state.t('audio.failed', errorText(e)), 'error');
     }
   }
   // 解码好的音乐分段算波形，每帧算一点、算好的先画（整首一次算完时长歌会让画面冻住零点几秒、打拍声漏掉）
@@ -461,8 +496,8 @@
     state.doc.fileName = name + '.json';
     markMetaDirty(); // 换了名字还没存：游戏里还是原来那个文件。文件名也进草稿，从历史接着改时沿用
   });
-  let metaDirty = false;
-  function markMetaDirty() { metaDirty = true; renderHeader(); scheduleDraft(); }
+  let metaDirty = false, metaEdits = 0; // metaEdits：改了几次作者、说明、文件名（保存途中又改了，存完照样算没保存）
+  function markMetaDirty() { metaDirty = true; metaEdits++; renderHeader(); scheduleDraft(); }
   function copy(text, button) {
     navigator.clipboard.writeText(text).then(() => toast(state.t('file.copied'), 'ok', null, 1600), () => {});
     if (button) button.blur();
@@ -1277,9 +1312,14 @@
     setTimeout(() => URL.revokeObjectURL(url), 2000); // 有意的延时：等浏览器开始下载再释放
   }
 
-  function saved() {
-    state.history.markSaved();
-    metaDirty = false;
+  /**
+   * 存进游戏了：记成已保存的是开始保存时的那一步（snap，saveToGame 开头记下的）。存的途中（等文件夹权限时）又改了一处，
+   * 那一处不在文件里，照样算没保存（2026-11-19 评审：原来标的是存完时的样子，多改的那处也显示已保存）。
+   */
+  function saved(snap, name) {
+    snap.history.markSaved(snap.step);
+    metaDirty = metaEdits !== snap.metaEdits;
+    snap.doc.savedBase = snap.base(name); // 游戏下次用存进去的这份导出时，草稿也认得
     allowDraft(); // 这一页刚存进游戏，就以这一页为准
     writeDraft(); // 草稿留着、记成已保存：从「历史」打开这一关时还是保存时的样子
     renderHeader();
@@ -1361,12 +1401,17 @@
       toast(state.t('save.downloaded', doc.fileName, saveFolderText()), 'warn', null, 12000);
       return;
     }
+    // 开头记下存的是哪一关、哪一步、用什么名字：下面要等文件夹权限等，期间玩家可能又改了、改了文件名、在历史里换了关卡
+    const snap = {
+      doc, history: state.history, step: state.history.current, metaEdits, base: M.baseFor(doc),
+      target: { fileName: doc.fileName, usedFile: doc.usedFile, meta: { charts: doc.meta.charts } },
+    };
     try {
       let dir = await fingeringsFolder();
       if (!dir) return;
       let name;
       try {
-        name = await writeInto(dir, doc, text);
+        name = await writeInto(dir, snap.target, text);
       } catch (e) {
         if (!e || (e.name !== 'NotFoundError' && e.name !== 'NotAllowedError')) throw e;
         // 记住的文件夹被删、被挪走或没有权限了：忘掉，问玩家重新选（选择框要玩家再点一下才能打开）
@@ -1374,12 +1419,15 @@
         if (!(await modal(state.t('save.pickTitle'), state.t('save.folderLost'), saveFolderText(), state.t('save.pickGo')))) return;
         dir = await pickFolder();
         if (!dir) return;
-        name = await writeInto(dir, doc, text);
+        name = await writeInto(dir, snap.target, text);
       }
-      if (name === null) { toast(state.t('save.tooMany', doc.fileName), 'error', null, 12000); return; }
-      const renamed = name !== doc.fileName;
-      if (renamed) { doc.fileName = name; renderFilePanel(); }
-      saved();
+      if (name === null) { toast(state.t('save.tooMany', snap.target.fileName), 'error', null, 12000); return; }
+      const renamed = name !== snap.target.fileName;
+      // 存完时已经换了一关：那一关的文件照样写好了，这一关不算保存
+      if (state.doc === doc) {
+        if (renamed && doc.fileName === snap.target.fileName) { doc.fileName = name; renderFilePanel(); } // 存的途中玩家自己改了名字就留着他的
+        saved(snap, name);
+      }
       toast(state.t(renamed ? 'save.renamed' : 'save.done', name), 'ok', null, renamed ? 12000 : 6000);
     } catch (e) {
       if (e && e.name === 'AbortError') return; // 玩家在选文件夹时点了取消
@@ -1387,10 +1435,10 @@
     }
   }
 
-  /** 写进文件夹，返回存成的文件名；同名的都是别的谱、没名字可用时为 null。 */
-  async function writeInto(dir, doc, text) {
+  /** 写进文件夹，返回存成的文件名；同名的都是别的谱、没名字可用时为 null。target：开始保存时的文件名、游戏正用着的文件、谱面指纹。 */
+  async function writeInto(dir, target, text) {
     // 同名的是另一首谱的手序时另起名字，不覆盖（M.saveName，和 Mod 搬中转文件夹时同一规则）
-    const name = await M.saveName(doc, n => existingText(dir, n));
+    const name = await M.saveName(target, n => existingText(dir, n));
     if (!name) return null;
     const writable = await (await dir.getFileHandle(name, { create: true })).createWritable();
     await writable.write(text);
@@ -1540,39 +1588,68 @@
   if (window.ResizeObserver) new ResizeObserver(() => { if (prefs.track) track.resize(); }).observe($('trackCard'));
 
   // ---------- 草稿 ----------
-  // 这一关在编辑器里现在的样子，随时存在这台电脑的浏览器里（按「历史」里的 Id；打开的是手序文件时按谱面签名）。
+  // 这一关在编辑器里现在的样子，随时存在这台电脑的浏览器里（按「历史」里的 Id；打开的是手序文件时按谱面签名加文件内容，见 loadDoc）。
   // 关掉网页、换到别的关卡都不丢，下次打开这一关自动接着改；保存到游戏后也留着（记成已保存）。
+  // 草稿记着是在哪份手序上改的（M.draftMatches）：游戏换了一份手序、打开了别人分享的文件时不自动套，先问玩家（2026-11-19 第二轮评审：
+  // 原来只按谱面认，打开朋友的手序显示的是自己的旧键位，文件名、作者也变回自己的）
   const DRAFT_PREFIX = 'rhythmhint.editor.draft.';
   const MAX_DRAFTS = 30; // 浏览器里最多留几关的草稿（2026-11-19 评审：原来从不删，越攒越多，写满了就存不进去）
-  const draftKeyOf = doc => DRAFT_PREFIX + (doc.sessionId || doc.signature);
+  const draftKeyOf = doc => doc.draftKey || DRAFT_PREFIX + (doc.sessionId || doc.signature);
   let draftTimer = 0;
   let draftBlocked = false; // 另一个标签页改了这一关的草稿：这一页先不写，等玩家选用哪一边
-  let otherTabToast = null, storageFullTold = false;
+  let otherTabToast = null, askToast = null, storageFullTold = false; // askToast：正在问要不要载入上次的进度（askDraft）
 
-  function writeDraft() {
+  /**
+   * 把现在的样子写进草稿，写好了（或者不用记、删掉了）为 true。time：草稿里记的最后改动时间（默认现在）；
+   * quiet：别的标签页删了这一关的草稿、这里重写时，写不下也不删别的关没保存的进度（两个标签页会轮流删对方的）。
+   */
+  function writeDraft(time, quiet) {
     clearTimeout(draftTimer);
     draftTimer = 0;
     const doc = state.doc;
-    if (!doc) return;
-    if (draftBlocked) { warnOtherTab(); return; }
+    if (!doc) return false;
+    if (draftBlocked) { warnOtherTab(); return false; }
     const key = draftKeyOf(doc);
-    const draft = M.draftOf(doc, !(state.history.dirty || metaDirty));
+    const draft = M.draftOf(doc, !(state.history.dirty || metaDirty), time);
+    let ok = true;
     if (draft.saved && M.untouched(doc)) removeKey(key); // 和打开时一样、也没有要保存的：不用记
-    // 存不进去（写满了）：先删掉已保存的那些再试，还不行就告诉玩家一次（原来空 catch 吞掉，界面还说已自动保留）
-    else if (!writeJson(key, draft) && !(pruneDrafts(true) && writeJson(key, draft))) tellStorageFull();
+    // 存不进去（写满了）：腾了地方还不行就告诉玩家一次（原来空 catch 吞掉，界面还说已自动保留）
+    else if (!(ok = storeDraft(key, JSON.stringify(draft), !quiet))) tellStorageFull();
     if (openPanel === 'history') renderHistory();
+    return ok;
   }
   function scheduleDraft() {
     clearTimeout(draftTimer);
     draftTimer = 0;
     if (draftBlocked) { warnOtherTab(); return; }
-    draftTimer = setTimeout(writeDraft, 600); // 有意的延时：连续改动时少写几次
+    draftTimer = setTimeout(() => writeDraft(), 600); // 有意的延时：连续改动时少写几次
   }
 
   function tellStorageFull() {
     if (storageFullTold) return;
     storageFullTold = true;
     toast(state.t('draft.storageFull'), 'error', null, 15000);
+  }
+
+  /**
+   * 存一份草稿；写满了先删别的关已保存的草稿（游戏里有文件），还不够、dropUnsaved 时再从最久没改的删别的关没保存的，
+   * 每删一份试一次，删了几关告诉玩家（2026-11-19 评审：原来只删已保存的，别的关没保存的旧草稿一直占着，这一关存不进去）。
+   * 正在编辑的这一关不删。腾完还是存不进去为 false。
+   */
+  function storeDraft(key, text, dropUnsaved) {
+    if (writeText(key, text)) return true;
+    if (pruneDrafts(true) && writeText(key, text)) return true;
+    if (!dropUnsaved) return false;
+    let dropped = 0;
+    for (const old of M.draftsToDrop(listDrafts(), 0, key)) {
+      removeKey(old);
+      dropped++;
+      if (writeText(key, text)) {
+        toast(state.t('draft.dropped', dropped), 'warn', null, 15000);
+        return true;
+      }
+    }
+    return false;
   }
 
   /** 浏览器里各关的草稿 [{ key, saved, time }]（读不出来的按没保存、很久以前算）。 */
@@ -1605,6 +1682,14 @@
     if (!e.key || !e.key.startsWith(DRAFT_PREFIX)) return;
     if (openPanel === 'history') renderHistory();
     if (!state.doc || e.key !== draftKeyOf(state.doc)) return;
+    if (e.newValue === null) {
+      // 别的标签页删了这一关的草稿（启动时清理旧草稿、在那边点了「放弃」）：不是改了进度，不用问，按本页现状重写一份
+      // （2026-11-19 评审：原来照样提示「另一个标签页改了这一关」，点「载入另一页的进度」后本页的改动全丢）
+      draftBlocked = false;
+      if (otherTabToast) otherTabToast();
+      writeDraft(undefined, true);
+      return;
+    }
     draftBlocked = true;
     clearTimeout(draftTimer);
     draftTimer = 0;
@@ -1617,9 +1702,11 @@
       [state.t('draft.keepMine'), () => { allowDraft(); writeDraft(); }],
     ], 60000, () => { otherTabToast = null; });
   }
+  /** 以这一页为准（换了一关、刚存进游戏、选了「以本页为准」）：不再等别的标签页，也不再问要不要载入上次的进度。 */
   function allowDraft() {
     draftBlocked = false;
     if (otherTabToast) otherTabToast();
+    if (askToast) askToast();
   }
   /** 重新打开这一关：套上另一页存的草稿。 */
   function reopenDoc() {
@@ -1627,20 +1714,60 @@
     try { openDoc(state.make, state.source); } catch (e) { toast(state.t('toast.openFailed', errorText(e)), 'error'); }
   }
 
-  /** 打开一关时套上上次的进度（可撤销）；「不用了」回到游戏这次给的样子。 */
+  /**
+   * 这一关的草稿；打开的是手序文件、新的名字下没有时，看看这一版以前的编辑器按谱面签名存的那份（legacyKey，两份文件共用过它）。
+   * 游戏的关卡只按 Id 读：早期测试版按签名存过游戏关卡的草稿，没发布过，不再回头读（2026-11-19 评审：
+   * 回头读会把打开文件时留下的草稿套到游戏的这一关上，「放弃」又只删 Id 那一份，下次打开再冒出来）。
+   */
+  function readDraft(doc) {
+    const draft = readJson(draftKeyOf(doc));
+    if (draft || doc.sessionId) return { draft, legacyKey: '' };
+    const key = DRAFT_PREFIX + doc.signature, old = readJson(key);
+    return old && !old.session ? { draft: old, legacyKey: key } : { draft: null, legacyKey: '' };
+  }
+  const metaDiffers = (doc, meta) => meta.author !== doc.opened.author || meta.comment !== doc.opened.comment || meta.fileName !== doc.opened.fileName;
+
+  /** 打开一关时套上上次的进度（可撤销）：是在这份手序上改的直接套上，不是的先问；「放弃」回到游戏这次给的样子。 */
   function restoreDraft() {
     const doc = state.doc;
-    // 只按这一关的 Id（打开文件时按谱面签名）读。早期测试版按签名存过游戏关卡的草稿，没发布过，不再回头读：
-    // 回头读会把打开文件时留下的草稿套到游戏的这一关上，「放弃」又只删 Id 那一份，下次打开再冒出来（2026-11-19 评审）
-    const draft = readJson(draftKeyOf(doc));
+    const { draft, legacyKey } = readDraft(doc);
     const change = draft && M.draftChange(doc, draft);
     if (!change) return;
+    if (M.draftMatches(doc, draft)) { applyDraft(doc, draft, change, legacyKey, !!legacyKey); return; }
+    // 游戏换了一份手序、打开的是别人的文件，或者旧版的草稿认不出来：和这次打开的一样就不用问
+    if (!change.size && !metaDiffers(doc, M.draftMeta(doc, draft))) return;
+    askDraft(doc, draft, legacyKey);
+  }
+
+  /**
+   * 问玩家要不要载入不是在这份手序上改的进度。提示条开着时都能载入（载入的是打开时读到的那份）；没回答就接着改的照常写草稿，
+   * 不为了留着那份进度而不存新改的（换关卡、关网页时新改的会丢）。到时间收起来、也没接着改：那份进度留着，下次打开再问。
+   */
+  function askDraft(doc, draft, legacyKey) {
+    askToast = toast(state.t('draft.found'), 'warn', [
+      [state.t('draft.load'), () => {
+        if (state.doc !== doc) return;
+        const change = M.draftChange(doc, draft);
+        if (change) applyDraft(doc, draft, change, legacyKey, true);
+      }, true],
+      [state.t('draft.skip'), () => { if (state.doc === doc) writeDraft(); }], // 以这次打开的为准：没改过就删掉那份进度，改过了就换成这一页的
+    ], 60000, () => { askToast = null; });
+  }
+
+  /**
+   * 套上草稿（可撤销）。rebase：玩家选了载入、或接上的是旧版编辑器的草稿：马上按这次打开的重写一份（时间照旧），
+   * 下次打开同样的这一份直接接上；旧版按谱面签名存的那份删掉。
+   */
+  function applyDraft(doc, draft, change, legacyKey, rebase) {
     const opened = Object.assign({}, doc.opened), meta = M.draftMeta(doc, draft);
-    const metaChanged = meta.author !== opened.author || meta.comment !== opened.comment || meta.fileName !== opened.fileName;
+    const metaChanged = metaDiffers(doc, meta);
     const confirmed = M.draftConfirmed(doc, draft);
     confirmed.forEach(id => { doc.notes[id].confirmed = true; }); // 看过的待检查照样算看过
+    doc.savedBase = typeof draft.savedBase === 'string' ? draft.savedBase : ''; // 上次存进游戏的那份：游戏下次用它导出时也认得
     if (change.missed) toast(state.t('draft.missed', change.missed), 'error', null, 15000);
-    if (!change.size && !metaChanged) { if (confirmed.length) edited(true); return; }
+    // 旧版的那份在新的名字下写好了才删（存储写满时留着）
+    const finish = () => { if (rebase && writeDraft(draft.time) && legacyKey) removeKey(legacyKey); };
+    if (!change.size && !metaChanged) { if (confirmed.length) edited(true); finish(); return; }
     const before = new Map([...change.keys()].map(id => [id, doc.notes[id].lanes]));
     if (change.size) state.history.apply(change);
     setMeta(doc, meta); // 文件名也沿用（2026-11-19 评审：从历史接着改时存成默认名，同一关两份文件，游戏认不出用哪份）
@@ -1649,8 +1776,9 @@
     metaDirty = !saved && metaChanged;
     edited(true); // 不重写草稿：草稿里记的是上次改动的时间
     renderFilePanel();
+    finish();
     toast(state.t(saved ? 'draft.restoredSaved' : 'draft.restored', change.size), 'ok', [
-      [state.t('draft.discard'), () => discardDraft(doc, before, opened, confirmed)],
+      [state.t('draft.discard'), () => discardDraft(doc, change, before, opened, confirmed)],
     ], 12000);
   }
 
@@ -1660,16 +1788,24 @@
     doc.fileName = meta.fileName;
   }
 
-  /** 「放弃」：回到游戏这次给的样子，删掉草稿。 */
-  function discardDraft(doc, before, opened, confirmed) {
+  /**
+   * 「放弃」恢复的进度：恢复时改过、之后没再动过的音符改回去，作者、说明、文件名回到打开时的，看过的待检查不再算看过。
+   * 和打开时一样了就算已保存、删掉草稿；恢复后又改了别处的，那些改动留着、照旧没保存，草稿照现状写
+   * （2026-11-19 评审：原来无条件记成已保存、删掉草稿，那处改动关网页时不提醒、丢了）。
+   */
+  function discardDraft(doc, restored, before, opened, confirmed) {
     if (state.doc !== doc) return;
-    if (before.size) state.history.apply(before);
+    const back = M.undoRestore(doc, restored, before);
+    if (back.size) state.history.apply(back);
     setMeta(doc, opened);
     confirmed.forEach(id => { doc.notes[id].confirmed = false; });
-    state.history.markSaved();
+    doc.savedBase = '';
+    const clean = M.untouched(doc);
+    if (clean) state.history.markSaved();
     metaDirty = false;
-    removeKey(draftKeyOf(doc));
     edited(true);
+    if (clean) removeKey(draftKeyOf(doc));
+    else writeDraft();
     renderFilePanel();
     if (openPanel === 'history') renderHistory();
   }

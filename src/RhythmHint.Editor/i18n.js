@@ -67,7 +67,6 @@
     'file.title': ['手序信息', '手序資訊', 'Fingering', '운지 정보', '運指情報'],
     'file.level': ['曲目信息', '曲目資訊', 'Song', '곡 정보', '曲情報'],
 
-    'refs.title': ['两种自动排法', '兩種自動排法', 'Two auto styles', '두 가지 자동 배치', '2 種類の自動配置'],
     'refs.desc': ['两侧为「标准」与「交替优先」的自动排键结果，与当前手序不同之处会高亮显示。', '兩側為「標準」與「交替優先」的自動排鍵結果，與目前手序不同之處會醒目顯示。', 'The side columns show the Standard and Alternate first auto fingerings; differences from the current fingering are highlighted.', '양옆 열은 표준과 교대 우선 자동 운지 결과이며, 현재 운지와 다른 곳이 강조됩니다.', '左右の列は「標準」と「交互優先」の自動運指です。現在の運指と異なる箇所が強調表示されます。'],
     'refs.show': ['显示此列', '顯示此列', 'Show column', '열 표시', '列を表示'],
     'refs.applySel': ['套用到所选', '套用到所選', 'Apply to selection', '선택에 적용', '選択に適用'],
@@ -76,7 +75,6 @@
     'refs.width': ['参考列宽度', '參考列寬度', 'Reference column width', '참고 열 너비', '参考列の幅'],
     'refs.none': ['单独打开的文件没有自动排键参考。', '單獨開啟的檔案沒有自動排鍵參考。', 'Files opened on their own have no auto fingering reference.', '파일로 연 경우 자동 운지 참고가 없습니다.', 'ファイルから開いた場合、自動運指の参考はありません。'],
 
-    'audio.title': ['音乐', '音樂', 'Music', '음악', '音楽'],
     'audio.none': ['无音乐', '無音樂', 'No music', '음악 없음', '音楽なし'],
     'audio.load': ['载入音乐', '載入音樂', 'Load music', '음악 불러오기', '音楽を読み込む'],
     'audio.fromGame': ['来自游戏的音乐', '來自遊戲的音樂', 'Music from the game', '게임의 음악', 'ゲームの音楽'],
@@ -187,7 +185,6 @@
     'save.pickBodyInbox': ['游戏位于系统文件夹，浏览器无法直接写入。首次保存请选择下方文件夹，游戏会自动将手序移入手序文件夹：', '遊戲位於系統資料夾，瀏覽器無法直接寫入。首次儲存請選擇下方資料夾，遊戲會自動將手序移入手序資料夾：', 'The game is in a system folder the browser cannot write to. Choose the folder below once; the game moves your fingerings into its fingering folder automatically:', '게임이 브라우저가 쓸 수 없는 시스템 폴더에 있습니다. 처음 한 번 아래 폴더를 선택하면 게임이 운지를 자동으로 운지 폴더로 옮깁니다:', 'ゲームはブラウザーが書き込めないシステムフォルダーにあります。初回のみ下のフォルダーを選択してください。運指はゲームが自動的に運指フォルダーへ移します：'],
     'save.pickGo': ['选择文件夹', '選擇資料夾', 'Choose folder', '폴더 선택', 'フォルダーを選択'],
     'save.cancel': ['取消', '取消', 'Cancel', '취소', 'キャンセル'],
-    'save.ok': ['确定', '確定', 'OK', '확인', 'OK'],
     'save.done': ['已保存：{0}，游戏内立即生效。', '已儲存：{0}，遊戲內立即生效。', 'Saved {0}. It takes effect in the game immediately.', '{0} 저장됨. 게임에 즉시 적용됩니다.', '{0} を保存しました。ゲームに即時反映されます。'],
     'save.downloaded': ['已下载 {0}，请放入：{1}', '已下載 {0}，請放入：{1}', 'Downloaded {0}. Put it in: {1}', '{0}을(를) 내려받았습니다. 다음 폴더에 넣으세요: {1}', '{0} をダウンロードしました。次のフォルダーに入れてください：{1}'],
     'save.wrongFolder': ['所选文件夹为「{0}」，不是手序文件夹 Fingerings。请重新选择：', '所選資料夾為「{0}」，不是手序資料夾 Fingerings。請重新選擇：', 'The chosen folder is "{0}", not the Fingerings folder. Please choose:', '선택한 폴더는 "{0}"(으)로, 운지 폴더 Fingerings가 아닙니다. 다음 폴더를 다시 선택해 주세요:', '選択したフォルダーは「{0}」で、運指フォルダー Fingerings ではありません。次のフォルダーを選び直してください：'],
@@ -205,6 +202,10 @@
     'draft.otherTab': ['本关已在另一个标签页中修改。为避免互相覆盖，本页暂停自动保留进度。', '本關已在另一個分頁中修改。為避免互相覆蓋，本頁暫停自動保留進度。', 'This level was changed in another tab. To avoid overwriting each other, this tab has stopped keeping your progress.', '이 레벨이 다른 탭에서 수정되었습니다. 서로 덮어쓰지 않도록 이 탭은 진행 상황 자동 보존을 멈췄습니다.', 'このレベルは別のタブで変更されました。上書きし合わないよう、このタブでは進行状況の自動保持を停止しています。'],
     'draft.useOther': ['载入另一页的进度', '載入另一頁的進度', "Load the other tab's progress", '다른 탭의 진행 상황 불러오기', '別のタブの状態を読み込む'],
     'draft.keepMine': ['以本页为准', '以本頁為準', 'Keep this tab', '이 탭 기준으로 유지', 'このタブを優先'],
+    'draft.found': ['找到上次的进度，但无法确认是在当前这份手序上修改的。是否载入？', '找到上次的進度，但無法確認是在目前這份手序上修改的。是否載入？', 'Found earlier progress, but it may not have been made on this fingering. Load it?', '이전 진행 상황이 있지만 현재 운지에서 수정한 것인지 확인할 수 없습니다. 불러올까요?', '前回の進行状況がありますが、現在の運指で編集したものか確認できません。読み込みますか？'],
+    'draft.load': ['载入', '載入', 'Load', '불러오기', '読み込む'],
+    'draft.skip': ['不载入', '不載入', "Don't load", '불러오지 않기', '読み込まない'],
+    'draft.dropped': ['浏览器存储空间不足，已删除 {0} 个关卡较早的未保存进度。', '瀏覽器儲存空間不足，已刪除 {0} 個關卡較早的未儲存進度。', "The browser's storage was full, so older unsaved progress for {0} levels was deleted.", '브라우저 저장 공간이 부족해 레벨 {0}개의 오래된 미저장 진행 상황을 삭제했습니다.', 'ブラウザーの保存領域が不足したため、{0} レベル分の古い未保存の進行状況を削除しました。'],
     'draft.storageFull': ['浏览器存储空间不足，进度未能自动保留。请尽快保存到游戏。', '瀏覽器儲存空間不足，進度未能自動保留。請盡快儲存到遊戲。', "The browser's storage is full, so your progress could not be kept. Please save to the game soon.", '브라우저 저장 공간이 부족해 진행 상황을 보존하지 못했습니다. 게임에 저장해 주세요.', 'ブラウザーの保存領域が不足しているため、進行状況を保持できませんでした。早めにゲームに保存してください。'],
     'draft.missed': ['本关的音符分组有变化，上次改过的 {0} 处未能恢复，请检查。', '本關的音符分組有變化，上次改過的 {0} 處未能恢復，請檢查。', 'The notes in this level are grouped differently now; {0} of your earlier edits could not be restored. Please check them.', '이 레벨의 노트 묶음이 바뀌어 이전에 수정한 {0}곳을 복원하지 못했습니다. 확인해 주세요.', 'このレベルのノーツのまとまりが変わったため、前回の変更のうち {0} か所を復元できませんでした。確認してください。'],
 

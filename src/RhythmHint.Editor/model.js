@@ -126,10 +126,54 @@
     return doc;
   }
 
-  /** 记下打开时的作者、说明、文件名（草稿还要不要留着、放弃时回到哪里）。打开文件后改了文件名要再记一次。 */
+  /**
+   * 记下打开时的作者、说明、文件名（草稿还要不要留着、放弃时回到哪里），和打开时这份手序的指纹 base（草稿认「是在哪份手序上改的」）。
+   * 打开文件后改了文件名要再记一次。
+   */
   function remember(doc) {
     doc.opened = { author: doc.meta.author, comment: doc.meta.comment, fileName: doc.fileName };
+    doc.base = baseOf(doc);
+    doc.savedBase = '';
   }
+
+  // ---------- 手序的指纹（草稿用） ----------
+  // 2026-11-19 第二轮评审：草稿原来只按谱面认，打开朋友分享的同一张谱的手序、游戏换了一份手序时，都被套上自己的旧进度。
+  // 现在草稿记着「打开时那份手序」的指纹，对得上才自动套，对不上先问玩家。
+
+  /** 53 位的文字指纹（cyrb53 算法）：只用来认手序，不用于安全。 */
+  function hashText(text) {
+    let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
+    h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
+    h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+  }
+
+  /** 一份手序的内容：键数、作者、说明、每个音符的砖号和键（左撇子的先镜像成右手：游戏里切换惯用手不算换了一份）。 */
+  function fingeringText(doc) {
+    const mirror = doc.meta.leftHanded === true;
+    const notes = doc.notes.map(n => n.tile + ',' + n.lastTile + ':' + n.lanes.map(l => (mirror ? doc.keys - 1 - l[0] : l[0])).sort((a, b) => a - b).join('+'));
+    return JSON.stringify([doc.keys, doc.meta.author, doc.meta.comment]) + '|' + notes.join(';');
+  }
+
+  /**
+   * 现在这份手序的指纹，文件名后给（保存时先记下内容，存成什么名字要等写完才知道）：内容加文件名。
+   * 同一张谱的两份手序，键位、作者、说明、文件名有一样不同就是两份。
+   */
+  function baseFor(doc) {
+    const text = fingeringText(doc);
+    return fileName => 'b' + hashText(text + '|' + fileName);
+  }
+  const baseOf = doc => baseFor(doc)(doc.fileName);
+
+  /** 打开的手序文件的草稿名：谱面签名加文件内容的指纹（两份不同的文件不共用一份草稿；同一份文件换了名字再打开还能找到）。 */
+  const fileDraftId = doc => doc.signature + '.' + hashText(fingeringText(doc));
 
   /** 读游戏给的会话（session.js 里的 window.RHYTHMHINT_SESSION）。 */
   function fromSession(s) {
@@ -400,7 +444,8 @@
     get canUndo() { return this.undoStack.length > 0; }
     get canRedo() { return this.redoStack.length > 0; }
     get dirty() { return this.current !== this.savedId; }
-    markSaved() { this.savedId = this.current; }
+    /** 记成已保存；step：存进去的是哪一步（保存要等文件夹权限，期间又改了时只算开始保存时的那一步）。 */
+    markSaved(step = this.current) { this.savedId = step; }
   }
 
   // ---------- 参考信息 ----------
@@ -507,10 +552,11 @@
    * tiles（2026-11-19 起）：按砖号记 [第一块砖号, 最后一块砖号, 键, 改过的记 1, 各键的长按]，游戏重新导出时多押分组变了也能逐条对上；
    * 后两项可以没有：没改过也没长按的只记前三项，有长按的第 4 项记 1 或 0、第 5 项记长按（套回去时长按跟着原来那个键）。
    * lanes 照旧按第几个音符记，旧版编辑器（1.3.1 及以前）读的是它。session、leftHanded 是哪一关、当时的惯用手。
-   * 后来加的（旧版编辑器不认，照样能用）：confirmed 是看过的自动补齐音符 [第一块砖号, 最后一块砖号]，fileName 是文件面板里的文件名。
+   * 后来加的（旧版编辑器不认，照样能用）：confirmed 是看过的自动补齐音符 [第一块砖号, 最后一块砖号]，fileName 是文件面板里的文件名；
+   * base 是打开时那份手序的指纹，savedBase 是最后一次存进游戏的那份的指纹（游戏下次用它导出时也算对得上），见 draftMatches。
    */
   function draftOf(doc, saved, time) {
-    return {
+    const draft = {
       signature: doc.signature, session: doc.sessionId, leftHanded: doc.meta.leftHanded === true,
       lanes: doc.notes.map(n => n.lanes.map(l => l[0])),
       tiles: doc.notes.map(draftEntry),
@@ -518,6 +564,44 @@
       confirmed: doc.notes.filter(n => n.confirmed).map(n => [n.tile, n.lastTile]),
       saved: saved === true, changed: stats(doc).changed, time: finite(time) ? time : Date.now(),
     };
+    if (doc.base) draft.base = doc.base;
+    if (doc.savedBase) draft.savedBase = doc.savedBase;
+    return draft;
+  }
+
+  /**
+   * 这份草稿是不是在现在打开的这份手序上改的（是才自动套上，不是就先问玩家）：
+   * 记了指纹的，和打开时的指纹（base）或上次存进游戏的那份（savedBase）一样才算。
+   * 旧版编辑器写的草稿没有指纹：按砖号记的、没改过的音符都和这次打开的一样，作者、说明、文件名也一样，才算；只按第几个音符记的认不出来。
+   */
+  function draftMatches(doc, draft) {
+    if (!draft || typeof draft !== 'object') return false;
+    if (typeof draft.base === 'string') return draft.base === doc.base || (typeof draft.savedBase === 'string' && draft.savedBase === doc.base);
+    if (!Array.isArray(draft.tiles) || draft.tiles.length !== doc.notes.length) return false;
+    const o = doc.opened || {};
+    const same = (v, want) => v === undefined || v === want; // 更早的测试版没记作者、文件名
+    if (!same(draft.author, o.author) || !same(draft.comment, o.comment) || !same(draft.fileName, o.fileName)) return false;
+    const mirror = typeof draft.leftHanded === 'boolean' && draft.leftHanded !== (doc.meta.leftHanded === true);
+    return draft.tiles.every((e, i) => {
+      const n = doc.notes[i];
+      if (!Array.isArray(e) || e[0] !== n.tile || e[1] !== n.lastTile || !Array.isArray(e[2])) return false;
+      if (e[3] === 1) return true; // 改过的：不知道打开时是什么样
+      const lanes = e[2].map(l => (mirror ? doc.keys - 1 - l : l)).sort((a, b) => a - b);
+      return lanes.join('+') === laneKey(n.lanes);
+    });
+  }
+
+  /**
+   * 恢复草稿后点「放弃」要改回去的：恢复时改过的音符，之后没再改过的改回恢复前的样子；之后又改过的留着（那是新改的）。
+   * restored、before：恢复时 { 音符 id: 恢复成的 lanes }、{ 音符 id: 恢复前的 lanes }。
+   */
+  function undoRestore(doc, restored, before) {
+    const change = new Map();
+    restored.forEach((lanes, id) => {
+      const n = doc.notes[id];
+      if (n && before.has(id) && noteKey(n.lanes) === noteKey(lanes)) change.set(id, before.get(id));
+    });
+    return change;
   }
 
   function draftEntry(n) {
@@ -696,7 +780,8 @@
   return {
     FILE_FORMAT, SESSION_FORMAT, MAX_FILE_BYTES, FingeringError, parseFingering, fromSession, fromFileText, toFileText, parseRecent,
     suggestedFileName, cleanFileName, numberedFileName, sameLevelFile, saveName, signature, ops, History, jacks, noteValue, secondsPerBeat, stats, refLanes, laneKey,
-    isChanged, handOf, draftOf, draftChange, draftMeta, draftConfirmed, draftsToDrop, untouched, remember, plain,
+    isChanged, handOf, draftOf, draftChange, draftMeta, draftConfirmed, draftsToDrop, draftMatches, undoRestore, untouched, remember, plain,
+    baseFor, baseOf, fileDraftId,
     markReview, confirm, reviewList, nextReview, keyCodeOf, laneOfKey, isModifier, keyDisplay, shortcutClashes,
   };
 });

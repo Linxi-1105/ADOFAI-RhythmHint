@@ -402,3 +402,28 @@ test('the waveform is built in slices: a step stops at its deadline and the fini
   while (!wave.step(-Infinity));
   assert.deepEqual(Array.from(wave.peaks), Array.from(expected));
 });
+
+// ---------- 2026-11-19 第二轮评审：第一次播放时画面跳到 −offset ----------
+
+test('right after a seek or a start, the picture stays on the target while <audio> is not ready, even if currentTime reads 0', () => {
+  // 画面跳到 −(关卡 offset − 一拍) = 音乐文件第 0 秒：只有 <audio> 后备给得出。跳转刚发出、元素还没准备好时 currentTime 读成 0，
+  // 原来照读，而且把读回的 0 记成跳转目标
+  const el = { addEventListener() {}, paused: true, seeking: false, readyState: 4, playbackRate: 1, seekable: { length: 1, start: () => 0, end: () => 300 } };
+  let stored = 0;
+  Object.defineProperty(el, 'currentTime', { get: () => (el.seeking ? 0 : stored), set: v => { stored = v; el.seeking = true; el.readyState = 1; } });
+  el.play = () => { el.paused = false; return Promise.resolve(); };
+  el.pause = () => { el.paused = true; };
+  const p = new globalThis.EditorPlayer(el);
+  p.hasAudio = true;
+  p.baseOffset = 6.9;
+  p.seek(1.3);
+  p.play();
+  near(p.time(), 1.3); // 跳转中：停在目标上
+  el.seeking = false; // 跳好了，但还没缓冲够
+  near(p.time(), 1.3);
+  el.readyState = 4; // 开始走
+  stored += 0.2;
+  near(p.time(), 1.5);
+  p.pause();
+  near(p.time(), 1.5);
+});

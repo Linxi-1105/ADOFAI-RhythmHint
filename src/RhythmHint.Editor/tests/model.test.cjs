@@ -518,3 +518,78 @@ test('lane keys that are also editor shortcuts are reported', () => {
   assert.deepEqual(M.shortcutClashes(['Z', 'X', 'n', 'M']), ['N', 'M']);
   assert.deepEqual(M.shortcutClashes(['[', 'Space', 'LeftArrow', 'Home']), ['[', 'Space', '\u2190', 'Home']);
 });
+
+// ---------- 2026-11-19 \u7b2c\u4e8c\u8f6e\u8bc4\u5ba1\uff1a\u8349\u7a3f\u8ba4\u300c\u662f\u5728\u54ea\u4efd\u624b\u5e8f\u4e0a\u6539\u7684\u300d ----------
+
+test('the fingerprint of a fingering changes with its keys, author, comment and file name, but not with handedness', () => {
+  const base = s => M.fromSession(s).base;
+  const s0 = session(), b0 = base(s0);
+  assert.match(b0, /^b[0-9a-z]+$/);
+  assert.equal(base(session()), b0, 'the same export gives the same fingerprint');
+  const author = session(); author.fingering.author = 'Friend';
+  const comment = session(); comment.fingering.comment = 'x';
+  const name = session(); name.fileName = 'friend.json';
+  const lanes = session(); lanes.fingering.notes[0][2] = [[0, 0]];
+  for (const s of [author, comment, name, lanes]) assert.notEqual(base(s), b0);
+  const left = session(); // \u6e38\u620f\u91cc\u6539\u6210\u5de6\u6487\u5b50\uff1a\u6574\u4f53\u955c\u50cf
+  left.fingering.leftHanded = true;
+  left.fingering.notes = left.fingering.notes.map(n => [n[0], n[1], n[2].map(([l, hold]) => [3 - l, hold])]);
+  assert.equal(base(left), b0);
+  // \u4fdd\u5b58\u65f6\u5148\u8bb0\u5185\u5bb9\u3001\u5199\u5b8c\u624d\u77e5\u9053\u5b58\u6210\u4ec0\u4e48\u540d\u5b57
+  const doc = M.fromSession(session()), later = M.baseFor(doc);
+  doc.notes[0].lanes = [[0, 0]];
+  assert.equal(later(doc.fileName), b0, 'the content is taken when baseFor is called');
+  assert.equal(M.fileDraftId(M.fromSession(name)), M.fileDraftId(M.fromSession(session())), 'a file draft does not depend on the file name');
+});
+
+test('a draft matches the fingering it was made on, or the one last saved to the game', () => {
+  const doc = M.fromSession(session());
+  new M.History(doc).apply(M.ops.toLane(doc, [doc.notes[0]], 0));
+  const draft = JSON.parse(JSON.stringify(M.draftOf(doc, false)));
+  assert.equal(draft.base, doc.base);
+  assert.equal('savedBase' in draft, false, 'only written once saved');
+  assert.ok(M.draftMatches(M.fromSession(session()), draft));
+  const friend = session(); friend.fingering.author = 'Friend';
+  assert.ok(!M.draftMatches(M.fromSession(friend), draft));
+  doc.savedBase = M.fromSession(friend).base;
+  assert.ok(M.draftMatches(M.fromSession(friend), JSON.parse(JSON.stringify(M.draftOf(doc, true)))));
+});
+
+test('a draft from an older editor matches when the notes it did not change are the same', () => {
+  const doc = M.fromSession(session());
+  new M.History(doc).apply(M.ops.toLane(doc, [doc.notes[0]], 0));
+  const draft = JSON.parse(JSON.stringify(M.draftOf(doc, false)));
+  delete draft.base;
+  assert.ok(M.draftMatches(M.fromSession(session()), draft));
+  const other = session(); other.fingering.notes[1][2] = [[3, 0]]; // \u6ca1\u6539\u8fc7\u7684\u97f3\u7b26\u4e0d\u4e00\u6837\u4e86
+  assert.ok(!M.draftMatches(M.fromSession(other), draft));
+  const changedOnly = session(); changedOnly.fingering.notes[0][2] = [[3, 0]]; // \u53ea\u6709\u6539\u8fc7\u7684\u90a3\u4e2a\u4e0d\u4e00\u6837\uff1a\u8ba4\u5f97
+  assert.ok(M.draftMatches(M.fromSession(changedOnly), draft));
+  const renamed = session(); renamed.fileName = 'friend.json';
+  assert.ok(!M.draftMatches(M.fromSession(renamed), draft));
+  assert.ok(!M.draftMatches(M.fromSession(session()), { ...draft, tiles: undefined }), 'one kept only by note number cannot be told');
+});
+
+test('undoing a restore leaves notes edited after it alone', () => {
+  const doc = M.fromSession(session());
+  const before = new Map([[0, doc.notes[0].lanes], [1, doc.notes[1].lanes]]);
+  const restored = new Map([[0, [[0, 0]]], [1, [[3, 0]]]]);
+  const h = new M.History(doc);
+  h.apply(restored);
+  h.apply(M.ops.toLane(doc, [doc.notes[1]], 2)); // \u6062\u590d\u540e\u53c8\u6539\u4e86\u7b2c 1 \u4e2a
+  const back = M.undoRestore(doc, restored, before);
+  assert.deepEqual([...back.keys()], [0]);
+  assert.deepEqual(back.get(0), before.get(0));
+});
+
+test('saving marks the step that was saved, not the one reached meanwhile', () => {
+  const doc = M.fromSession(session());
+  const h = new M.History(doc);
+  h.apply(M.ops.toLane(doc, [doc.notes[0]], 0));
+  const step = h.current;
+  h.apply(M.ops.toLane(doc, [doc.notes[1]], 3));
+  h.markSaved(step);
+  assert.equal(h.dirty, true);
+  h.undo();
+  assert.equal(h.dirty, false);
+});

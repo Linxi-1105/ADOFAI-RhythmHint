@@ -1,15 +1,10 @@
 // 手序编辑器的界面层：在假页面里跑 app.js 原文（tests/app-harness.cjs），复现 2026-11-19 评审找到的交互问题。
+// 草稿的问题在 app-draft.test.cjs，按钮、面板、音乐的接线在 app-wiring.test.cjs。
 // 运行：node --test src/RhythmHint.Editor/tests/
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const { boot, fakeDir, fakeIndexedDb, named, El } = require('./app-harness.cjs');
+const { boot, fakeDir, fakeIndexedDb, named, DRAFT, session, lanesOf, otherLevel, recentOf, editSingle, T, hasToast } = require('./app-harness.cjs');
 
-const fixtures = path.join(__dirname, 'fixtures');
-const session = () => JSON.parse(fs.readFileSync(path.join(fixtures, 'session.json'), 'utf8'));
-const DRAFT = 'rhythmhint.editor.draft.';
-const lanesOf = n => Array.from(n.lanes, l => l[0]); // Array.from：假页面里的数组和这里的不是同一个 Array，严格比较要换过来
 const draftOf = (h, s) => JSON.parse(h.storage.get(DRAFT + s.id));
 
 /** 第 3 个和最后一个音符是自动补齐的会话。 */
@@ -18,25 +13,6 @@ function autoSession() {
   s.fromAuto = s.fromAuto.map((_, i) => (i === 3 || i === s.fromAuto.length - 1 ? 1 : 0));
   return s;
 }
-function otherLevel(id, shift) {
-  const s = session();
-  s.id = id;
-  s.fingering.hits.forEach(h => { h[1] += shift; });
-  s.fingering.song = 'Other ' + id;
-  return s;
-}
-const recentOf = (...list) => ({
-  format: 'rhythmhint-editor-recent',
-  items: list.map((s, i) => ({ id: s.id, session: s.id + '.js', song: s.fingering.song, exported: 1000 - i, notes: s.fingering.notes.length })),
-});
-/** 选中一个单押，按下一条轨道的键。 */
-function editSingle(h, n) {
-  h.select(n.id);
-  const labels = h.t.state.doc.keyLabels;
-  h.key(labels[(lanesOf(n)[0] + 1) % labels.length].toLowerCase());
-}
-const T = (h, key, ...args) => h.t.state.t(key, ...args);
-const hasToast = (h, key, ...args) => h.toasts.some(x => x.text === T(h, key, ...args));
 
 test('N goes on to the next place to review and wraps around', () => {
   // 复现：跳过去时画面停在音符前 0.6 秒，下一次从画面时间往后找还是它，按 N 永远停在第一处
@@ -242,8 +218,8 @@ test('game key names like Keypad4 and LeftShift work as lane keys', () => {
 test('Ctrl+S in a text box saves instead of opening the browser\'s save page dialog', () => {
   const h = boot({ session: session() });
   h.frames(2);
-  const box = new El('fAuthor');
-  box.closest = () => box;
+  const box = h.el('fAuthor');
+  box.focus();
   const e = h.key('s', { ctrlKey: true, target: box });
   assert.ok(e.prevented);
   assert.ok(hasToast(h, 'save.downloaded', h.t.state.doc.fileName, h.t.state.doc.saveFolder || '…/Mods/RhythmHint/Fingerings'));

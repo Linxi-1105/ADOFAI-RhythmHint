@@ -2,7 +2,8 @@
 //   fixtures/conformance/accept、reject：两边都要接受 / 拒绝的写法，接受的读出来和 expected.json 一致
 //   fixtures/frozen/1.3.x：1.3.x 实际写出的文件，只读，没有重新生成的开关
 // 样例的期望改了就是破坏性更新（玩家手里的手序认不出来），只能加样例；拒绝的以后放宽了可以挪进接受，接受的不能挪进拒绝。
-// KNOWN 里是两边有意不一致的样例：Mod（Newtonsoft）的宽松读法，编辑器用 JSON.parse 不跟（第三方工具也不该依赖），跳过并写明原因。
+// KNOWN 里是两边有意不一致的样例：Mod（Newtonsoft）的宽松读法，编辑器用 JSON.parse 不跟（第三方工具也不该依赖）。
+// 这几份断言编辑器拒绝（不再跳过）：哪天编辑器悄悄放宽或改了报错，这里会先知道。
 // 运行：node --test src/RhythmHint.Editor/tests/
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -45,21 +46,28 @@ function check(name, doc) {
   }
 }
 
+/** 编辑器有意不收的宽松写法：读的时候报「不是有效的 JSON」。 */
+function rejectsLenient(file) {
+  assert.throws(() => M.fromFileText(read(file)), e => e instanceof M.FingeringError && e.code === 'notJson');
+}
+
 for (const name of samples('accept')) {
-  const id = 'accept/' + name;
-  const run = KNOWN[id] ? test.skip : test;
-  run(`接受 ${name}` + (KNOWN[id] ? `（已知不一致：${KNOWN[id]}）` : ''), () => {
-    check(name, M.fromFileText(read(path.join(conformance, 'accept', name))));
-  });
+  const id = 'accept/' + name, file = path.join(conformance, 'accept', name);
+  if (KNOWN[id]) test(`Mod 接受、编辑器拒绝 ${name}（有意不一致：${KNOWN[id]}）`, () => rejectsLenient(file));
+  else test(`接受 ${name}`, () => check(name, M.fromFileText(read(file))));
 }
 
 for (const name of samples('reject')) {
   const id = 'reject/' + name;
-  const run = KNOWN[id] ? test.skip : test;
-  run(`拒绝 ${name}` + (KNOWN[id] ? `（已知不一致：${KNOWN[id]}）` : ''), () => {
+  assert.ok(!KNOWN[id], 'KNOWN 只放 Mod 接受、编辑器拒绝的宽松写法：' + id);
+  test(`拒绝 ${name}`, () => {
     assert.throws(() => M.fromFileText(read(path.join(conformance, 'reject', name))), M.FingeringError);
   });
 }
+
+test('KNOWN 里列的样例都还在', () => {
+  for (const id of Object.keys(KNOWN)) assert.ok(fs.existsSync(path.join(conformance, id)), id);
+});
 
 test('1.3.x 的编辑器存出的手序：读得出来，内容不变', () => {
   const doc = M.fromFileText(read(frozen('fingering.json')));

@@ -106,13 +106,15 @@
         if (this.preroll && t + this.offset >= 0) this.startAudio(t);
         return t;
       }
-      const a = this.el.currentTime;
+      // 跳转、开始播放刚发出，音乐还没从目标位置走起来：停在发出时的目标上，不读 currentTime
+      // （2026-11-19：第一次播放时画面跳到音乐文件第 0 秒，即 −offset；元素还没准备好时 currentTime 可能读成 0）
+      const a = this.el.currentTime, held = this.mediaStart;
       if (this.el.seeking || this.el.paused || this.el.readyState < 3) {
         this.lastAudio = -1;
-        return a - this.offset;
+        return (held !== null ? held : a) - this.offset;
       }
-      if (this.mediaStart !== null) {
-        if (Math.abs(a - this.mediaStart) < 1e-4) return a - this.offset;
+      if (held !== null) {
+        if (Math.abs(a - held) < 1e-4) return held - this.offset;
         this.mediaStart = null;
       }
       if (a !== this.lastAudio) { this.lastAudio = a; this.lastAudioAt = now; }
@@ -135,7 +137,7 @@
           if (this.playing) { this.el.pause(); this.preroll = true; }
         } else {
           if (Math.abs(this.el.currentTime - target) > 1e-4) this.el.currentTime = target;
-          this.mediaStart = this.el.currentTime;
+          this.mediaStart = target; // 记发出的目标，不读回 currentTime（刚设完可能还读成 0）
           this.lastAudio = -1;
           if (!this.canSeekTo(target) && this.onSeekFail) this.onSeekFail();
           if (this.playing && this.preroll) { this.preroll = false; this.el.play().catch(() => {}); }
@@ -180,7 +182,7 @@
       this.clockOffset = null; // 从音乐开头之前接过来时，之前按画面时钟取的对齐基准不含 <audio> 的起播延迟，等它走起来重取
       const target = Math.max(0, t + this.offset);
       if (Math.abs(this.el.currentTime - target) > 1e-4) this.el.currentTime = target;
-      this.mediaStart = this.el.currentTime;
+      this.mediaStart = target;
       if (!this.canSeekTo(target) && this.onSeekFail) this.onSeekFail();
       this.el.playbackRate = this.rate;
       this.lastAudio = -1;
