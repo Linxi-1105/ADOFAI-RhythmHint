@@ -197,6 +197,7 @@
     'draft.restored': ['已恢复上次的进度（{0} 处未保存）。', '已恢復上次的進度（{0} 處未儲存）。', 'Restored your last session ({0} unsaved).', '지난 진행 상황을 복원했습니다(미저장 {0}곳).', '前回の続きを復元しました（未保存 {0} か所）。'],
     'draft.restoredSaved': ['已恢复上次保存的进度（与本次导出相差 {0} 处）。', '已恢復上次儲存的進度（與本次匯出相差 {0} 處）。', 'Restored your last saved progress ({0} notes differ from this export).', '지난번 저장한 상태를 복원했습니다(이번 내보내기와 {0}곳 다름).', '前回保存した状態を復元しました（今回の書き出しと {0} か所異なります）。'],
     'draft.discard': ['放弃', '放棄', 'Discard', '버리기', '破棄'],
+    'draft.missed': ['本关的音符分组有变化，上次改过的 {0} 处未能恢复，请检查。', '本關的音符分組有變化，上次改過的 {0} 處未能恢復，請檢查。', 'The notes in this level are grouped differently now; {0} of your earlier edits could not be restored. Please check them.', '이 레벨의 노트 묶음이 바뀌어 이전에 수정한 {0}곳을 복원하지 못했습니다. 확인해 주세요.', 'このレベルのノーツのまとまりが変わったため、前回の変更のうち {0} か所を復元できませんでした。確認してください。'],
 
     'toast.cannotMove': ['无法移动：目标轨道超出范围或已被占用。', '無法移動：目標軌道超出範圍或已被佔用。', "Can't move: the lane is out of range or already used.", '이동할 수 없습니다: 레인이 범위를 벗어나거나 이미 사용 중입니다.', '移動できません：レーンが範囲外か、すでに使われています。'],
     'toast.chordKey': ['多押请拖动其中一个键，或在右侧面板中选择。', '多押請拖動其中一個鍵，或在右側面板中選擇。', 'For chords, drag one key or pick keys in the right panel.', '동시 입력은 키 하나를 끌거나 오른쪽 패널에서 선택하세요.', '同時押しはキーを 1 つドラッグするか、右のパネルで選択してください。'],

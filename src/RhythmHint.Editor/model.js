@@ -376,24 +376,54 @@
    * 草稿：这一关在编辑器里现在的样子（每个音符按哪几个键），改到一半关掉网页、下次从「历史」打开时接着改。
    * 存全部音符而不只是改过的：游戏重新导出这一关时原来的排法可能变了（比如换了排法、用上了保存的文件），照样能还原。
    * saved：和保存到游戏的文件一样；changed：和打开时相比改了几处；time：最后改动的时间。
+   * tiles（2026-11-19 起）：按砖号记 [第一块砖号, 最后一块砖号, 键, 改过的记 1]，游戏重新导出时多押分组变了也能逐条对上；
+   * lanes 照旧按第几个音符记，旧版编辑器（1.3.1 及以前）读的是它。session、leftHanded 是哪一关、当时的惯用手。
    */
   function draftOf(doc, saved, time) {
     return {
-      signature: doc.signature, lanes: doc.notes.map(n => n.lanes.map(l => l[0])), author: doc.meta.author, comment: doc.meta.comment,
+      signature: doc.signature, session: doc.sessionId, leftHanded: doc.meta.leftHanded === true,
+      lanes: doc.notes.map(n => n.lanes.map(l => l[0])),
+      tiles: doc.notes.map(n => [n.tile, n.lastTile, n.lanes.map(l => l[0])].concat(isChanged(n) ? [1] : [])),
+      author: doc.meta.author, comment: doc.meta.comment,
       saved: saved === true, changed: stats(doc).changed, time: finite(time) ? time : Date.now(),
     };
   }
 
-  /** 草稿和现在这一份不一样的音符（可撤销地套上去）；不是这一关的草稿为 null。旧版草稿是 { 音符号: 键 } 只记改过的，照样认。 */
+  /**
+   * 草稿和现在这一份不一样的音符（可撤销地套上去）；不是这一关的草稿为 null。
+   * 有 tiles 的按砖号对：分组变了、对不上的音符不套，其中玩家改过的个数记在 change.missed（提示玩家；没改过的对不上不算丢）；
+   * 草稿的惯用手和这次导出不同时先镜像。
+   * 旧版草稿只有 lanes：按第几个音符整份套（个数不同就不套）；更早的测试版是 { 音符号: 键 } 只记改过的，照样认。
+   */
   function draftChange(doc, draft) {
-    if (!draft || draft.signature !== doc.signature || !draft.lanes || typeof draft.lanes !== 'object') return null;
+    if (!draft || typeof draft !== 'object') return null;
+    if (Array.isArray(draft.tiles) && ((draft.session && draft.session === doc.sessionId) || draft.signature === doc.signature))
+      return draftByTile(doc, draft);
+    if (draft.signature !== doc.signature || !draft.lanes || typeof draft.lanes !== 'object') return null;
     if (Array.isArray(draft.lanes) && draft.lanes.length !== doc.notes.length) return null;
     const change = new Map();
+    change.missed = 0;
     for (const [id, targets] of Object.entries(draft.lanes)) {
       const note = doc.notes[Number(id)];
       if (!note || !Array.isArray(targets)) return null;
       const lanes = withLanes(doc, note, targets);
       if (!lanes) return null;
+      if (laneKey(lanes) !== laneKey(note.lanes)) change.set(note.id, lanes);
+    }
+    return change;
+  }
+
+  function draftByTile(doc, draft) {
+    const byTile = new Map(doc.notes.map(n => [n.tile, n]));
+    const mirror = typeof draft.leftHanded === 'boolean' && draft.leftHanded !== (doc.meta.leftHanded === true);
+    const change = new Map();
+    change.missed = 0;
+    for (const entry of draft.tiles) {
+      const note = Array.isArray(entry) ? byTile.get(entry[0]) : undefined;
+      const targets = note && note.lastTile === entry[1] && Array.isArray(entry[2])
+        ? entry[2].map(l => (mirror && int(l) ? doc.keys - 1 - l : l)) : null;
+      const lanes = targets && withLanes(doc, note, targets);
+      if (!lanes) { if (Array.isArray(entry) && entry[3] === 1) change.missed++; continue; } // 分组变了（或这一条坏了）：不套；改过的告诉玩家没接上
       if (laneKey(lanes) !== laneKey(note.lanes)) change.set(note.id, lanes);
     }
     return change;

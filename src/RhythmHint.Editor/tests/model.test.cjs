@@ -146,8 +146,70 @@ test('drafts restore only onto the same level', () => {
   const fresh = M.fromSession(session());
   const change = M.draftChange(fresh, draft);
   assert.equal(change.size, 1);
-  assert.equal(M.draftChange(fresh, { ...draft, signature: 'other' }), null);
-  assert.equal(M.draftChange(fresh, { ...draft, lanes: draft.lanes.slice(1) }), null, 'a draft for a different note count does not apply');
+  assert.equal(M.draftChange(fresh, { ...draft, signature: 'other', session: 'other' }), null);
+  const indexOnly = { ...draft, tiles: undefined, session: undefined };
+  assert.equal(M.draftChange(fresh, { ...indexOnly, lanes: draft.lanes.slice(1) }), null, 'an old draft (by note number) for a different note count does not apply');
+});
+
+/** 把会话里一个跨两块砖的多押拆成两个单押（模拟 Mod 更新后多押分组规则变了）。 */
+function splitFirstChord(s) {
+  const notes = s.fingering.notes;
+  const i = notes.findIndex(n => n[1] > n[0] && n[2].length === 2);
+  const [first, last, lanes] = notes[i];
+  notes.splice(i, 1, [first, first, [lanes[0]]], [last, last, [lanes[1]]]);
+  if (Array.isArray(s.fromAuto)) s.fromAuto.splice(i, 1, s.fromAuto[i], s.fromAuto[i]);
+  return { first, last };
+}
+
+test('a draft still restores when the game groups the notes differently', () => {
+  // 复现（2026-11-19 评审）：草稿只按第几个音符记，Mod 更新后多押分组一变整份作废、不提示，改一下就被新草稿盖掉
+  const doc = M.fromSession(session());
+  const edited = doc.notes.filter(n => n.lanes.length === 1).at(-1);
+  const target = (lanesOf(edited)[0] + 1) % doc.keys;
+  new M.History(doc).apply(M.ops.toLane(doc, [edited], target));
+  const draft = JSON.parse(JSON.stringify(M.draftOf(doc, false)));
+
+  const regrouped = session();
+  splitFirstChord(regrouped);
+  const fresh = M.fromSession(regrouped);
+  assert.equal(fresh.notes.length, doc.notes.length + 1);
+  const change = M.draftChange(fresh, draft);
+  assert.ok(change, 'restores by tile');
+  assert.equal(change.missed, 0);
+  assert.ok(new M.History(fresh).apply(change));
+  assert.deepEqual(lanesOf(fresh.notes.find(n => n.tile === edited.tile)), [target]);
+});
+
+test('notes whose grouping changed are counted, the rest still restore', () => {
+  const doc = M.fromSession(session());
+  const chord = doc.notes.find(n => n.lastTile > n.tile && n.lanes.length === 2);
+  const single = doc.notes.filter(n => n.lanes.length === 1).at(-1);
+  const h = new M.History(doc);
+  h.apply(M.ops.mirror(doc, [chord]));
+  h.apply(M.ops.toLane(doc, [single], (lanesOf(single)[0] + 1) % doc.keys));
+  const draft = JSON.parse(JSON.stringify(M.draftOf(doc, false)));
+
+  const regrouped = session();
+  splitFirstChord(regrouped);
+  const change = M.draftChange(M.fromSession(regrouped), draft);
+  assert.equal(change.missed, 1, 'the split chord');
+  assert.equal(change.size, 1, 'the single note');
+});
+
+test('a draft made right-handed is mirrored onto a left-handed export', () => {
+  // 草稿不记惯用手时，切成左撇子再打开会把右手的键位套上去，存出 leftHanded=true、键位却是右手的文件
+  const doc = M.fromSession(session());
+  const single = doc.notes.filter(n => n.lanes.length === 1).at(-1);
+  new M.History(doc).apply(M.ops.toLane(doc, [single], 0));
+  const draft = JSON.parse(JSON.stringify(M.draftOf(doc, false)));
+  assert.equal(draft.leftHanded, false);
+
+  const left = session();
+  left.fingering.leftHanded = true;
+  left.fingering.notes.forEach(n => n[2].forEach(l => { l[0] = 3 - l[0]; }));
+  const fresh = M.fromSession(left);
+  new M.History(fresh).apply(M.draftChange(fresh, draft));
+  assert.deepEqual(fresh.notes.map(n => lanesOf(n)), doc.notes.map(n => lanesOf(n).map(l => 3 - l).sort((a, b) => a - b)));
 });
 
 test('a draft brings back the whole level even when the game exports it differently', () => {

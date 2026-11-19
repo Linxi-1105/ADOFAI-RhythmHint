@@ -1334,24 +1334,27 @@
   /** 打开一关时套上上次的进度（可撤销）；「不用了」回到游戏这次给的样子。 */
   function restoreDraft() {
     const doc = state.doc;
-    let draft = readJson(draftKeyOf(doc));
-    if (!draft && doc.sessionId) draft = readJson(DRAFT_PREFIX + doc.signature); // 早期测试版按谱面签名存的草稿
+    // 只按这一关的 Id（打开文件时按谱面签名）读。早期测试版按签名存过游戏关卡的草稿，没发布过，不再回头读：
+    // 回头读会把打开文件时留下的草稿套到游戏的这一关上，「放弃」又只删 Id 那一份，下次打开再冒出来（2026-11-19 评审）
+    const draft = readJson(draftKeyOf(doc));
     const change = draft && M.draftChange(doc, draft);
     if (!change) return;
     const author = typeof draft.author === 'string' ? draft.author : doc.meta.author;
     const comment = typeof draft.comment === 'string' ? draft.comment : doc.meta.comment;
     const metaChanged = author !== doc.meta.author || comment !== doc.meta.comment;
+    if (change.missed) toast(state.t('draft.missed', change.missed), 'error', null, 15000);
     if (!change.size && !metaChanged) return;
     const before = new Map([...change.keys()].map(id => [id, doc.notes[id].lanes]));
     const meta = { author: doc.meta.author, comment: doc.meta.comment };
     if (change.size) state.history.apply(change);
     doc.meta.author = author;
     doc.meta.comment = comment;
-    if (draft.saved) state.history.markSaved(); // 和保存到游戏的文件一样：不算没保存
-    metaDirty = !draft.saved && metaChanged;
+    const saved = draft.saved && !change.missed; // 有没接上的改动时，和保存过的文件已经不一样
+    if (saved) state.history.markSaved(); // 和保存到游戏的文件一样：不算没保存
+    metaDirty = !saved && metaChanged;
     edited(true); // 不重写草稿：草稿里记的是上次改动的时间
     renderFilePanel();
-    toast(state.t(draft.saved ? 'draft.restoredSaved' : 'draft.restored', change.size), 'ok', [
+    toast(state.t(saved ? 'draft.restoredSaved' : 'draft.restored', change.size), 'ok', [
       [state.t('draft.discard'), () => {
         if (state.doc !== doc) return;
         if (before.size) state.history.apply(before);
