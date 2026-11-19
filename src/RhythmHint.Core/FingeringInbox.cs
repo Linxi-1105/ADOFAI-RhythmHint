@@ -55,18 +55,41 @@ public static class FingeringInbox
 
     /// <summary>
     /// 把 <paramref name="inbox"/> 里的 .json 搬进 <paramref name="target"/>，文件名按 <see cref="SaveName"/> 选（不覆盖别的谱的手序）。
-    /// 搬不动的（浏览器正在写、被占用）留到下次。返回搬过去后的文件名。
+    /// 搬不动的（浏览器正在写、被占用）留到下次。返回搬过去后的文件名。没有要搬的就不建 <paramref name="target"/>。
     /// </summary>
-    public static List<string> MoveInto(string inbox, string target)
+    public static List<string> MoveInto(string inbox, string target) => MoveInto(inbox, target, out _);
+
+    /// <param name="inbox">中转文件夹。</param>
+    /// <param name="target">游戏的手序文件夹。</param>
+    /// <param name="problem">
+    /// 列不出中转文件夹（刚好被删、没有权限）或建不了手序文件夹时的原因，这一次什么都没搬，下一秒再试；没问题为空。
+    /// 复现（2026-11-19 第二轮评审）：原来这两步在逐个文件的 try 外面，异常漏到 Overlay 的兜底，整个 Mod 停用。
+    /// </param>
+    public static List<string> MoveInto(string inbox, string target, out string problem)
     {
         var moved = new List<string>();
+        problem = string.Empty;
         if (!Directory.Exists(inbox))
         {
             return moved;
         }
 
-        Directory.CreateDirectory(target);
-        foreach (var source in Directory.GetFiles(inbox, "*.json"))
+        string[] files;
+        try
+        {
+            files = Directory.GetFiles(inbox, "*.json");
+            if (files.Length > 0)
+            {
+                Directory.CreateDirectory(target);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            problem = ex.Message;
+            return moved;
+        }
+
+        foreach (var source in files)
         {
             try
             {

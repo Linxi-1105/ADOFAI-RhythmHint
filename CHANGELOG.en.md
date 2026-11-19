@@ -24,7 +24,9 @@ What changed in each version, newest first.
 - Fingering editor: clicking levels quickly in History opens the last one clicked, tabs editing the same level no longer overwrite each other's progress, and it tells you when browser storage is full and keeps progress for the latest 30 levels
 - Fingering editor: a loop whose start and end are too close is no longer turned on (it used to stall in silence), hit sounds at the end of a loop are no longer dropped with visual calibration set, the play button resets when the song ends, long songs no longer freeze the view briefly after loading, long charts play more smoothly, and the view stays sharp after moving to a display with different scaling
 - Custom fingerings follow chart updates more closely: changing, adding or removing a tile inside a stream no longer shifts the run before it by one key, and unchanged charts are recognized faster when entering a level
+- Fingering backup: if some fingerings cannot be read when restoring after a UMM reinstall, the backup is no longer deleted and they are restored on the next launch; two game installs no longer delete each other's backed-up fingerings
 - Fixed: Edit this level's fingering failed when a hold tile was followed by a destroyed tile, or when an entry in the editor's History was damaged; levels with extremely dense speed changes no longer stall on load, levels with invalid speed values no longer disable the mod, and song titles that look like dates show as written in the editor's History
+- Large fingering folders no longer cause a hitch every second while playing; file lists in English, Japanese and Korean use the right separator
 
 ## 1.3.1 · 2026-11-19
 

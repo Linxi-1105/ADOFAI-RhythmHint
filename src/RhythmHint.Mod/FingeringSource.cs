@@ -57,18 +57,33 @@ internal sealed class FingeringResult
 
 /// <summary>
 /// 专属手序文件夹（Mods/RhythmHint/Fingerings）：玩家把手序文件放进来就不用管了，进到对应的歌时自动使用（认歌见 FingeringMatcher）。
-/// 每秒看一次文件夹有没有变化（编辑器保存后关卡里马上换上）；读过的文件按修改时间缓存，同一关重开不重新对齐。
+/// 每秒看一次文件夹有没有变化（编辑器保存后关卡里马上换上），打歌时每 5 秒一次；读过的文件按修改时间缓存，同一关重开不重新对齐。
 /// </summary>
 internal sealed class FingeringSource
 {
+    /// <summary>平时多久看一次手序文件夹（秒）：编辑器保存后关卡里马上换上。</summary>
+    private const float PollSeconds = 1;
+
+    /// <summary>
+    /// 打歌时（关卡显示中、没暂停、没开设置窗口）多久看一次（秒）。看一次除了列目录，还可能要把中转文件夹的手序搬进来、
+    /// 把改动同步到备份（复制文件），都在主线程上，打歌时少做几次、少卡几次；打歌中途改手序很少见（编辑器保存一般在暂停或菜单里），
+    /// 晚几秒换上不要紧。暂停、回到菜单后按上次看的时间算，满 1 秒马上再看。
+    /// </summary>
+    private const float PlayingPollSeconds = 5;
+
+    /// <summary>按文件名（不分大小写）。</summary>
     private readonly Dictionary<string, Entry> _files = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>这次运行在手序文件夹里见过的文件名：备份里只删这些后来不见了的（见 <see cref="FingeringBackup.Mirror"/>）。</summary>
+    private readonly HashSet<string> _seen = new(StringComparer.OrdinalIgnoreCase);
     private string _signature = string.Empty;
-    private float _nextPoll;
+    private float _lastPoll = float.NegativeInfinity;
     private string _lastKey = string.Empty;
     private FingeringResult? _last;
     private bool _restoreChecked;
     private bool _backupPending;
     private bool _backupWarned;
+    private bool _inboxWarned;
 
     public static string Folder => Path.Combine(Main.Mod.Path, "Fingerings");
 
@@ -106,28 +121,28 @@ internal sealed class FingeringSource
         return inbox;
     });
 
-    /// <summary>每秒最多看一次；文件加了、删了、改了就返回 true。</summary>
-    public bool Poll()
+    /// <summary>每秒最多看一次（打歌时 5 秒一次）；文件加了、删了、改了就返回 true。</summary>
+    /// <param name="playing">正在打歌：关卡显示中、没暂停、没开设置窗口。</param>
+    public bool Poll(bool playing)
     {
-        if (Time.unscaledTime < _nextPoll)
+        var now = Time.unscaledTime;
+        if (now - _lastPoll < (playing ? PlayingPollSeconds : PollSeconds))
         {
             return false;
         }
 
-        _nextPoll = Time.unscaledTime + 1;
+        _lastPoll = now;
         if (!_restoreChecked)
         {
             _restoreChecked = true;
-            RestoreFromBackup(); // 要在搬中转文件夹之前：搬的时候会建出空的手序文件夹，就看不出整个文件夹被删过了
+            RestoreFromBackup(); // 要在搬中转文件夹之前：搬的时候会建出手序文件夹，就看不出整个文件夹被删过了
         }
 
         if (Inbox != null)
         {
-            foreach (var name in FingeringInbox.MoveInto(Inbox, Folder))
-            {
-                Main.Mod.Logger.Log($"专属手序：把编辑器保存的 {name} 搬进手序文件夹");
-            }
+            MoveInbox(Inbox);
         }
+
         var signature = Signature();
         if (signature == _signature)
         {
@@ -144,7 +159,10 @@ internal sealed class FingeringSource
         return true;
     }
 
-    /// <summary>手序文件夹整个不见了（UMM 卸载、回退会删掉整个 Mod 文件夹）时，从文档里的备份还原。</summary>
+    /// <summary>
+    /// 手序文件夹整个不见了（UMM 卸载、回退会删掉整个 Mod 文件夹）、或者上次没还原完时，从文档里的备份还原。
+    /// 每次启动只试一次：读不了的（杀毒软件在扫、OneDrive 离线）留到下次启动，在那之前备份里的这几份不会被改动。
+    /// </summary>
     private static void RestoreFromBackup()
     {
         if (Backup == null)
@@ -154,15 +172,40 @@ internal sealed class FingeringSource
 
         try
         {
-            var restored = FingeringBackup.RestoreIfMissing(Folder, Backup);
-            if (restored.Count > 0)
+            var result = FingeringBackup.Restore(Folder, Backup);
+            if (result.Restored.Count > 0)
             {
-                Main.Mod.Logger.Log($"专属手序：手序文件夹不见了（UMM 卸载、回退会删掉整个 Mod 文件夹），从 {Backup} 还原了 {restored.Count} 份：{string.Join("、", restored)}");
+                Main.Mod.Logger.Log($"专属手序：手序文件夹被删掉过（UMM 卸载、回退会删掉整个 Mod 文件夹），从 {Backup} 还原了 {result.Restored.Count} 份：{string.Join("、", result.Restored)}");
+            }
+
+            if (result.Pending.Count > 0)
+            {
+                Main.Mod.Logger.Warning($"专属手序：备份里有 {result.Pending.Count} 份这次还原不了（{result.Error}），下次启动游戏时再还原，在那之前备份里的这几份不会被改动：{string.Join("、", result.Pending)}");
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Main.Mod.Logger.Warning($"专属手序：从备份 {Backup} 还原失败：{ex.Message}");
+            Main.Mod.Logger.Warning($"专属手序：从备份 {Backup} 还原失败，下次启动游戏时再试：{ex.Message}");
+        }
+    }
+
+    /// <summary>把编辑器存进中转文件夹的手序搬进手序文件夹；列不出中转文件夹、建不了手序文件夹时下一秒再试，一直不行只记一次日志。</summary>
+    private void MoveInbox(string inbox)
+    {
+        var moved = FingeringInbox.MoveInto(inbox, Folder, out var problem);
+        foreach (var name in moved)
+        {
+            Main.Mod.Logger.Log($"专属手序：把编辑器保存的 {name} 搬进手序文件夹");
+        }
+
+        if (problem.Length == 0)
+        {
+            _inboxWarned = false;
+        }
+        else if (!_inboxWarned)
+        {
+            _inboxWarned = true;
+            Main.Mod.Logger.Warning($"专属手序：没能把 {inbox} 里的手序搬进手序文件夹，稍后再试：{problem}");
         }
     }
 
@@ -176,7 +219,7 @@ internal sealed class FingeringSource
 
         try
         {
-            _backupPending = !FingeringBackup.Mirror(Folder, Backup);
+            _backupPending = !FingeringBackup.Mirror(Folder, Backup, _seen);
             _backupWarned = false;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -265,7 +308,7 @@ internal sealed class FingeringSource
             0 => Message.Empty,
             1 => Lang.M("\n{0} 是 {1} 键手序，当前版本只支持 {2} 键，未使用。", otherKeys[0].Name, otherKeys[0].File.Keys, Lanes.Count),
             _ => Lang.M("\n有 {0} 份像这一关的手序不是 {1} 键，当前版本不支持，未使用：{2}", otherKeys.Count, Lanes.Count,
-                string.Join("、", otherKeys.ConvertAll(c => c.Name))),
+                NameList(otherKeys.ConvertAll(c => c.Name), 0, otherKeys.Count)),
         };
         if (broken.Count == 0)
         {
@@ -273,8 +316,23 @@ internal sealed class FingeringSource
         }
 
         return otherKeys.Count == 0
-            ? Lang.M("\n有 {0} 个文件无法读取：{1}（原因见日志）", broken.Count, string.Join("、", broken))
-            : Lang.M("\n有 {0} 个文件无法读取：{1}（原因见日志）{2}", broken.Count, string.Join("、", broken), keys);
+            ? Lang.M("\n有 {0} 个文件无法读取：{1}（原因见日志）", broken.Count, NameList(broken, 0, broken.Count))
+            : Lang.M("\n有 {0} 个文件无法读取：{1}（原因见日志）{2}", broken.Count, NameList(broken, 0, broken.Count), keys);
+    }
+
+    /// <summary>
+    /// 给玩家看的文件名列表，分隔符跟着界面语言（中文、日文用顿号，英文、韩文用逗号；原来写死顿号，2026-11-19 第二轮评审）。
+    /// 做成消息，换界面语言时跟着变、日志里是中文原文；两两对半拼，名字再多嵌套也只有 log₂ 层。
+    /// </summary>
+    private static object NameList(List<string> names, int from, int count)
+    {
+        if (count <= 1)
+        {
+            return count == 1 ? names[from] : string.Empty;
+        }
+
+        var half = count / 2;
+        return Lang.M("{0}、{1}", NameList(names, from, half), NameList(names, from + half, count - half));
     }
 
     /// <summary>玩家给这个谱面选过的文件名（空串 = 选了都不用）；没选过为 null。存在 Settings.FingeringChoices，一行「指纹 Tab 文件名」。</summary>
@@ -316,49 +374,59 @@ internal sealed class FingeringSource
     public CustomFingering? Get(string name)
     {
         Load(out _);
-        return _files.TryGetValue(Path.Combine(Folder, name), out var entry) ? entry.File : null;
+        return _files.TryGetValue(name, out var entry) ? entry.File : null;
     }
 
     /// <summary>文件夹里所有 .json 的名字、修改时间、大小，用来判断变没变。</summary>
     private static string Signature()
     {
-        if (!Directory.Exists(Folder))
-        {
-            return string.Empty;
-        }
-
         var sb = new StringBuilder();
-        foreach (var path in JsonFiles())
+        foreach (var info in JsonFiles())
         {
-            if (TryStat(path, out var info))
-            {
-                sb.Append(info.Name).Append('|').Append(info.LastWriteTimeUtc.Ticks).Append('|').Append(info.Length).Append(';');
-            }
+            sb.Append(info.Name).Append('|').Append(info.LastWriteTimeUtc.Ticks).Append('|').Append(info.Length).Append(';');
         }
 
         return sb.ToString();
     }
 
-    /// <summary>文件夹里的 .json；文件夹刚好被删、被改名时当成空的，下一秒再看。</summary>
-    private static string[] JsonFiles()
+    /// <summary>
+    /// 文件夹里的 .json，连同大小和修改时间。用 DirectoryInfo.EnumerateFiles：列目录时就带回大小和时间，不再每个文件单独查一次磁盘
+    /// （2026-11-19 第二轮评审：每秒在主线程上看一次，原来 1000 份手序要 24–29 ms，144 Hz 一帧只有 6.9 ms）。
+    /// 游戏自带的 Mono 也是这样（mscorlib 里 FileSystemInfo.Create 调 Init，用列目录的结果填好属性、时间和大小）。
+    /// 没有文件夹、文件夹刚好被删或被改名时当成空的，下一秒再看。
+    /// </summary>
+    private static List<FileInfo> JsonFiles()
     {
+        var files = new List<FileInfo>();
+        if (!Directory.Exists(Folder))
+        {
+            return files; // 没用过专属手序的玩家没有这个文件夹：先看一眼，不用每秒抛一次异常
+        }
+
         try
         {
-            return Directory.GetFiles(Folder, "*.json");
+            foreach (var info in new DirectoryInfo(Folder).EnumerateFiles("*.json"))
+            {
+                if (TryStat(info))
+                {
+                    files.Add(info);
+                }
+            }
         }
         catch (IOException)
         {
-            return Array.Empty<string>(); // DirectoryNotFoundException 也是 IOException：文件夹没了就当没有手序
+            files.Clear(); // DirectoryNotFoundException 也是 IOException：列到一半文件夹没了就当没有手序
         }
+
+        return files;
     }
 
     /// <summary>
-    /// 读出文件的修改时间和大小（FileInfo 读一次后会记住）。列出来之后文件刚好被删、被改名（浏览器保存、玩家整理文件夹）时
-    /// 返回 false，这一份下一秒再看；原来 Length 抛的 FileNotFoundException 会漏到 Overlay 的兜底，整个 Mod 停用。
+    /// 确认读得到修改时间和大小（列目录时已经带回来了，一般不再查磁盘；运行时没带回来时这里才去读）。列出来之后文件刚好被删、
+    /// 被改名（浏览器保存、玩家整理文件夹）时返回 false，这一份下一秒再看；原来 Length 抛的 FileNotFoundException 会漏到 Overlay 的兜底，整个 Mod 停用。
     /// </summary>
-    private static bool TryStat(string path, out FileInfo info)
+    private static bool TryStat(FileInfo info)
     {
-        info = new FileInfo(path);
         try
         {
             _ = info.Length;
@@ -374,25 +442,14 @@ internal sealed class FingeringSource
     {
         var result = new List<FingeringCandidate>();
         broken = new List<string>();
-        if (!Directory.Exists(Folder))
-        {
-            _files.Clear();
-            return result;
-        }
-
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var path in JsonFiles())
+        foreach (var info in JsonFiles())
         {
-            if (!TryStat(path, out var info))
-            {
-                continue;
-            }
-
-            seen.Add(path);
-            if (!_files.TryGetValue(path, out var entry) || entry.Time != info.LastWriteTimeUtc || entry.Size != info.Length)
+            seen.Add(info.Name);
+            if (!_files.TryGetValue(info.Name, out var entry) || entry.Time != info.LastWriteTimeUtc || entry.Size != info.Length)
             {
                 entry = Read(info);
-                _files[path] = entry;
+                _files[info.Name] = entry;
             }
 
             if (entry.File != null)

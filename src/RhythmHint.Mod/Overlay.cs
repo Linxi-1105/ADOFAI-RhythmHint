@@ -39,6 +39,7 @@ internal sealed class Overlay : MonoBehaviour
     private string _screenStateText = string.Empty; // 原文，用来判断画面状态变没变
     private Message _levelStatus = Lang.M("尚未进入关卡");
     private readonly FingeringSource _fingerings = new();
+    private bool _playing; // 上一帧在打歌（关卡显示中、没暂停、没开设置窗口）：手序文件夹少看几次
     private LevelSnapshot? _snapshot;
     private bool _levelActive;
     private (int, int, int, double)? _waitingPrint; // 还没开始的那一关：读过的指纹、排键设置和快照
@@ -267,7 +268,7 @@ internal sealed class Overlay : MonoBehaviour
         var settings = Main.Settings;
 
         // 手序文件夹有变化（比如编辑器刚保存）：关卡里马上重排，换上新的手序
-        if (_fingerings.Poll() && settings.UseCustomFingering)
+        if (_fingerings.Poll(_playing) && settings.UseCustomFingering)
         {
             _rebuildRequested = true;
             _waitingPrint = null;
@@ -316,6 +317,7 @@ internal sealed class Overlay : MonoBehaviour
         // 按 Esc 暂停时面板收起、游戏画面还原，不挡暂停菜单；暂停中打开本 Mod 的设置窗口时照常显示，方便看改设置的效果
         var paused = levelShown && level.Controller.paused;
         var pausedHide = paused && !_window.Visible;
+        _playing = levelShown && !paused && !_window.Visible;
         Frame.Presence = (float)_presence.Update((levelShown && !pausedHide) || preview, Time.unscaledDeltaTime);
 
         // 界面文字在关卡里始终跟着面板一起缩放（暂停、开关本 Mod 设置窗口、本关结束都一样）：

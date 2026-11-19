@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using RhythmHint.Core;
 
 namespace RhythmHint.Core.Tests;
@@ -116,6 +117,57 @@ public class FingeringInboxTests : IDisposable
         }
 
         Assert.Equal(new[] { "Song.json" }, FingeringInbox.MoveInto(inbox, game));
+    }
+
+    /// <summary>
+    /// 建不了游戏的手序文件夹（这里用同名文件挡住）、列不出中转文件夹时不抛异常，说明原因、下一秒再试。
+    /// 复现（2026-11-19 第二轮评审）：原来这两步在逐个文件的 try 外面，异常漏到 Overlay 的兜底，整个 Mod 停用。
+    /// </summary>
+    [Fact]
+    public void AGameFolderThatCannotBeCreatedWaitsForTheNextPoll()
+    {
+        var inbox = Path.Combine(_root, "inbox");
+        Directory.CreateDirectory(inbox);
+        File.WriteAllText(Path.Combine(inbox, "Song.json"), "song");
+        File.WriteAllText(Path.Combine(_root, "Mods"), "not a folder");
+        var game = Path.Combine(_root, "Mods", "Fingerings");
+
+        Assert.Empty(FingeringInbox.MoveInto(inbox, game, out var problem));
+        Assert.NotEmpty(problem);
+        Assert.True(File.Exists(Path.Combine(inbox, "Song.json")));
+
+        File.Delete(Path.Combine(_root, "Mods"));
+        Assert.Equal(new[] { "Song.json" }, FingeringInbox.MoveInto(inbox, game, out problem));
+        Assert.Empty(problem);
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public void AnInboxThatCannotBeListedWaitsForTheNextPoll()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "用 Windows 的文件夹权限挡住列目录");
+        var inbox = Path.Combine(_root, "inbox");
+        Directory.CreateDirectory(inbox);
+        File.WriteAllText(Path.Combine(inbox, "Song.json"), "song");
+        using (new DenyListing(inbox))
+        {
+            Assert.Empty(FingeringInbox.MoveInto(inbox, Path.Combine(_root, "game"), out var problem));
+            Assert.NotEmpty(problem);
+        }
+
+        Assert.False(Directory.Exists(Path.Combine(_root, "game")));
+        Assert.Equal(new[] { "Song.json" }, FingeringInbox.MoveInto(inbox, Path.Combine(_root, "game")));
+    }
+
+    /// <summary>中转文件夹是空的就不建游戏的手序文件夹，不凭空多出一个空文件夹。</summary>
+    [Fact]
+    public void AnEmptyInboxCreatesNothing()
+    {
+        var inbox = Path.Combine(_root, "inbox");
+        Directory.CreateDirectory(inbox);
+
+        Assert.Empty(FingeringInbox.MoveInto(inbox, Path.Combine(_root, "game")));
+        Assert.False(Directory.Exists(Path.Combine(_root, "game")));
     }
 
     [Fact]

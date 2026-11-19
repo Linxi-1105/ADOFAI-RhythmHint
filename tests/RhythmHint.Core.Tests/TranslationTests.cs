@@ -173,10 +173,14 @@ public class TranslationTests
         Assert.True(wrong.Count == 0, $"{code}.json 占位符和原文不一致：{string.Join(" | ", wrong.Take(8))}");
     }
 
+    /// <summary>界面代码里本来就该写全角符号、不用翻译的字符串：设置窗口预先排字形用的符号表（WindowSkin.Extra）。</summary>
+    private static readonly string[] NotSentences = { "×—…→←↑↓·−%°：，。、；（）「」！？" };
+
     [Fact]
     public void ModCodeHasNoUntranslatedChinese()
     {
-        // 界面代码里写死的中文都要经过 Lang.T / Lang.M；注释、日志（Logger.Log / Warning / Error）不算
+        // 界面代码里写死的中文都要经过 Lang.T / Lang.M；注释、日志（Logger.Log / Warning / Error）不算。
+        // 中文的全角标点也算（2026-11-19 第二轮评审：文件名列表写死顿号，英、韩、日界面里也是「、」）
         var problems = new List<string>();
         foreach (var file in Directory.GetFiles(ModDir, "*.cs"))
         {
@@ -185,7 +189,8 @@ public class TranslationTests
             text = Regex.Replace(text, @"Logger\.(?:Log|LogException|Warning|Error)\((?:[^;]|;(?!\s*\n))*?\);", string.Empty, RegexOptions.Singleline); // 日志语句
             foreach (Match m in Regex.Matches(text, @"(Lang\.[TM]\(\s*)?\$?""((?:[^""\\]|\\.)*)"""))
             {
-                if (m.Groups[1].Success || !Regex.IsMatch(m.Groups[2].Value, @"\p{IsCJKUnifiedIdeographs}"))
+                if (m.Groups[1].Success || NotSentences.Contains(m.Groups[2].Value)
+                    || !Regex.IsMatch(m.Groups[2].Value, @"[\p{IsCJKUnifiedIdeographs}　-〿＀-￯]"))
                 {
                     continue;
                 }

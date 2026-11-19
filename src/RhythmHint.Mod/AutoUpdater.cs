@@ -105,7 +105,7 @@ internal static class AutoUpdater
             yield return request.SendWebRequest();
             if (request.result != UnityWebRequest.Result.Success)
             {
-                Fail(Lang.M("连不上更新服务器"), url + "：" + request.error);
+                Fail(Lang.M("连不上更新服务器"), url + ": " + request.error);
                 yield break;
             }
 
@@ -138,7 +138,7 @@ internal static class AutoUpdater
             yield return request.SendWebRequest();
             if (request.result != UnityWebRequest.Result.Success)
             {
-                Fail(Lang.M("下载失败"), manifest.Url + "：" + request.error);
+                Fail(Lang.M("下载失败"), manifest.Url + ": " + request.error);
                 yield break;
             }
         }
