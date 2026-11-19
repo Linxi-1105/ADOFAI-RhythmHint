@@ -13,6 +13,7 @@ What changed in each version, newest first.
 - Fixed: in the fingering editor, saving, undoing and then editing something else still showed the level as saved, while the game still had the saved version
 - Fixed: when the game exported a level with its notes grouped differently (for example after a mod update changed the chord rules), unsaved progress in the editor was not restored and was lost on the next edit. Progress is now restored by tile, the editor tells you how many edits could not be restored, and switching to left-handed restores correctly too
 - Fixed: the fingering editor's track preview froze for seconds and used several GB of memory on levels with many Move Track events
+- Fixed: the first few hit sounds played ahead of the music after starting playback, seeking, changing the practice speed, looping back, or starting before the song begins
 
 ## 1.3.1 · 2026-11-19
 

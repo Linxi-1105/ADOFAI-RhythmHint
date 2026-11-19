@@ -159,6 +159,7 @@
 
     startAudio(t) {
       this.preroll = false;
+      this.clockOffset = null; // 从音乐开头之前接过来时，之前按画面时钟取的对齐基准不含 <audio> 的起播延迟，等它走起来重取
       const target = Math.max(0, t + this.offset);
       if (Math.abs(this.el.currentTime - target) > 1e-4) this.el.currentTime = target;
       this.mediaStart = this.el.currentTime;
@@ -302,26 +303,35 @@
       this.pending.clear();
     }
 
-    /** 用声卡正在输出的采样对齐音乐，再把未来 120 毫秒的打拍声交给 Web Audio。 */
+    /** 把未来 120 毫秒的打拍声交给 Web Audio，排在音乐放到那一拍的同一个采样上。 */
     scheduleClicks(visualTime, notes, firstNoteAt, loopEnd = Infinity) {
       const ctx = this.ctx;
       if (!this.playing || !ctx || ctx.state !== 'running') return;
       if (!this.buffer && this.hasAudio && !this.preroll && (this.mediaStart !== null || this.el.seeking || this.el.paused || this.el.readyState < 3)) return;
 
       const musicTime = visualTime + (this.hasAudio ? this.calibration : 0);
-      const renderTime = ctx.currentTime;
-      // currentTime 是正在生成的采样。扬声器正在播的采样比它早，两者相差设备的输出延迟。
-      const audible = this.audibleTime();
-      const sample = musicTime - audible * this.rate;
-      // OGG 的媒体位置在相邻画面间有几毫秒抖动。定位、暂停和换速都会丢掉旧锚点。
-      this.clockOffset = this.clockOffset === null ? sample : this.clockOffset + (sample - this.clockOffset) * 0.05;
-      const now = renderTime * this.rate + this.clockOffset;
-      const until = Math.min(now + 0.12 * this.rate, loopEnd);
+      const now = this.renderedBeat(musicTime);
+      // 还没到音乐开头：<audio> 起播要多久事先不知道，音乐开头之后的拍子等它真正走起来再排
+      const until = Math.min(now + 0.12 * this.rate, loopEnd, this.preroll ? this.calibration - this.offset : Infinity);
       const from = Math.max(this.scheduledUntil ?? musicTime, musicTime - 0.02 * this.rate);
       for (let i = firstNoteAt(from); i < notes.length && notes[i].time < until; i++) {
         this.click(notes[i].lanes.length > 1, (notes[i].time - now) / this.rate);
       }
       this.scheduledUntil = Math.max(from, until);
+    }
+
+    /**
+     * 声卡此刻正在生成的采样对应哪个音乐拍点时间（打拍声和音乐走同一条输出，排在同一个采样上就同时听到）。
+     * 整首解码时声源哪个采样放哪个位置是排定的，直接算；声源刚排上、还没出声时画面停在起点，不能拿画面来对。
+     * <audio> 和自己的时钟只知道此刻听到哪里：用输出时间戳对到正在生成的采样，两者相差设备的输出延迟。
+     */
+    renderedBeat(musicTime) {
+      const ctx = this.ctx, a = this.anchor;
+      if (this.buffer && a) return a.pos + (ctx.currentTime - a.at) * a.rate - this.offset + this.calibration;
+      const sample = musicTime - this.audibleTime() * this.rate;
+      // OGG 的媒体位置在相邻画面间有几毫秒抖动。定位、暂停和换速都会丢掉旧锚点。
+      this.clockOffset = this.clockOffset === null ? sample : this.clockOffset + (sample - this.clockOffset) * 0.05;
+      return ctx.currentTime * this.rate + this.clockOffset;
     }
 
     /** 记下排好的声源，响完自动拿掉。 */

@@ -101,8 +101,8 @@ test('pausing and resuming in place does not move the music', () => {
   assert.equal(sets, 0);
 });
 
-/** 已经解码好的整首歌：假的 AudioContext 记下每个声源从哪开始放。输出延迟 20 毫秒。 */
-function decodedSetup() {
+/** 已经解码好的整首歌：假的 AudioContext 记下每个声源从哪开始放。输出延迟 20 毫秒。decoded 为 false 时还没解码好，先按自己的时钟走。 */
+function decodedSetup({ decoded = true } = {}) {
   const el = { addEventListener() {}, pause() {}, play: () => Promise.resolve(), load() {}, removeAttribute() {}, currentTime: 0, readyState: 4,
     seekable: { length: 1, start: () => 0, end: () => 30 } };
   const p = new globalThis.EditorPlayer(el);
@@ -119,7 +119,7 @@ function decodedSetup() {
     resume() {},
   };
   p.ctx = ctx;
-  p.useBuffer({ duration: 120 });
+  if (decoded) p.useBuffer({ duration: 120 });
   p.baseOffset = -1; // 音乐里的位置 = 谱面时间 − 1
   return { p, ctx, sources };
 }
@@ -192,6 +192,89 @@ test('decoded music: the song end stops playback', () => {
   near(p.end, 121);
   live(sources)[0].onended();
   assert.equal(p.playing, false);
+});
+
+// ---------- 开始放之后的头几下打拍声（评审在模拟环境里复现，真浏览器未测） ----------
+// 整首解码：新声源要过「起播提前量 + 输出延迟」才出声，旧版在这段时间取打拍声的对齐基准，头几下早 40–60 毫秒，约 1 秒才收敛。
+// <audio>：从音乐开头之前开始播时，旧版按画面时钟排好了音乐开头之后的打拍声，play() 的启动延迟全算成了提前。
+
+const notesEvery = (from, to, step) => Array.from({ length: Math.round((to - from) / step) + 1 }, (_, i) => ({ time: from + i * step, lanes: [[0, 0]] }));
+
+/** 像界面那样一帧帧往前走（每帧 1/64 秒），每帧先取画面时间再排打拍声；返回每一下排在 AudioContext 时间轴上的哪一刻。 */
+function runFrames(p, advance, notes, frames) {
+  const at = [];
+  p.click = (strong, delay) => at.push(p.ctx.currentTime + Math.max(0, delay));
+  for (let f = 0; f < frames; f++) {
+    p.scheduleClicks(p.time(), notes, t => notes.filter(n => n.time < t).length);
+    advance(1 / 64);
+  }
+  return at;
+}
+
+test('decoded music: the first clicks after play, a seek, a speed change or the takeover sound with the music', () => {
+  const notes = notesEvery(0.05, 60, 0.1);
+  // 打拍声和音乐走同一条输出：排在声源放到那个位置的同一刻，就同时听到
+  const onBeat = ({ p, ctx, sources }, from) => {
+    const clicks = runFrames(p, dt => { ctx.currentTime += dt; }, notes, 96);
+    const s = live(sources)[0], due = notes.filter(n => n.time >= from).slice(0, 8);
+    assert.ok(clicks.length >= due.length, clicks.length + ' clicks');
+    due.forEach((n, i) => near(clicks[i], s.when + (n.time - 1 - s.offset) / s.playbackRate.value));
+  };
+  const music = decodedSetup();
+  music.p.seek(5);
+  music.p.play();
+  onBeat(music, 5);
+  music.p.seek(20); // 播放中跳转；循环绕回起点也是这样
+  onBeat(music, 20);
+  const t = music.p.time();
+  music.p.setRate(0.5, 1);
+  onBeat(music, t);
+
+  const late = decodedSetup({ decoded: false });
+  late.p.seek(5);
+  late.p.play(); // 解码还没好：先按自己的时钟走
+  const t2 = late.p.time();
+  late.p.useBuffer({ duration: 120 });
+  onBeat(late, t2);
+});
+
+/** 假的 performance.now()：跟着测试里的时钟走，测完换回来。 */
+function withFakeClock(fn) {
+  const saved = Object.getOwnPropertyDescriptor(globalThis, 'performance');
+  const clock = { now: 20 };
+  Object.defineProperty(globalThis, 'performance', { value: { now: () => clock.now * 1000 }, configurable: true, writable: true });
+  try { fn(clock); } finally { Object.defineProperty(globalThis, 'performance', saved); }
+}
+
+/** <audio>：play() 之后 delay 秒才真正开始走；currentTime 是此刻听到的位置。 */
+function slowStartAudio(clock, delay) {
+  return {
+    addEventListener() {}, paused: true, seeking: false, readyState: 4, playbackRate: 1, src: 'song.wav',
+    seekable: { length: 1, start: () => 0, end: () => 300 },
+    from: 0, startedAt: null,
+    get currentTime() { return this.startedAt === null ? this.from : this.from + Math.max(0, clock.now - this.startedAt) * this.playbackRate; },
+    set currentTime(v) { this.from = v; },
+    play() { this.paused = false; this.startedAt = clock.now + delay; return Promise.resolve(); },
+    pause() { this.from = this.currentTime; this.paused = true; this.startedAt = null; },
+  };
+}
+
+test('<audio> started before the song: clicks after the music begins wait until it really plays', () => {
+  withFakeClock(clock => {
+    const L = 0.04, D = 0.1; // 输出延迟 40 毫秒，play() 之后 100 毫秒才出声
+    const p = new globalThis.EditorPlayer(slowStartAudio(clock, D));
+    p.ctx = { get currentTime() { return clock.now; }, state: 'running',
+      getOutputTimestamp: () => ({ contextTime: clock.now - L, performanceTime: clock.now * 1000 }) };
+    p.hasAudio = true;
+    p.baseOffset = -1; // 画面走到 1 秒时音乐开头
+    p.seek(0);
+    p.play(); // 画面在 20 秒时从 0 起走，21 秒时调 play()，21.1 秒才出声
+    const times = [0.5, 0.98, 1.1, 1.2, 1.3, 1.4];
+    const clicks = runFrames(p, dt => { clock.now += dt; }, times.map(time => ({ time, lanes: [[0, 0]] })), 128);
+    assert.equal(clicks.length, times.length);
+    // 音乐开头之前跟着画面，之后跟着真正放出来的音乐
+    times.forEach((n, i) => near(clicks[i] + L, n < 1 ? 20 + n : 21 + D + (n - 1)));
+  });
 });
 
 test('the song script written by the Mod decodes to the same bytes', () => {
