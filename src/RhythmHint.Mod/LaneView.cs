@@ -24,11 +24,11 @@ internal static class LaneView
 
     public static void Draw(OverlayFrame f, OverlayLayout l, Settings s)
     {
-        var panel = new Rect(0, l.TopHeight, l.PanelWidth, Screen.height - l.TopHeight);
+        var panel = new Rect(l.PanelX, l.PanelY, l.PanelWidth, l.PanelHeight);
         Painter.Rect(panel, Painter.PanelColor.WithAlpha(Mathf.Clamp01(s.PanelOpacity)));
 
         GUI.BeginGroup(panel);
-        var judgeY = l.JudgeY - l.TopHeight;
+        var judgeY = l.JudgeY - l.PanelY;
         var bottom = panel.height;
 
         // 音符到达的位置：横条是判定线；圆形是判定圈圆心，判定圈下面离面板底边留一点空
@@ -59,9 +59,12 @@ internal static class LaneView
     private static void DrawLaneBackground(OverlayLayout l, float height)
     {
         var sep = new Color(0.2f, 0.2f, 0.22f);
+        var w = 2 * l.Scale;
         for (var i = 0; i <= Lanes.Count; i++)
         {
-            Painter.Rect(new Rect(l.LaneX(i) - l.Scale, 0, 2 * l.Scale, height), sep);
+            // 最外侧两条贴着面板边画在里面（轨道铺满面板，居中画会有一半在面板外被裁掉）
+            var x = Mathf.Clamp(l.LaneX(i) - l.Scale, 0, l.PanelWidth - w);
+            Painter.Rect(new Rect(x, 0, w, height), sep);
         }
     }
 

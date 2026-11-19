@@ -51,7 +51,7 @@ public sealed class ReviewRulesTests
         Assert.Equal(new[] { "J+K", "F", "J" }, Shape(NotePlanner.Plan(
             Chart((1, true), (1.234375, false), (1.46875, false)), new FingeringOptions())));
         Assert.Equal(new[] { "K", "J", "D", "F" }, Shape(NotePlanner.Plan(
-            Run(4, 1.0 / 15), new FingeringOptions { Style = FingeringStyle.TimeReset })));
+            Run(4, 1.0 / 16), new FingeringOptions { Style = FingeringStyle.TimeReset })));
     }
 
     [Fact]
@@ -123,8 +123,8 @@ public sealed class ReviewRulesTests
     [Theory]
     [InlineData(4, .046875)]
     [InlineData(5, .046875)]
-    [InlineData(6, .06666666666666667)]
-    [InlineData(32, .06666666666666667)]
+    [InlineData(6, .0625)]
+    [InlineData(32, .0625)]
     [InlineData(4, .059)]
     public void VeryFastOrLongPhrasesKeepTheirRolls(int count, double gap)
     {
@@ -143,7 +143,7 @@ public sealed class ReviewRulesTests
     [Fact]
     public void ExplicitInnerRollPreferenceIsNotReplacedByTheOuterRollExperiment()
     {
-        var hits = Run(4, 1.0 / 15);
+        var hits = Run(4, 1.0 / 16);
         var legacy = new FingeringOptions { OuterRoll = false };
         var experimental = new FingeringOptions { OuterRoll = false, Style = FingeringStyle.ReviewPreferenceV1 };
         Assert.Equal(new[] { "J", "K", "F", "D" }, Shape(NotePlanner.Plan(hits, experimental)));
@@ -165,7 +165,9 @@ public sealed class ReviewRulesTests
 
         var seven = NotePlanner.Plan(Run(7, 1.0 / 15), new FingeringOptions
         {
-            Style = FingeringStyle.ReviewPreferenceV1, ReviewShortMinNotes = 7, ReviewShortMaxNotes = 7
+            Style = FingeringStyle.ReviewPreferenceV1,
+            ReviewShortMinNotes = 7,
+            ReviewShortMaxNotes = 7
         });
         Assert.Equal(new[] { "J", "F", "J", "F", "J", "F", "J" }, Shape(seven));
 
@@ -265,36 +267,36 @@ public sealed class ReviewRulesTests
         var random = new Random(1172026);
         var gaps = new[] { .046875, .06666666666666667, .09375, .1171875, .1875, .234375 };
         foreach (var left in new[] { false, true })
-        for (var round = 0; round < 50; round++)
-        {
-            var moments = new List<(double, bool)>();
-            var t = 0.0;
-            for (var part = 0; part < 25; part++)
+            for (var round = 0; round < 50; round++)
             {
-                var gap = gaps[random.Next(gaps.Length)];
-                var count = random.Next(1, 10);
-                for (var i = 0; i < count; i++)
+                var moments = new List<(double, bool)>();
+                var t = 0.0;
+                for (var part = 0; part < 25; part++)
                 {
-                    t += gap;
-                    moments.Add((t, random.Next(5) == 0));
+                    var gap = gaps[random.Next(gaps.Length)];
+                    var count = random.Next(1, 10);
+                    for (var i = 0; i < count; i++)
+                    {
+                        t += gap;
+                        moments.Add((t, random.Next(5) == 0));
+                    }
+                    t += .2;
                 }
-                t += .2;
+                var hits = Chart(moments.ToArray());
+                var options = Experimental(left);
+                var notes = NotePlanner.Plan(hits, options);
+                SameStructure(NotePlanner.Plan(hits, new FingeringOptions { LeftHanded = left }), notes);
+                for (var i = 1; i < notes.Count; i++)
+                {
+                    var gap = notes[i].Time - notes[i - 1].Time;
+                    if (gap < options.JackWindow - .000001)
+                        Assert.Empty(notes[i].Lanes.Keys.Intersect(notes[i - 1].Lanes.Keys));
+                    if (notes[i].IsChord || notes[i - 1].IsChord || gap > options.ResetWindow + .000001) continue;
+                    var from = notes[i - 1].Lanes.Keys.Single();
+                    var to = notes[i].Lanes.Keys.Single();
+                    Assert.False((from == 1 && to == 0) || (from == 2 && to == 3),
+                        $"Unexpected outward step at round {round}, tile {notes[i].TileIndex}");
+                }
             }
-            var hits = Chart(moments.ToArray());
-            var options = Experimental(left);
-            var notes = NotePlanner.Plan(hits, options);
-            SameStructure(NotePlanner.Plan(hits, new FingeringOptions { LeftHanded = left }), notes);
-            for (var i = 1; i < notes.Count; i++)
-            {
-                var gap = notes[i].Time - notes[i - 1].Time;
-                if (gap < options.JackWindow - .000001)
-                    Assert.Empty(notes[i].Lanes.Keys.Intersect(notes[i - 1].Lanes.Keys));
-                if (notes[i].IsChord || notes[i - 1].IsChord || gap > options.ResetWindow + .000001) continue;
-                var from = notes[i - 1].Lanes.Keys.Single();
-                var to = notes[i].Lanes.Keys.Single();
-                Assert.False((from == 1 && to == 0) || (from == 2 && to == 3),
-                    $"Unexpected outward step at round {round}, tile {notes[i].TileIndex}");
-            }
-        }
     }
 }

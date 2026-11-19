@@ -8,7 +8,8 @@
 // 用法：dotnet run tools/Preview.cs -- <关卡.adofai> [参考谱.pez/.json] [--from 秒] [--seconds 秒]
 //       [--reset 毫秒] [--focus 毫秒] [--jack 毫秒] [--chord 毫秒] [--no-roll] [--inner-roll] [--left-handed] [--chord-other-hand]   临时试排键参数
 //       [--export 文件.json]   导出砖块时间和节拍线，给 tools/layout-lab 网页用
-//       [--review-export 文件.review.json] [--review-rules]   导出可审核排键；可选审核偏好排法，默认仍为时间重置法
+//       [--editor-session 目录] [--alternate]   给手序编辑器写 session.js（和游戏里「编辑本关手序」一样，离线近似：没有游戏音频采样）；
+//                                               --alternate 用交替优先排法，默认标准。比如写进 src/RhythmHint.Editor 后直接打开 index.html 看界面
 // 支持常见 angleData / pathData（绝对方向、中旋与现代相对方向）+ SetSpeed + Twirl + Pause；离线仅作近似，游戏时序以游戏内导出为准。
 
 using System.Globalization;
@@ -16,24 +17,23 @@ using Newtonsoft.Json.Linq;
 using RhythmHint.Core;
 using RhythmHint.Reference;
 
-var valueOptions = new HashSet<string> { "--from", "--seconds", "--reset", "--focus", "--jack", "--chord", "--export", "--review-export" };
+var valueOptions = new HashSet<string> { "--from", "--seconds", "--reset", "--focus", "--jack", "--chord", "--export", "--editor-session" };
 var files = args.Where((a, i) => !a.StartsWith("--", StringComparison.Ordinal)
     && (i == 0 || !valueOptions.Contains(args[i - 1]))).ToList();
 double from = ReadOption("--from", 0), span = ReadOption("--seconds", 6);
 if (files.Count == 0)
 {
-    Console.Error.WriteLine("用法：dotnet run tools/Preview.cs -- <关卡.adofai> [参考谱] [--from 秒] [--seconds 秒] [--reset|--focus|--jack|--chord 毫秒] [--no-roll] [--inner-roll] [--left-handed] [--chord-other-hand] [--review-rules] [--review-export 文件.review.json]");
+    Console.Error.WriteLine("用法：dotnet run tools/Preview.cs -- <关卡.adofai> [参考谱] [--from 秒] [--seconds 秒] [--reset|--focus|--jack|--chord 毫秒] [--no-roll] [--inner-roll] [--left-handed] [--chord-other-hand] [--alternate] [--editor-session 目录]");
     return 2;
 }
 
 var paths = new HashSet<string>(files.Select(Path.GetFullPath),
     OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 string? labOutput;
-string? reviewOutput;
+string? sessionFolder = null;
 try
 {
     labOutput = OutputPath("--export");
-    reviewOutput = OutputPath("--review-export");
 }
 catch (ArgumentException ex)
 {
@@ -48,10 +48,16 @@ options.UseRoll = !args.Contains("--no-roll");
 options.OuterRoll = !args.Contains("--inner-roll");
 options.LeftHanded = args.Contains("--left-handed");
 options.ChordsOnOtherHand = args.Contains("--chord-other-hand");
-options.Style = args.Contains("--review-rules") ? FingeringStyle.ReviewPreferenceV1 : FingeringStyle.TimeReset;
+options.Style = args.Contains("--alternate") ? FingeringStyle.ReviewPreferenceV1 : FingeringStyle.TimeReset;
+var sessionIndex = Array.IndexOf(args, "--editor-session");
+if (sessionIndex >= 0 && sessionIndex + 1 < args.Length)
+{
+    sessionFolder = Path.GetFullPath(args[sessionIndex + 1]);
+}
 options.JackWindow = ReadOption("--jack", options.JackWindow * 1000) / 1000;
 options.ChordWindow = ReadOption("--chord", options.ChordWindow * 1000) / 1000;
 
+var floorPath = new List<PathPoint>();
 List<TileHit> tiles;
 List<(double Time, double Speed)> speeds;
 double crotchet;
@@ -59,12 +65,12 @@ JObject levelDocument;
 try
 {
     levelDocument = AdofaiTiming.ParseJson(File.ReadAllText(files[0]));
-    (tiles, speeds, crotchet) = AdofaiTiming.Read(levelDocument);
+    (tiles, speeds, crotchet) = AdofaiTiming.Read(levelDocument, floorPath);
 }
 catch (Exception ex) when (ex is Newtonsoft.Json.JsonReaderException or InvalidDataException or IOException)
 {
     Console.Error.WriteLine($"读不了关卡文件 {files[0]}：{ex.Message}");
-    Console.Error.WriteLine("请在游戏中打开 Mod 设置 → 状态 → 导出当前关卡排键；游戏导出采用实际砖块数据，不受离线解析限制。");
+    Console.Error.WriteLine("离线读谱只是近似：要用游戏里的实际砖块，在游戏中按 F8 → 排键 → 编辑本关手序。");
     return 1;
 }
 
@@ -97,25 +103,51 @@ if (labOutput != null)
     Console.WriteLine($"已导出 {tiles.Count} 块砖、{beats.Count} 条节拍线到 {labOutput}");
 }
 var notes = NotePlanner.Plan(tiles, options);
-if (reviewOutput != null)
+if (sessionFolder != null)
 {
-    var document = JObject.Parse(ReviewChart.Export(Path.GetFileNameWithoutExtension(files[0]) + "（离线近似）",
-        "offline-approximation", notes, options, sourceHits: tiles));
-    document["sourceFile"] = new JObject
+    // 和游戏里「编辑本关手序」交给编辑器的一样，只是离线近似：轨道形状按关卡方向和 PositionTrack 算、没有波形；歌曲文件在关卡旁边就一起拷过去
+    var fingering = CustomFingering.From(tiles, notes, options.LeftHanded);
+    var hitTiles = new HashSet<int>(tiles.Select(t => t.TileIndex));
+    fingering.Song = (string?)levelSettings["song"] ?? Path.GetFileNameWithoutExtension(files[0]);
+    fingering.Artist = (string?)levelSettings["artist"] ?? "";
+    fingering.Charter = (string?)levelSettings["author"] ?? "";
+    var standard = new FingeringOptions { Style = FingeringStyle.TimeReset, LeftHanded = options.LeftHanded, ChordsOnOtherHand = options.ChordsOnOtherHand };
+    var alternate = new FingeringOptions { Style = FingeringStyle.ReviewPreferenceV1, LeftHanded = options.LeftHanded, ChordsOnOtherHand = options.ChordsOnOtherHand };
+    Directory.CreateDirectory(sessionFolder);
+    var id = SessionLibrary.IdOf(fingering);
+    var pitch = (double?)levelSettings["pitch"] ?? 100;
+    var audio = new SessionAudio
     {
-        ["name"] = Path.GetFileName(files[0]), ["bpm"] = (double)levelSettings["bpm"]!,
-        ["songFilename"] = (string?)levelSettings["songFilename"] ?? "", ["offset"] = (double?)levelSettings["offset"] ?? 0,
-        ["pitch"] = (double?)levelSettings["pitch"] ?? 100,
+        Pitch = double.IsFinite(pitch) && pitch > 0 ? pitch / 100 : 1,
+        Offset = MusicTiming.Offset(((double?)levelSettings["offset"] ?? 0) / 1000, crotchet, countdownBeatsInTileTimes: 0),
     };
-    document["timing"] = new JObject
+    var song = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(files[0]))!, (string?)levelSettings["songFilename"] ?? "");
+    if (File.Exists(song))
     {
-        ["originSeconds"] = 0,
-        ["speeds"] = new JArray(speeds.Select(s => new JObject { ["time"] = s.Time, ["speed"] = s.Speed })),
+        // 音乐时间 = 砖块时间 + offset − 起始一拍（MusicTiming；离线读谱的砖块时间不算倒计时，7 张工坊关卡按起音对齐验证过）
+        audio.File = SessionLibrary.AudioFile(sessionFolder, id, Path.GetExtension(song));
+        File.Copy(song, Path.Combine(sessionFolder, audio.File), overwrite: true);
+    }
+
+    var effects = TrackEffects.Extract(levelDocument);
+    TrackEffects.AddBeats(effects, speeds, crotchet);
+    var session = new EditorSession
+    {
+        Id = id,
+        Fingering = fingering,
+        FileName = fingering.SuggestedFileName(),
+        SaveFolder = Path.Combine(sessionFolder, "Fingerings"),
+        Language = "zh-Hans",
+        Standard = NotePlanner.Plan(tiles, standard),
+        Alternate = NotePlanner.Plan(tiles, alternate),
+        Beats = beats,
+        Tempo = BeatGrid.MusicalTempo(speeds, crotchet).ConvertAll(t => (t.Time, 60 / t.SecondsPerBeat)),
+        Audio = audio,
+        Effects = effects,
+        Path = floorPath.ConvertAll(p => p with { Hit = hitTiles.Contains(p.Tile) }),
     };
-    Directory.CreateDirectory(Path.GetDirectoryName(reviewOutput)!);
-    File.WriteAllText(reviewOutput, document.ToString(), new System.Text.UTF8Encoding(false));
-    Console.WriteLine($"已导出 {notes.Count} 个排键提示到 {reviewOutput}");
-    Console.Error.WriteLine("离线近似：未模拟游戏倒计时、校准和完整事件系统；正式审核以游戏内导出为准。");
+    SessionLibrary.Save(sessionFolder, session, DateTimeOffset.Now); // session.js + 编辑器的历史（recent/），和游戏里一样
+    Console.WriteLine($"已写好编辑器数据：{Path.Combine(sessionFolder, "session.js")}（{notes.Count} 个音符，音乐：{(audio.File.Length == 0 ? "无" : audio.File)}）");
 }
 var doubles = notes.Count(n => n.Lanes.Count == 2);
 var rightDoubles = notes.Count(n => n.Lanes.Count == 2 && n.PairHand == 1);
@@ -253,7 +285,9 @@ internal static class AdofaiTiming
     };
 
     /// <returns>需要按键的砖块、变速点（时间, 相对起始 BPM 的倍率）、起始一拍的秒数。</returns>
-    public static (List<TileHit> Hits, List<(double Time, double Speed)> Speeds, double Crotchet) Read(JObject root)
+    /// <param name="path">给了就按每块砖的方向（angleData 的绝对角度，中旋原路折返）填上位置和时间，编辑器画轨道形状用；
+    /// 按游戏默认的 1.5 单位砖距构造轨道，叠加 PositionTrack 的静态位置。</param>
+    public static (List<TileHit> Hits, List<(double Time, double Speed)> Speeds, double Crotchet) Read(JObject root, List<PathPoint>? path = null)
     {
         if (root["angleData"] is JToken angleToken && angleToken is not JArray)
         {
@@ -407,8 +441,86 @@ internal static class AdofaiTiming
 
         // angleData 有 N 项就有 N+1 块砖，最后一块（第 N 块）的到达也要按一下
         floors.Add(new FloorInfo(angles.Length, time, false, false));
+        if (path != null)
+        {
+            const double tileSize = 1.5;
+            double x = 0, y = 0, entryAngle = Math.PI;
+            foreach (var floor in floors)
+            {
+                var k = floor.SeqId;
+                var midspin = k < angles.Length && angles[k] == 999;
+                var exitAngle = k == angles.Length ? entryAngle + Math.PI : midspin ? entryAngle : angles[k] * Math.PI / 180;
+                path.Add(new PathPoint(k, x, y, floor.Time, false, entryAngle, exitAngle));
+                // 中旋的下一块回到上一块中心，时间间隔仍为零。
+                x += tileSize * Math.Cos(exitAngle);
+                y += tileSize * Math.Sin(exitAngle);
+                entryAngle = exitAngle + Math.PI;
+            }
+
+            ApplyTrackPositions(path, root["actions"] as JArray, tileSize);
+        }
+
         return (FloorHits.From(floors, 60 / bpm), speeds, 60 / bpm);
     }
+
+    private static void ApplyTrackPositions(List<PathPoint> path, JArray? actions, double tileSize)
+    {
+        // 前面的砖已摆好，后面的砖还在原位；相对位置按游戏逐砖处理的顺序求值。
+        var events = (actions ?? new JArray()).OfType<JObject>()
+            .Where(e => !Flag(e["editorOnly"]) && (e["active"] == null || Flag(e["active"])))
+            .Where(e => (string?)e["eventType"] switch
+            {
+                "PositionTrack" => e["positionOffset"] is JArray { Count: 2 },
+                "ScaleRadius" => e["scale"]?.Type is JTokenType.Float or JTokenType.Integer,
+                _ => false,
+            })
+            .ToLookup(e => (int?)e["floor"]);
+        double carryX = 0, carryY = 0;
+        double radius = 1, radiusX = 0, radiusY = 0;
+        for (var i = 0; i < path.Count; i++)
+        {
+            var floor = path[i];
+            var dx = carryX;
+            var dy = carryY;
+            foreach (var e in events[i])
+            {
+                if ((string?)e["eventType"] == "ScaleRadius")
+                {
+                    radius = (double)e["scale"]! / 100;
+                    continue;
+                }
+
+                var offset = (JArray)e["positionOffset"]!;
+                dx += ((double?)offset[0] ?? 0) * tileSize;
+                dy += ((double?)offset[1] ?? 0) * tileSize;
+                if (e["relativeTo"] is JArray { Count: 2 } relative)
+                {
+                    var origin = (string?)relative[1] switch { "Start" => 0, "End" => path.Count - 1, _ => i };
+                    var target = (int)Math.Clamp((long)origin + ((int?)relative[0] ?? 0), 0, path.Count - 1);
+                    if (target != i)
+                    {
+                        dx += path[target].X - (floor.X + carryX);
+                        dy += path[target].Y - (floor.Y + carryY);
+                    }
+                }
+
+                if (!Flag(e["justThisTile"]))
+                {
+                    carryX = dx;
+                    carryY = dy;
+                }
+            }
+
+            // 半径按到达这一块的方向改变砖距。与 PositionTrack 的继承偏移分开累计。
+            var extra = tileSize * (1 - radius);
+            radiusX += extra * Math.Cos(floor.Entry);
+            radiusY += extra * Math.Sin(floor.Entry);
+            path[i] = floor with { X = floor.X + dx + radiusX, Y = floor.Y + dy + radiusY };
+        }
+    }
+
+    private static bool Flag(JToken? value) => value?.Type == JTokenType.Boolean
+        ? (bool)value : string.Equals((string?)value, "Enabled", StringComparison.OrdinalIgnoreCase);
 
     private static double Mod(double x) => ((x % 360) + 360) % 360;
 
@@ -467,7 +579,7 @@ internal static class AdofaiTiming
 
     // Newtonsoft already accepts comments, trailing commas and raw characters in
     // strings. Some older charts additionally omit a comma after an array-valued
-    // object property. Repair only that lexical boundary, never arbitrary text.
+    // object property, or duplicate an object separator. Repair these boundaries outside strings.
     internal static JObject ParseJson(string text)
     {
         text = text.TrimStart('\uFEFF');
@@ -505,6 +617,13 @@ internal static class AdofaiTiming
                 output.Append(text[++i]); continue;
             }
             if (c == '"') quoted = true;
+            else if (c == ',' && containers.TryPeek(out var container) && container == '{')
+            {
+                // 部分老谱在对象属性之间写了两个逗号（如 "requiredMods": [],,）。
+                var next = i + 1;
+                while (next < text.Length && char.IsWhiteSpace(text[next])) next++;
+                if (next < text.Length && text[next] == ',') i = next;
+            }
             else if (c is '[' or '{') containers.Push(c);
             else if (c is ']' or '}')
             {

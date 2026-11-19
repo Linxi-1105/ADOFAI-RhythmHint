@@ -27,3 +27,8 @@ __pycache__/
 task_plan.md
 findings.md
 progress.md
+
+# 手序编辑器：游戏（或 tools/Preview.cs --editor-session）写给编辑器的本关数据和音乐，不进仓库
+src/RhythmHint.Editor/session.js
+src/RhythmHint.Editor/session-audio*
+src/RhythmHint.Editor/recent/

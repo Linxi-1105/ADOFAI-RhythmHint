@@ -139,7 +139,7 @@ kbd { font-family: var(--font-num); background: var(--raise); border: 1px solid 
 
     <section class="card">
       <h2>「当前 Mod」列的参数</h2>
-      <label>排键方式 <select id="pStyle"><option value="TimeReset">时间重置法（默认）</option><option value="ReviewPreferenceV1">审核偏好 v1</option></select></label>
+      <label>排键方式 <select id="pStyle"><option value="TimeReset">标准（时间重置法，默认）</option><option value="ReviewPreferenceV1">交替优先（试验性）</option></select></label>
       <div class="param"><span>主手重置间隔（毫秒）</span><input type="range" id="pReset" min="100" max="300" step="5" value="165"><output id="pResetOut">165</output></div>
       <div class="param"><span>双押前后换手（毫秒）</span><input type="range" id="pFocus" min="0" max="800" step="10" value="450"><output id="pFocusOut">450</output></div>
       <div class="param"><span>同键连按最短（毫秒）</span><input type="range" id="pJack" min="50" max="300" step="5" value="150"><output id="pJackOut">150</output></div>
@@ -157,8 +157,8 @@ kbd { font-family: var(--font-num); background: var(--raise); border: 1px solid 
   </aside>
 </main>
 
-<script src="review-editor/note-planner.js"></script>
-<script src="review-editor/adofai-import.js"></script>
+<script src="planner-js/note-planner.js"></script>
+<script src="planner-js/adofai-import.js"></script>
 <script>
 "use strict";
 // ---------- 内置关卡（砖块时间毫秒、长按毫秒、节拍线），由 tools/build-layout-lab.py 注入 ----------
@@ -191,7 +191,8 @@ function levelFromExport(e, key) {
   return {
     key,
     name: e.name,
-    song: e.song || "", offset: (e.offset || 0) / 1000, pitch: e.pitch || 100,
+    // 音乐时间 = 砖块时间 + offset − 起始一拍（2026-11-18 按起音对齐实测，见 docs/开发说明.md）
+    song: e.song || "", offset: (e.offset || 0) / 1000 - 60 / e.bpm, pitch: e.pitch || 100,
     // 每块：序号、时间、长按、和上一块之间的转角（度；旧导出没有这一列、算不出来是 null，都当作不知道）
     tiles: e.tiles.map(([i, ms, h, ang]) => ({ i, t: ms / 1000, hold: h / 1000, ang: ang == null ? NaN : ang })),
     beats: e.beats.map(([ms, m]) => ({ t: ms / 1000, m: !!m })),
@@ -228,7 +229,7 @@ function loadLevel(index) {
   setSegment(Math.max(0, Math.floor(S.moments[0].t)));
 }
 
-// ---------- 读 .adofai（与审核编辑器共用离线时序读取器） ----------
+// ---------- 读 .adofai（共用离线时序读取器 planner-js/adofai-import.js） ----------
 function parseAdofai(text) {
   const { hits, speeds, crotchet, settings } = AdofaiImport.parseTiming(text);
   const tiles = hits.map(({ tileIndex, time, holdSeconds, angle }) => ({ i: tileIndex, t: time, hold: holdSeconds, ang: angle ?? NaN }));
@@ -249,7 +250,7 @@ function parseAdofai(text) {
     if (seg + 1 < tempo.length && next > tempo[seg + 1].t + 1e-6) { next = tempo[seg + 1].t; beat = -1; }
     t = next; beat++;
   }
-  return { tiles, beats, song: settings.songFilename || "", offset: (Number(settings.offset) || 0) / 1000, pitch: Number(settings.pitch) || 100 };
+  return { tiles, beats, song: settings.songFilename || "", offset: (Number(settings.offset) || 0) / 1000 - 60 / Number(settings.bpm), pitch: Number(settings.pitch) || 100 };
 }
 
 // ---------- 排键方案 ----------
@@ -280,7 +281,7 @@ function onBeat(t) {
 function hand(l) { return l < 2 ? 0 : 1; }
 function pairOf(h) { return [h * 2, h * 2 + 1]; }
 
-// 当前 Mod 列使用审核编辑器共用的规划器；不再维护第二份手序算法。
+// 当前 Mod 列使用共用的规划器 planner-js/note-planner.js；不再维护第二份手序算法。
 function plannerOptions() {
   return {
     ChordWindow: P.chordWindow, ChordAngle: P.chordAngle, ChordMaxGap: P.chordGap,
@@ -607,7 +608,7 @@ function startRun(mode, target) {
     if (b.t < S.start || $("sMetro").checked) click(atSong(b.t), b.m ? 1100 : 760, b.t < S.start ? 0.35 : 0.12);
   }
   if ($("sHit").checked) for (const k of segRange()) click(atSong(S.moments[k].t), 2000, mode === "record" ? 0.18 : 0.3);
-  // 歌曲：音频时间 = 砖块时间 + 关卡 offset（和游戏一样）；放慢时跟着变调
+  // 歌曲：音频时间 = 砖块时间 + level.offset（读关卡时已经减了起始一拍）；放慢时跟着变调
   let src = null;
   if ($("sMusic").checked && S.music && S.music.key === S.level.key) {
     src = a.createBufferSource(); src.buffer = S.music.buffer; src.playbackRate.value = speed;

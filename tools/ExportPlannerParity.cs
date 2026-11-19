@@ -4,16 +4,45 @@
 
 // Synthetic, public fixtures generated from the current C# implementation, not a copied JS oracle.
 // dotnet run tools/ExportPlannerParity.cs -- fixtures.json
+// Each case: { name, algorithm, options, notes, sourceHits }, read by tools/planner-js/planner-parity.test.cjs.
+using System.Globalization;
 using System.Text.Json;
 using RhythmHint.Core;
 
 if (args.Length != 1) throw new ArgumentException("Usage: ExportPlannerParity.cs <output.json>");
-var cases = new List<JsonElement>();
+// Must match `revision` in tools/planner-js/note-planner.js (algorithmFor).
+const string BaselineRevision = "054fe9cd6a8961afbf0c8f9c181bd3dcedb12b18";
+var cases = new List<object>();
 void Add(string name, List<TileHit> hits, FingeringOptions options)
 {
-    using var document = JsonDocument.Parse(ReviewChart.Export(name, "demo", NotePlanner.Plan(hits, options), options,
-        exportedAt: DateTimeOffset.UnixEpoch, sourceHits: hits));
-    cases.Add(document.RootElement.Clone());
+    cases.Add(new
+    {
+        name,
+        algorithm = "NotePlanner/" + BaselineRevision + "/" + options.Style,
+        options = new
+        {
+            options.ChordWindow, options.ChordAngle, options.ChordMaxGap, options.ResetWindow, options.ChordFocusWindow,
+            options.JackWindow, options.UseRoll, options.OuterRoll, options.LeftHanded, options.ChordsOnOtherHand,
+            Style = options.Style.ToString(), options.ReviewShortMinGap, options.ReviewShortMaxGap,
+            options.ReviewShortMinNotes, options.ReviewShortMaxNotes, options.ReviewTimingTolerance,
+        },
+        notes = NotePlanner.Plan(hits, options).Select(n => new
+        {
+            id = string.Create(CultureInfo.InvariantCulture, $"{n.TileIndex}:{n.LastTileIndex}:{n.Time:R}"),
+            tileIndex = n.TileIndex,
+            lastTileIndex = n.LastTileIndex,
+            time = n.Time,
+            lanes = n.Lanes.Select(l => new { lane = l.Key, holdSeconds = l.Value }),
+        }),
+        // Unknown angle is null, never JSON-invalid NaN; the JS planner reads null as unknown.
+        sourceHits = hits.Select(h => new
+        {
+            tileIndex = h.TileIndex,
+            time = h.Time,
+            holdSeconds = h.HoldSeconds,
+            angle = double.IsNaN(h.Angle) ? (double?)null : h.Angle,
+        }),
+    });
 }
 List<TileHit> Run(double gap, int count, double start = 1) =>
     Enumerable.Range(0, count).Select(i => new TileHit(i + 1, start + i * gap)).ToList();

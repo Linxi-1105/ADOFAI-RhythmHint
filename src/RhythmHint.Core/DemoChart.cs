@@ -69,8 +69,9 @@ public sealed class DemoChart
 
         if (forSettings)
         {
-            // 预留第 8–9 拍给短串：160 BPM 时每步约 66.7 ms。压缩快歌里的间隔，避免碰上下一个双押。
-            var gap = Math.Min(1.0 / 15, spb / 3);
+            // 预留第 8–9 拍给短串：每步 62.5 ms，在标准排法的轮指线（重置间隔一半，默认 65 ms）以内、交替优先的短串范围里，两种排法看得出区别。
+            // 压缩快歌里的间隔，避免碰上下一个双押。
+            var gap = Math.Min(1.0 / 16, spb / 3);
             for (var i = 0; i < 4; i++)
             {
                 At((8.5 * spb) + (i * gap));

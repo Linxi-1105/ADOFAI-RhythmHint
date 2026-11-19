@@ -34,7 +34,11 @@ public sealed class ViewportShrinker<TCamera>
     /// <param name="cameras">当前在用的摄像机（可以含画到贴图上的，会被跳过）。</param>
     /// <param name="left">左侧让出来的宽度占屏幕的比例。</param>
     /// <param name="top">顶部让出来的高度占屏幕的比例。</param>
-    public void Apply(IEnumerable<TCamera> cameras, double left, double top)
+    public void Apply(IEnumerable<TCamera> cameras, double left, double top) => Apply(cameras, new ScreenMargins(left, 0, top, 0));
+
+    /// <param name="cameras">当前在用的摄像机（可以含画到贴图上的，会被跳过）。</param>
+    /// <param name="margins">四边让出来的比例。</param>
+    public void Apply(IEnumerable<TCamera> cameras, ScreenMargins margins)
     {
         Forget(cam => !_isAlive(cam));
         Forget(cam => _rendersToTexture(cam), restore: true);
@@ -50,7 +54,7 @@ public sealed class ViewportShrinker<TCamera>
             var original = _cameras.TryGetValue(cam, out var known) && known.Applied == current
                 ? known.Original
                 : current; // 第一次见到，或游戏刚改过它：以现在的值为原始值
-            _setRect(cam, ViewportMath.Shrink(original, left, top));
+            _setRect(cam, ViewportMath.Shrink(original, margins));
             _cameras[cam] = (original, _getRect(cam)); // 读回来存：引擎可能把数值换成它自己的精度
         }
     }

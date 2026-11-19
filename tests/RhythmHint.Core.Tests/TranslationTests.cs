@@ -42,6 +42,19 @@ public class TranslationTests
     }
 
     [Fact]
+    public void AllTextCoversWhatTheLanguageShows()
+    {
+        // 设置窗口打开前先把这些字的字形排好（2026-11-19 用户：每次点选项都卡一下）：当前语言会显示的字都要在里面，缺译文时显示的英文也算
+        var ko = new Translator(Sample) { Language = "ko" }.AllText();
+        var zh = new Translator(Sample) { Language = "zh-Hans" }.AllText();
+
+        Assert.Contains("주로 쓰는 손", ko);
+        Assert.Contains("About {0} BPM", ko);
+        Assert.Contains("惯用手", zh);
+        Assert.Contains("当前相当于 {0} BPM", zh);
+    }
+
+    [Fact]
     public void FormatsNumbersTheSameEverywhere()
     {
         // 占位符按固定格式填，不随系统区域设置把小数点变成逗号

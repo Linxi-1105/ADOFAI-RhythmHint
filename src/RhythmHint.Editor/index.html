@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RhythmHint Fingering Editor</title>
+<!-- 网页图标：和左上角一样的四竖条标志（file:// 页面直接内嵌，不依赖旁边的文件） -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2316181d'/%3E%3Crect x='5.75' y='16' width='4' height='10' rx='2' fill='%23f57829'/%3E%3Crect x='11.25' y='9.3' width='4' height='16.7' rx='2' fill='%233d9ee0'/%3E%3Crect x='16.75' y='6' width='4' height='20' rx='2' fill='%23f57829'/%3E%3Crect x='22.25' y='12.7' width='4' height='13.3' rx='2' fill='%23b273f2'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="editor.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/></symbol>
+    <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2.2" class="fill"/><circle cx="15" cy="12" r="2.2" class="fill"/><circle cx="7" cy="18" r="2.2" class="fill"/></symbol>
+    <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2.5"/><path d="M6.5 10h1M10.5 10h1M14.5 10h1M18 10h-.5M7 14h10"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></symbol>
+    <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></symbol>
+    <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 15V3M7 8l5-5 5 5M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z" class="fill"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6.5" y="5" width="3.6" height="14" rx="1" class="fill"/><rect x="13.9" y="5" width="3.6" height="14" rx="1" class="fill"/></symbol>
+    <symbol id="i-start" viewBox="0 0 24 24"><path d="M6 5v14"/><path d="M18 5.5v13L9 12z" class="fill"/></symbol>
+    <symbol id="i-repeat" viewBox="0 0 24 24"><path d="m17 2 4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="m7 22-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/></symbol>
+    <symbol id="i-sound" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-fit" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></symbol>
+    <symbol id="i-mirror" viewBox="0 0 24 24"><path d="M12 3v18" stroke-dasharray="2 3"/><path d="m8 7-5 5 5 5M16 7l5 5-5 5"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-revert" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+    <symbol id="i-open" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1"/><path d="M3 7v11a2 2 0 0 0 2 2h13l3-9H7l-4 9"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2.2h7.5A2.5 2.5 0 0 1 21 9.7v7.8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/></symbol>
+    <symbol id="i-repo" viewBox="0 0 24 24"><path d="M5 18.5V5.5A2.5 2.5 0 0 1 7.5 3H19v14H7.5A2.5 2.5 0 0 0 5 19.5 2.5 2.5 0 0 0 7.5 22H19v-5"/><path d="M9 7.5h6"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 4v-4A2.5 2.5 0 0 1 4 13.5z"/><path d="M8.5 9h7M8.5 12h4.5"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-8.5 8.5"/><path d="M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M14 4h6v6M10 20H4v-6M20 4l-6.5 6.5M4 20l6.5-6.5"/></symbol>
+    <symbol id="i-shrink" viewBox="0 0 24 24"><path d="M20 10h-6V4M4 14h6v6M14 10l6.5-6.5M10 14l-6.5 6.5"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/></symbol>
+  </defs>
+</svg>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+    <span class="brand-name">RhythmHint</span>
+    <span class="brand-sub" data-i18n="brand.sub"></span>
+  </div>
+  <div class="doc-tab" id="docTab">
+    <span class="doc-source" id="docSource"></span>
+    <span class="doc-title" id="docTitle"></span>
+    <span class="doc-dirty" id="docDirty" data-i18n-title="top.unsaved"></span>
+    <button class="badge warn" id="docCheck" hidden></button>
+  </div>
+  <div class="top-actions">
+    <button class="icon-btn" id="undoBtn" data-i18n-title="top.undo" disabled><svg><use href="#i-undo"/></svg></button>
+    <button class="icon-btn" id="redoBtn" data-i18n-title="top.redo" disabled><svg><use href="#i-redo"/></svg></button>
+    <span class="sep"></span>
+    <div class="lang"><svg><use href="#i-globe"/></svg><select id="langSelect" data-i18n-title="top.language"></select></div>
+    <button class="btn" id="saveAsBtn"><svg><use href="#i-share"/></svg><span data-i18n="top.saveAs"></span></button>
+    <button class="btn primary" id="saveBtn"><svg><use href="#i-save"/></svg><span data-i18n="top.save"></span></button>
+  </div>
+</header>
+
+<nav class="rail" id="rail">
+  <button data-panel="file" data-i18n-title="rail.file"><svg><use href="#i-file"/></svg></button>
+  <button data-panel="history" data-i18n-title="rail.history"><svg><use href="#i-history"/></svg></button>
+  <button data-panel="refs" data-i18n-title="rail.refs"><svg><use href="#i-layers"/></svg></button>
+  <button data-panel="audio" data-i18n-title="rail.audio"><svg><use href="#i-music"/></svg></button>
+  <button data-panel="view" data-i18n-title="rail.view"><svg><use href="#i-sliders"/></svg></button>
+  <span class="rail-gap"></span>
+  <button data-panel="keys" data-i18n-title="rail.keys"><svg><use href="#i-keyboard"/></svg></button>
+  <button data-panel="about" data-i18n-title="rail.about"><svg><use href="#i-info"/></svg></button>
+</nav>
+
+<main class="stage" id="stage">
+  <canvas id="chart"></canvas>
+
+  <section class="empty" id="empty" hidden>
+    <div class="empty-card">
+      <span class="logo big" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      <h1 data-i18n="empty.title"></h1>
+      <p data-i18n="empty.body"></p>
+      <button class="btn primary" data-action="open"><svg><use href="#i-open"/></svg><span data-i18n="file.open"></span></button>
+    </div>
+  </section>
+
+  <aside class="drawer" id="drawer" hidden>
+    <div class="drawer-head"><h2 id="drawerTitle"></h2><button class="icon-btn small" id="drawerClose"><svg><use href="#i-close"/></svg></button></div>
+
+    <div class="drawer-body" data-panel-body="file">
+      <h3 data-i18n="file.level"></h3>
+      <dl class="facts">
+        <dt data-i18n="file.song"></dt><dd id="fSong"></dd>
+        <dt data-i18n="file.artist"></dt><dd id="fArtist"></dd>
+        <dt data-i18n="file.charter"></dt><dd id="fCharter"></dd>
+      </dl>
+      <h3 data-i18n="file.title"></h3>
+      <label class="field"><span data-i18n="file.author"></span><input class="input" id="fAuthor" maxlength="300" autocomplete="off" data-i18n-placeholder="file.authorHint"></label>
+      <label class="field"><span data-i18n="file.comment"></span><textarea class="input" id="fComment" rows="3" maxlength="4000" data-i18n-placeholder="file.commentHint"></textarea></label>
+      <label class="field"><span data-i18n="file.name"></span>
+        <span class="input-wrap"><input class="input" id="fName" maxlength="120" autocomplete="off" spellcheck="false"><span class="suffix">.json</span></span></label>
+      <div class="field"><span data-i18n="file.folder"></span>
+        <div class="location"><span class="loc-icon"><svg><use href="#i-folder"/></svg></span>
+          <span class="loc-text"><b id="fFolderName"></b><small id="fFolder"></small></span>
+          <button class="icon-btn small" id="copyFolder" data-i18n-title="file.copy"><svg><use href="#i-copy"/></svg></button></div>
+      </div>
+      <div class="stat-grid" id="fStats"></div>
+      <button class="btn wide" data-action="open"><svg><use href="#i-open"/></svg><span data-i18n="file.open"></span></button>
+    </div>
+
+    <div class="drawer-body" data-panel-body="refs">
+      <p class="muted" data-i18n="refs.desc"></p>
+      <label class="field"><span data-i18n="refs.width"></span>
+        <div class="slider"><input type="range" id="refScale" min="25" max="100" step="5" value="50"><output id="refScaleOut">50%</output></div></label>
+      <p class="muted" id="refsNone" data-i18n="refs.none" hidden></p>
+      <div class="ref-card" data-ref="standard">
+        <div class="ref-head"><span class="dot standard"></span><b data-i18n="col.standard"></b>
+          <label class="switch"><input type="checkbox" data-show-ref="standard" checked><i></i><span data-i18n="refs.show"></span></label></div>
+        <div class="row"><button class="btn" data-apply="standard" data-scope="selection" data-i18n="refs.applySel"></button>
+          <button class="btn" data-apply="standard" data-scope="all" data-i18n="refs.applyAll"></button></div>
+      </div>
+      <div class="ref-card" data-ref="alternate">
+        <div class="ref-head"><span class="dot alternate"></span><b data-i18n="col.alternate"></b>
+          <label class="switch"><input type="checkbox" data-show-ref="alternate" checked><i></i><span data-i18n="refs.show"></span></label></div>
+        <div class="row"><button class="btn" data-apply="alternate" data-scope="selection" data-i18n="refs.applySel"></button>
+          <button class="btn" data-apply="alternate" data-scope="all" data-i18n="refs.applyAll"></button></div>
+      </div>
+    </div>
+
+    <div class="drawer-body" data-panel-body="audio">
+      <div class="audio-file"><svg><use href="#i-music"/></svg><span id="audioName"></span></div>
+      <button class="btn wide" id="loadAudio"><svg><use href="#i-open"/></svg><span data-i18n="audio.load"></span></button>
+      <label class="field"><span data-i18n="audio.offset"></span>
+        <div class="slider"><input type="range" id="offset" min="-300" max="300" step="1" value="0"><output id="offsetOut">0</output></div>
+        <small class="muted" data-i18n="audio.offsetHint"></small>
+        <small class="muted" id="calibrationNote" hidden></small></label>
+      <label class="field"><span data-i18n="audio.volume"></span>
+        <div class="slider"><input type="range" id="volume" min="0" max="100" step="1" value="80"><output id="volumeOut">80</output></div></label>
+      <label class="switch line"><input type="checkbox" id="hitsound"><i></i><span data-i18n="audio.hitsound"></span></label>
+    </div>
+
+    <div class="drawer-body" data-panel-body="view">
+      <div class="field"><span data-i18n="view.style"></span>
+        <select id="vStyle" data-i18n-title="view.style">
+          <option value="game" data-i18n="view.styleGame"></option>
+          <option value="bar" data-i18n="view.styleBar"></option>
+          <option value="round" data-i18n="view.styleRound"></option>
+        </select></div>
+      <label class="switch line"><input type="checkbox" id="vBeats" checked><i></i><span data-i18n="view.beats"></span></label>
+      <label class="switch line"><input type="checkbox" id="vWave" checked><i></i><span data-i18n="view.wave"></span></label>
+      <label class="switch line"><input type="checkbox" id="vGaps" checked><i></i><span data-i18n="view.gaps"></span></label>
+      <label class="switch line"><input type="checkbox" id="vGhost" checked><i></i><span data-i18n="view.ghost"></span></label>
+      <label class="switch line"><input type="checkbox" id="vTrack" checked><i></i><span><span data-i18n="view.track"></span> <span class="tag exp" data-i18n="view.experimental"></span></span></label>
+      <label class="field"><span data-i18n="view.jack"></span>
+        <div class="slider"><input type="range" id="jackMs" min="50" max="300" step="5" value="150"><output id="jackOut">150</output></div>
+        <small class="muted" data-i18n="view.jackHint"></small></label>
+    </div>
+
+    <div class="drawer-body" data-panel-body="keys">
+      <h3 data-i18n="keys.custom"></h3>
+      <div class="keymap" id="keymap"></div>
+      <small class="muted" data-i18n="keys.customHint"></small>
+      <label class="switch line"><input type="checkbox" id="autoNext" checked><i></i><span data-i18n="keys.autoNext"></span></label>
+      <button class="btn wide" id="keysReset"><svg><use href="#i-revert"/></svg><span data-i18n="keys.reset"></span></button>
+      <h3 data-i18n="rail.keys"></h3>
+      <dl class="shortcuts" id="shortcuts"></dl>
+    </div>
+
+    <div class="drawer-body" data-panel-body="history">
+      <div class="history-list" id="historyList"></div>
+      <button class="btn wide quiet" id="copyPage"><svg><use href="#i-copy"/></svg><span data-i18n="history.copyPage"></span></button>
+    </div>
+
+    <div class="drawer-body" data-panel-body="about">
+      <div class="about-head"><span class="logo big" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <div><b>RhythmHint</b><small class="muted" data-i18n="brand.sub"></small><small class="muted version" id="aboutVersion"></small></div></div>
+      <h3 data-i18n="about.credits"></h3>
+      <div class="people" id="aboutPeople"></div>
+      <h3 data-i18n="about.links"></h3>
+      <a class="location link" id="aboutRepo" target="_blank" rel="noopener">
+        <span class="loc-icon blue"><svg><use href="#i-repo"/></svg></span>
+        <span class="loc-text"><b data-i18n="about.repo"></b><small id="aboutRepoText"></small></span>
+        <svg class="ext"><use href="#i-external"/></svg></a>
+      <div class="location">
+        <span class="loc-icon purple"><svg><use href="#i-chat"/></svg></span>
+        <span class="loc-text"><b data-i18n="about.qq"></b><small class="num" id="aboutQq"></small></span>
+        <button class="icon-btn small" id="copyQq" data-i18n-title="file.copy"><svg><use href="#i-copy"/></svg></button></div>
+    </div>
+  </aside>
+
+  <aside class="inspector" id="inspector"></aside>
+
+  <section class="track card" id="trackCard"><canvas id="track" data-i18n-title="track.zoomHint"></canvas>
+    <button class="icon-btn small track-size" id="trackSize" data-i18n-title="track.expand"><svg><use href="#i-expand"/></svg></button></section>
+
+  <section class="overview" id="overview">
+    <div class="zoom">
+      <span class="zoom-name" data-i18n="zoom.label"></span>
+      <button class="icon-btn small" id="zoomOut" data-i18n-title="zoom.out"><svg><use href="#i-minus"/></svg></button>
+      <input type="range" id="zoomSlider" min="0" max="1000" step="1" data-i18n-title="zoom.slider">
+      <button class="icon-btn small" id="zoomIn" data-i18n-title="zoom.in"><svg><use href="#i-plus"/></svg></button>
+      <span class="zoom-value" id="zoomLabel">100%</span>
+      <button class="icon-btn small" id="zoomFit" data-i18n-title="zoom.fit"><svg><use href="#i-fit"/></svg></button>
+    </div>
+    <canvas id="minimap" data-i18n-title="map.title"></canvas>
+  </section>
+
+  <footer class="transport" id="transport">
+    <button class="icon-btn" id="toStart" data-i18n-title="tr.start"><svg><use href="#i-start"/></svg></button>
+    <button class="play" id="playBtn" data-i18n-title="tr.play"><svg><use href="#i-play"/></svg></button>
+    <span class="time"><b id="timeNow">0:00.000</b><span id="timeEnd">/ 0:00</span></span>
+    <span class="sep"></span>
+    <select id="speed" data-i18n-title="tr.speed">
+      <option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="0.75">0.75×</option>
+      <option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option>
+    </select>
+    <span class="sep"></span>
+    <button class="chip" id="loopA" data-i18n-title="tr.loopA">A</button>
+    <button class="chip" id="loopB" data-i18n-title="tr.loopB">B</button>
+    <button class="icon-btn toggle" id="loopBtn" data-i18n-title="tr.loop"><svg><use href="#i-repeat"/></svg></button>
+    <button class="icon-btn toggle" id="hitBtn" data-i18n-title="audio.hitsound"><svg><use href="#i-sound"/></svg></button>
+    <span class="sep"></span>
+    <label class="volume" data-i18n-title="tr.volume"><svg><use href="#i-music"/></svg><input type="range" id="volumeQuick" min="0" max="100" step="1" value="50"></label>
+  </footer>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+</main>
+
+<div class="modal" id="modal" hidden>
+  <div class="modal-card">
+    <h2 id="modalTitle"></h2>
+    <p id="modalBody"></p>
+    <div class="path" id="modalPathRow"><code id="modalPath"></code><button class="icon-btn small" id="modalCopy"><svg><use href="#i-copy"/></svg></button></div>
+    <div class="row end"><button class="btn" id="modalCancel"></button><button class="btn primary" id="modalOk"></button></div>
+  </div>
+</div>
+
+<input type="file" id="openInput" accept=".json,application/json" hidden>
+<input type="file" id="audioInput" accept="audio/*,.ogg,.mp3,.wav,.flac,.m4a" hidden>
+<audio id="audio" preload="auto"></audio>
+
+<script src="i18n.js"></script>
+<script src="dropdown.js"></script>
+<script src="model.js"></script>
+<script src="audio.js"></script>
+<script src="view.js"></script>
+<script src="trackfx.js"></script>
+<script src="track.js"></script>
+<!-- 游戏里点「编辑本关手序」时由 Mod 写出：session.js 是最近一关，recent/ 是左边「历史」里的各关（SessionLibrary）；还没打开过时没有这些文件 -->
+<script src="session.js"></script>
+<script src="recent/index.js"></script>
+<script src="about.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,8 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- 纯逻辑：自动排键、节拍线、画面时钟。不引用 Unity 和游戏，可以单独编译和测试。
+  <!-- 纯逻辑：自动排键、节拍线、画面时钟、专属手序。不引用 Unity 和游戏，可以单独编译和测试。
        Mod 项目直接把这里的源码编进自己的 DLL，所以游戏里只需要一个 DLL。 -->
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
     <RootNamespace>RhythmHint.Core</RootNamespace>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 读写玩家分享的手序文件（外部输入，要严格校验）。和游戏自带的同一版本：Mod 编译时用游戏目录里那份，这里只为单独编译和测试 -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.2" />
+  </ItemGroup>
 </Project>

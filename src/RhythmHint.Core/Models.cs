@@ -54,6 +54,18 @@ public sealed class PlannedNote
     /// <summary>这一下要按的轨道及各自的长按时长（0 为普通音符）。</summary>
     public SortedDictionary<int, double> Lanes { get; } = new();
 
+    /// <summary>复制一份（轨道和长按一起复制）。</summary>
+    public PlannedNote Clone()
+    {
+        var copy = new PlannedNote(TileIndex, Time) { LastTileIndex = LastTileIndex };
+        foreach (var kv in Lanes)
+        {
+            copy.Lanes[kv.Key] = kv.Value;
+        }
+
+        return copy;
+    }
+
     /// <summary>同时按两个及以上轨道。</summary>
     public bool IsChord => Lanes.Count > 1;
 

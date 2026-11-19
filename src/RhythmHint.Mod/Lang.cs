@@ -25,6 +25,9 @@ internal static class Lang
 
     public static string T(string source, params object[] args) => Translator.T(source, args);
 
+    /// <summary>当前语言会显示的所有文字（设置窗口预先排字形用）。</summary>
+    public static string AllText() => Translator.AllText();
+
     public static string T(Message message) => Translator.T(message);
 
     /// <summary>一句先不翻译的话（状态、原因这类既显示又写日志的）。</summary>

@@ -1,6 +1,6 @@
 namespace RhythmHint.Core;
 
-/// <summary>排键方式。时间重置法保持默认行为，审核偏好方式是可独立选择的候选规则。</summary>
+/// <summary>排键方式。时间重置法（界面上叫「标准」）是默认，审核偏好方式（「交替优先」）是可独立选择的候选规则。</summary>
 public enum FingeringStyle
 {
     TimeReset,
@@ -51,9 +51,12 @@ public sealed class FingeringOptions
     /// <summary>
     /// 主手重置间隔 R：和上一下隔得比它久，就回到右手食指（一根手指点得过来）；
     /// R/2 到 R 之间两只手的食指轮流；R/2 以内同一只手两根手指轮指。
-    /// 默认 165 ms：原版「全节奏提示」作者交替 / 单指的分界约 160 ms，LaneReader 也用 165。
+    /// 默认 130 ms（2026-11-19 用户定，原来 165）：轮指线随之是 65 ms。依据 Avantgarde 严判完美通关视频（B 站 BV1cN411V7Pb）逐帧读出的 889 个音：
+    /// 75 ms 的快段全是两指交替（原来的 82.5 ms 轮指线把它们排成了轮指），150 ms 基本单指连点；而 deleted（工坊 3386617648）
+    /// 那种 50 ms 的旋转短串仍要轮指。改成 130 ms 后和视频 86% 一致（165 ms 时 44%），50 ms 短串的轮指不变。
+    /// 更早的依据：原版「全节奏提示」作者交替 / 单指的分界约 160 ms，LaneReader 用 165。
     /// </summary>
-    public double ResetWindow { get; set; } = 0.165;
+    public double ResetWindow { get; set; } = 0.13;
 
     /// <summary>
     /// 紧挨着双押（前一下或后一下就是双押）、隔得不超过它的单押放另一只手（双押在右手时放左手，在左手时放右手），让按双押的手专心按双押。

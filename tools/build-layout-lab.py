@@ -21,9 +21,9 @@ def main() -> int:
         return 2
 
     template = Path(__file__).with_name("layout-lab.html").read_text(encoding="utf-8")
-    scripts = Path(__file__).with_name("review-editor")
+    scripts = Path(__file__).with_name("planner-js")
     for name in ("note-planner.js", "adofai-import.js"):
-        reference = f'<script src="review-editor/{name}"></script>'
+        reference = f'<script src="planner-js/{name}"></script>'
         if reference not in template:
             raise ValueError(f"Missing {name} reference in layout-lab template")
         script = (scripts / name).read_text(encoding="utf-8")

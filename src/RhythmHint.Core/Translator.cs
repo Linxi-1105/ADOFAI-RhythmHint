@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Globalization;
+using System.Text;
 
 namespace RhythmHint.Core;
 
@@ -89,6 +90,37 @@ public sealed class Translator
 
     /// <summary>翻译一句话；参数里的 Message 也跟着翻译。</summary>
     public string T(Message message) => T(message.Source, message.Args);
+
+    /// <summary>
+    /// 当前语言会显示的所有文字连在一起：这种语言的译文，加上缺译文时会显示的那一种（英文或中文原文）。
+    /// 设置窗口打开前先把这些字的字形排好，点选项、换页时不再卡一下（2026-11-19 用户）。
+    /// </summary>
+    public string AllText()
+    {
+        var text = new StringBuilder();
+        var sourcesAdded = false;
+        foreach (var kv in _tables)
+        {
+            var shown = kv.Key == Language || (kv.Key == Languages.Fallback && Language != "zh-Hant" && Language != Languages.Source);
+            var addSources = !sourcesAdded && Language is Languages.Source or "zh-Hant"; // 简体是原文；繁体缺句时也显示原文
+            foreach (var entry in kv.Value)
+            {
+                if (shown)
+                {
+                    text.Append(entry.Value);
+                }
+
+                if (addSources)
+                {
+                    text.Append(entry.Key);
+                }
+            }
+
+            sourcesAdded |= addSources;
+        }
+
+        return text.ToString();
+    }
 
     /// <summary>不翻译、只填占位符（日志用原文；参数里的 Message 也是原文）。</summary>
     public static string Format(string text, params object[] args) =>

@@ -54,9 +54,31 @@ public static class KeyBindings
     /// <summary>两个按键名是不是同一个键（字母不分大小写，"d" 和 "D" 一样）。</summary>
     public static bool Same(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>按键框里显示的字：长名字缩写（LeftShift → LShift，UpArrow → ↑），没指定的显示空白，单个字母大写。</summary>
+    /// <summary>
+    /// 按键框里显示的字：长名字缩写（LeftShift → LShift，UpArrow → ↑，Keypad4 → Num4），没指定的显示空白，单个字母大写。
+    /// 鼠标侧键按系统的叫法从 1 数：Unity 的 Mouse3 是第 4 个键（MB4）。
+    /// </summary>
     public static string Display(string key) => key switch
     {
+        _ when key.StartsWith("Keypad", StringComparison.Ordinal) && key.Length == 7 && char.IsDigit(key[6]) => "Num" + key[6],
+        "KeypadPeriod" => "Num.",
+        "KeypadDivide" => "Num/",
+        "KeypadMultiply" => "Num*",
+        "KeypadMinus" => "Num-",
+        "KeypadPlus" => "Num+",
+        "KeypadEnter" => "NumEnter",
+        "KeypadEquals" => "Num=",
+        "PageUp" => "PgUp",
+        "PageDown" => "PgDn",
+        "Insert" => "Ins",
+        "Delete" => "Del",
+        "Backspace" => "Bksp",
+        "CapsLock" => "Caps",
+        "Mouse2" => "MMB",
+        "Mouse3" => "MB4",
+        "Mouse4" => "MB5",
+        "Mouse5" => "MB6",
+        "Mouse6" => "MB7",
         Unbound => string.Empty,
         "LeftShift" => "LShift",
         "RightShift" => "RShift",

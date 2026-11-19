@@ -39,10 +39,10 @@ public class PlannerTests
     [Theory]
     [InlineData(0.09)]
     [InlineData(0.12)]
-    [InlineData(0.165)]
+    [InlineData(0.13)]
     public void MediumSpeedAlternatesIndexFingers(double gap)
     {
-        // 83–165 ms：两只手的食指轮流，从右手开始 J F J F
+        // 66–130 ms（重置间隔默认 130 ms 的一半到它）：两只手的食指轮流，从右手开始 J F J F
         var lanes = LanesOf(NotePlanner.Plan(Run(1.0, 12, gap), Fingering));
 
         Assert.Equal(Enumerable.Range(0, 12).Select(i => i % 2 == 0 ? 2 : 1), lanes);

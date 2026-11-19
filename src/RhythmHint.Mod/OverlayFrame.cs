@@ -16,6 +16,9 @@ internal sealed class OverlayFrame
     /// <summary>入场 / 出场动画进度，0..1。</summary>
     public float Presence;
 
+    /// <summary>本关的估算难度档位（1–60，见 DifficultyTiers）；0 表示不画。Load 时清零，换关后重新估。</summary>
+    public int DifficultyTier;
+
     /// <summary>顶部条右侧的小字说明（演示模式用），画的时候按当前界面语言翻译；空表示不显示。</summary>
     public Message Caption = Message.Empty;
 
@@ -34,6 +37,7 @@ internal sealed class OverlayFrame
         Notes = notes;
         Beats = beats;
         EndTime = endTime;
+        DifficultyTier = 0;
         Flash.Clear();
         _lastSeq = -1;
     }
@@ -108,19 +112,49 @@ internal sealed class OverlayFrame
     }
 }
 
-/// <summary>按屏幕大小算出各部分的位置，基准是 1080p。</summary>
+/// <summary>
+/// 按屏幕大小算出各部分的位置，基准是 1080p。四轨面板在左边或右边、太鼓条在上面或下面（设置里选，用户要求）；
+/// 面板占满太鼓条以外的整个高度。坐标是 IMGUI 的：原点在左上角。
+/// </summary>
 internal readonly struct OverlayLayout
 {
     public OverlayLayout(Settings s)
     {
         Scale = Screen.height / 1080f * Mathf.Clamp(s.UiScale, 0.5f, 2f);
-        LaneWidth = 68 * Scale;
-        Padding = 12 * Scale;
-        PanelWidth = (LaneWidth * Lanes.Count) + (Padding * 2);
-        TopHeight = s.ShowTaiko || s.ShowBpm ? 128 * Scale : 0;
+        // 面板宽、太鼓条高取整到整数像素：边缘和游戏画面让出来的区域正好对齐，中间不留一列没人画的像素
+        // （用户反馈「一直以来都漏画了几个像素」：小数宽度时摄像机视口取整，和面板之间空出一列）。
+        // 轨道铺满整个面板，不再两侧各留 12 像素空边（同一次反馈：看着像轨道没画满）
+        PanelWidth = Mathf.Round(68 * Lanes.Count * Scale);
+        LaneWidth = PanelWidth / Lanes.Count;
+        Padding = 0;
+        TopHeight = s.ShowTaiko || s.ShowBpm ? Mathf.Round(128 * Scale) : 0;
+        // 关掉太鼓条时横条整个收起（2026-11-18 用户），BPM 框只占四轨面板那一列的顶端（或底端）
+        StripHeight = s.ShowTaiko ? TopHeight : 0;
         KeyBoxHeight = 64 * Scale;
-        JudgeY = Screen.height - KeyBoxHeight - (16 * Scale);
+        LanesRight = s.LanesOnRight;
+        TaikoBottom = s.TaikoAtBottom;
+        PanelX = LanesRight ? Screen.width - PanelWidth : 0;
+        PanelY = TaikoBottom ? 0 : TopHeight;
+        PanelHeight = Screen.height - TopHeight;
+        BarY = TaikoBottom ? Screen.height - TopHeight : 0;
+        JudgeY = PanelY + PanelHeight - KeyBoxHeight - (16 * Scale);
     }
+
+    /// <summary>四轨面板在右边。</summary>
+    public bool LanesRight { get; }
+
+    /// <summary>太鼓条在下面。</summary>
+    public bool TaikoBottom { get; }
+
+    /// <summary>四轨面板左上角和高度。</summary>
+    public float PanelX { get; }
+
+    public float PanelY { get; }
+
+    public float PanelHeight { get; }
+
+    /// <summary>太鼓条（横条）的上沿；高度是 TopHeight。</summary>
+    public float BarY { get; }
 
     public float Scale { get; }
 
@@ -130,7 +164,11 @@ internal readonly struct OverlayLayout
 
     public float PanelWidth { get; }
 
+    /// <summary>太鼓条那一行的高度（太鼓条或 BPM 框开着时有）；四轨面板让出这么高。</summary>
     public float TopHeight { get; }
+
+    /// <summary>横贯整个屏幕的太鼓条的高度（太鼓条关掉时为 0）；游戏画面只让出这么高。</summary>
+    public float StripHeight { get; }
 
     public float KeyBoxHeight { get; }
 

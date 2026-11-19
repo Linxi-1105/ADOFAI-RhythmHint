@@ -58,6 +58,15 @@ public class KeyBindingTests
     [InlineData("UpArrow", "↑")]
     [InlineData("Space", "Space")]
     [InlineData("None", "")]
-    [InlineData("Keypad4", "Keypad4")] // 屏幕键盘里没有的键（手改设置文件）原样显示
+    [InlineData("Keypad4", "Num4")] // 小键盘（2026-11-19 用户：很多人用小键盘等少见的键）
+    [InlineData("KeypadPlus", "Num+")]
+    [InlineData("KeypadEnter", "NumEnter")]
+    [InlineData("KeypadPeriod", "Num.")]
+    [InlineData("PageUp", "PgUp")]
+    [InlineData("CapsLock", "Caps")]
+    [InlineData("Backspace", "Bksp")]
+    [InlineData("Mouse3", "MB4")] // 鼠标侧键按系统的叫法从 1 数
+    [InlineData("F12", "F12")]
+    [InlineData("Joystick1Button0", "Joystick1Button0")] // 屏幕键盘里没有的键（手改设置文件）原样显示
     public void Display_ShortensLongNames(string key, string shown) => Assert.Equal(shown, KeyBindings.Display(key));
 }

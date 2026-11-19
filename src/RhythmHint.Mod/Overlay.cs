@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
 using RhythmHint.Core;
 using UnityEngine;
 
@@ -31,17 +33,121 @@ internal sealed class Overlay : MonoBehaviour
     private readonly PlayStateTracker<States> _editorPlay = new();
     private string _builtFingering = string.Empty;
     private bool _failed;
+    private bool _preloaded;
     private float _previewUntil;
     private Message _screenState = Message.Empty;
     private string _screenStateText = string.Empty; // 原文，用来判断画面状态变没变
     private Message _levelStatus = Lang.M("尚未进入关卡");
+    private readonly FingeringSource _fingerings = new();
+    private LevelSnapshot? _snapshot;
+    private bool _levelActive;
+    private (int, int, int, double)? _waitingPrint; // 还没开始的那一关：读过的指纹、排键设置和快照
+    private string _waitingKey = string.Empty;
+    private LevelSnapshot? _waitingSnapshot;
+    private Message _caption = Message.Empty;
+    private float _captionUntil;
+    private string _captionShownFor = string.Empty;
 
     internal OverlayFrame Frame { get; } = new();
 
     /// <summary>给设置页显示的当前状态（按当前界面语言）。</summary>
     internal string Status => _failed ? Lang.T(_levelStatus) : Lang.T("{0}\n画面：{1}", _levelStatus, _screenState);
 
-    internal void RequestRebuild() => _rebuildRequested = true;
+    /// <summary>「重新排键」：下一帧按现在的设置重排，并在按钮下面说一声。</summary>
+    internal void RequestRebuild()
+    {
+        _rebuildRequested = true;
+        Report(RulesArea, (Lang.M("已按当前设置重新排键。"), true));
+    }
+
+    /// <summary>设置窗口按钮的结果（2026-11-18 用户：设置页面缺少反馈），在按下的那排按钮下面显示几秒。</summary>
+    internal ActionFeedback Feedback { get; } = new();
+
+    /// <summary>排键页「专属手序」那排按钮。</summary>
+    internal const string EditorArea = "editor";
+
+    /// <summary>排键页底部的「重新排键」。</summary>
+    internal const string RulesArea = "rules";
+
+    private void Report(string area, (Message Text, bool Ok) result) => Feedback.Show(area, result.Text, !result.Ok, Time.unscaledTime);
+
+    /// <summary>Mod 正显示的这一关（编辑本关手序用）；不在关卡里为 null。</summary>
+    internal CurrentLevel<LevelSnapshot> Current { get; } = new();
+
+    /// <summary>这一关用的是哪份手序（设置窗口显示）。</summary>
+    internal string FingeringStatus => Current.Snapshot != null
+        ? Lang.T(Current.Snapshot.Fingering.Status)
+        : Lang.T("不在关卡中。进入关卡或在编辑器中试玩时，会自动使用对应歌曲的专属手序。");
+
+    /// <summary>「编辑本关手序」的说明（按下后的结果见 <see cref="Feedback"/>）。</summary>
+    internal string EditorMessage => Current.Snapshot == null ? Lang.T("进入关卡或在编辑器中试玩时，可以编辑这一关的手序（可以先暂停）。")
+        : Lang.T("在浏览器中打开手序编辑器，自动带上这一关的砖块、音乐和两种自动排法做参考；保存后马上生效。");
+
+    /// <summary>「编辑本关手序」：把这一关交给编辑器并打开。</summary>
+    internal void OpenEditor()
+    {
+        var snapshot = Current.Snapshot;
+        if (snapshot == null || !GameReader.TryGetLevel(out var level, out _))
+        {
+            Report(EditorArea, (Lang.M("请先进入关卡或在编辑器中试玩。"), false));
+            return;
+        }
+
+        try
+        {
+            Report(EditorArea, EditorLauncher.Open(snapshot, level, _fingerings));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException)
+        {
+            // 写不了编辑器目录（权限、磁盘满），或者这一关的数据凑不成一份手序：告诉玩家，提示面板照常工作
+            Report(EditorArea, (Lang.M("打开手序编辑器失败：{0}", ex.Message), false));
+            Main.Mod.Logger.LogException(ex);
+        }
+    }
+
+    /// <summary>玩家给这一关选手序（文件名；空串 = 都不用；null = 忘掉选择，重新自动识别）。</summary>
+    internal void ChooseFingering(string? name)
+    {
+        var snapshot = Current.Snapshot;
+        if (snapshot == null || snapshot.Fingering.Chart.Length == 0)
+        {
+            return;
+        }
+
+        FingeringSource.Remember(Main.Settings, snapshot.Fingering.Chart, name);
+        Main.Settings.Save(Main.Mod);
+        _rebuildRequested = true;
+        _waitingPrint = null;
+    }
+
+    /// <summary>「创建桌面快捷方式」：不开游戏也能打开编辑器。</summary>
+    internal void CreateEditorShortcut()
+    {
+        try
+        {
+            Report(EditorArea, EditorLauncher.CreateShortcut());
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            Report(EditorArea, (Lang.M("无法创建桌面快捷方式：{0}", ex.Message), false));
+            Main.Mod.Logger.LogException(ex);
+        }
+    }
+
+    /// <summary>「打开手序文件夹」。</summary>
+    internal void OpenFingeringFolder()
+    {
+        try
+        {
+            EditorLauncher.OpenFolder();
+            Report(EditorArea, (Lang.M("已打开手序文件夹。"), true));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Report(EditorArea, (Lang.M("无法打开手序文件夹：{0}", ex.Message), false));
+            Main.Mod.Logger.LogException(ex);
+        }
+    }
 
     /// <summary>设置页每帧调用：设置页开着时播放演示。</summary>
     internal void RequestPreview() => _previewUntil = Time.unscaledTime + 0.6f;
@@ -78,6 +184,12 @@ internal sealed class Overlay : MonoBehaviour
         try
         {
             Lang.Update(Main.Settings);
+            if (!_preloaded)
+            {
+                _preloaded = true;
+                Preload();
+            }
+
             UpdateNotice.Update(Main.Settings);
             ReadHotkey();
             if (_window.Visible)
@@ -99,6 +211,23 @@ internal sealed class Overlay : MonoBehaviour
             _shield.Cover(null);
             Frame.Presence = 0;
             _levelStatus = Lang.M("发生错误，已停用：{0}（详见 Unity Mod Manager 日志）", ex.Message);
+            Main.Mod.Logger.LogException(ex);
+        }
+    }
+
+    /// <summary>
+    /// 游戏启动后第一帧（还在载入）先把设置窗口的图标和字形准备好，打开窗口、换页时不卡（见 WindowSkin.Preload）。
+    /// 只是提速：出错就记日志，窗口照常能用（第一次画到时再读），所以这里接住所有异常，不让它停用整个叠加层。
+    /// </summary>
+    private static void Preload()
+    {
+        try
+        {
+            WindowSkin.Preload();
+        }
+        catch (Exception ex)
+        {
+            Main.Mod.Logger.Warning($"设置窗口预先准备失败，打开时再读：{ex.Message}");
             Main.Mod.Logger.LogException(ex);
         }
     }
@@ -135,12 +264,36 @@ internal sealed class Overlay : MonoBehaviour
     private void Tick()
     {
         var settings = Main.Settings;
+
+        // 手序文件夹有变化（比如编辑器刚保存）：关卡里马上重排，换上新的手序
+        if (_fingerings.Poll() && settings.UseCustomFingering)
+        {
+            _rebuildRequested = true;
+            _waitingPrint = null;
+        }
+
         var inLevel = GameReader.TryGetLevel(out var level, out var reason);
         var levelShown = inLevel && TickLevel(level, settings, out reason);
         if (!inLevel)
         {
             _fingerprint = null;
             _editorPlay.Reset();
+            _waitingPrint = null;
+            _waitingSnapshot = null;
+        }
+
+        // 能编辑这一关手序的时候：Mod 正显示这一关（游玩、暂停、死亡、通关画面），或者关卡已载入、还没按键开始；离开关卡就清掉
+        if (inLevel && _levelActive && _snapshot != null && _fingerprint != null)
+        {
+            Current.Show(_snapshot);
+        }
+        else if (inLevel && _window.Visible && WaitingSnapshot(level) is { } waiting)
+        {
+            Current.Show(waiting);
+        }
+        else
+        {
+            Current.Leave();
         }
 
         var preview = !levelShown && settings.ShowPreview && Time.unscaledTime < _previewUntil;
@@ -184,6 +337,7 @@ internal sealed class Overlay : MonoBehaviour
         var stale = ADOBase.isLevelEditor && !fresh;
         var won = level.Won && !stale;
         var failed = level.Failed && !stale;
+        _levelActive = false;
 
         if (!level.ShouldDraw)
         {
@@ -212,6 +366,10 @@ internal sealed class Overlay : MonoBehaviour
             return false;
         }
 
+        _levelActive = true;
+        EditorLauncher.RememberHitSound(level); // 存一份这一关的打击声，还没开始时打开编辑器也能用原声
+        Frame.Caption = Time.unscaledTime < _captionUntil ? _caption : Message.Empty;
+
         // 失败画面期间定住，不让音符继续流动；重开或回检查点后恢复
         Frame.Now = _clock.Advance(level.Conductor.songposition_minusi + (settings.VisualOffsetMs / 1000.0), failed);
         Frame.Bpm = GameReader.CurrentBpm(level);
@@ -228,19 +386,80 @@ internal sealed class Overlay : MonoBehaviour
     }
 
     /// <summary>只按这一关自己的砖块排键，不读任何外部谱面。</summary>
-    private void Rebuild(LevelState level)
+    /// <summary>读这一关：砖块、节拍线、BPM，以及要用的音符（文件夹里有这首歌的专属手序就用，对不上的地方用自动排键）。</summary>
+    private LevelSnapshot ReadLevel(LevelState level)
     {
         var hits = GameReader.ReadHits(level);
-        _hitCount = hits.Count;
         var end = hits.Count > 0 ? hits[hits.Count - 1].Time : 0;
 
         // 节拍线从起点砖（第 0 块）开始算，只用来画；排键只看砖块之间的间隔
         var tempo = BeatGrid.MusicalTempo(GameReader.ReadSpeeds(level), GameReader.Crotchet(level));
         var beats = BeatGrid.Build(tempo, level.Floors[0].entryTime, end + 2);
+        var settings = Main.Settings;
+        var auto = NotePlanner.Plan(hits, settings.ToFingering());
+        var info = GameReader.ReadInfo(level);
+        var chosen = hits.Count > 0
+            ? _fingerings.Choose(hits, auto, settings, info)
+            : new FingeringResult(auto, new List<bool>(), string.Empty, null, Message.Empty, Message.Empty);
+        var bpm = tempo.ConvertAll(t => (t.Time, 60 / t.SecondsPerBeat));
+        return new LevelSnapshot(hits, chosen, info, beats, bpm);
+    }
+
+    /// <summary>
+    /// 关卡已载入、还没按键开始（Start）时这一关的快照：这时 Mod 不显示面板，只在设置窗口开着时现读一遍（同一关、同样的设置只读一次）。
+    /// 不是这种情况、或者没有要按的砖时为 null。
+    /// 复现（2026-11-18 用户）：进关卡先按 F8，点「编辑本关手序」没反应——原来只有 Mod 正显示这一关时才能编辑。
+    /// </summary>
+    private LevelSnapshot? WaitingSnapshot(LevelState level)
+    {
+        var floors = level.Floors;
+        if (ADOBase.isLevelEditor || level.State != States.Start || floors.Count < 2 || floors[floors.Count - 1].entryTime <= 0)
+        {
+            return null;
+        }
+
+        var print = GameReader.Fingerprint(level);
+        var key = Main.Settings.FingeringKey;
+        if (_waitingPrint != print || _waitingKey != key)
+        {
+            _waitingPrint = print;
+            _waitingKey = key;
+            var snapshot = ReadLevel(level);
+            _waitingSnapshot = snapshot.Hits.Count > 0 ? snapshot : null;
+        }
+
+        return _waitingSnapshot;
+    }
+
+    private void Rebuild(LevelState level)
+    {
+        var snapshot = ReadLevel(level);
+        var hits = snapshot.Hits;
+        _hitCount = hits.Count;
         _builtFingering = Main.Settings.FingeringKey;
-        var notes = NotePlanner.Plan(hits, Main.Settings.ToFingering());
-        Frame.Load(notes, beats, end);
+        var end = hits.Count > 0 ? hits[hits.Count - 1].Time : 0;
+        var info = snapshot.Info;
+        var chosen = snapshot.Fingering;
+        var notes = chosen.Notes;
+        Frame.Load(notes, snapshot.Beats, end);
         Frame.Caption = Message.Empty;
+        _snapshot = hits.Count > 0 ? snapshot : null;
+
+        // 难度估算：只看这一关的砖块。按关卡设定的音高换算成实际播放的时间，不算练习时临时调的速度（TUF 按原速评级）
+        var data = GameReader.LevelData();
+        var pitch = data != null && data.pitch > 0 ? data.pitch / 100.0 : 1;
+        var difficulty = DifficultyEstimator.Estimate(hits, pitch);
+        Frame.DifficultyTier = hits.Count > 1 ? difficulty.Tier : 0;
+        Main.Mod.Logger.Log($"难度估算：{DifficultyTiers.Name(difficulty.Tier)}（{difficulty.Score:F1}，音高 {pitch:0.##}）");
+
+        // 对不上、差别太大：开局在面板上提醒一下（同一首歌、同一个结果只提醒一次，重开不再提醒）
+        var captionKey = $"{info.Artist}|{info.Song}|{chosen.UsedFile}|{chosen.Caption.Source}";
+        if (chosen.Caption.Source.Length > 0 && captionKey != _captionShownFor)
+        {
+            _caption = chosen.Caption;
+            _captionUntil = Time.unscaledTime + 8;
+            _captionShownFor = captionKey;
+        }
 
         var chords = new int[Lanes.Count + 1]; // 按几个键：双押、三押、四押各几个
         var laneUse = new int[Lanes.Count];
@@ -282,10 +501,14 @@ internal sealed class Overlay : MonoBehaviour
             DrawOverlay();
         }
 
-        // 设置窗口要处理鼠标、键盘等所有事件，不能只在 Repaint 时画
-        if (_window.Visible && !_failed)
+        // 设置窗口要处理鼠标、键盘等所有事件，不能只在 Repaint 时画；关掉后还要画完淡出动画
+        if (_window.NeedsDraw && !_failed)
         {
             _window.Draw(this);
+        }
+        else if (!_failed)
+        {
+            _window.Prewarm(this); // 还没打开过：趁游戏载入时在后台把每一页排一遍，打开、换页时不卡
         }
     }
 
@@ -293,15 +516,10 @@ internal sealed class Overlay : MonoBehaviour
     {
         // 游戏画面缩进去之后，让出来的区域没有摄像机在画，会残留旧画面：先铺纯黑，再画面板
         var freed = _viewport.Freed;
-        if (freed.x > 0)
-        {
-            GUI.DrawTexture(new Rect(0, 0, freed.x, Screen.height), Texture2D.whiteTexture, ScaleMode.StretchToFill, false, 0f, Color.black, 0f, 0f);
-        }
-
-        if (freed.y > 0)
-        {
-            GUI.DrawTexture(new Rect(0, 0, Screen.width, freed.y), Texture2D.whiteTexture, ScaleMode.StretchToFill, false, 0f, Color.black, 0f, 0f);
-        }
+        Black(new Rect(0, 0, (float)freed.Left, Screen.height));
+        Black(new Rect(Screen.width - (float)freed.Right, 0, (float)freed.Right, Screen.height));
+        Black(new Rect(0, 0, Screen.width, (float)freed.Top));
+        Black(new Rect(0, Screen.height - (float)freed.Bottom, Screen.width, (float)freed.Bottom));
 
         var settings = Main.Settings;
         var layout = new OverlayLayout(settings);
@@ -312,15 +530,19 @@ internal sealed class Overlay : MonoBehaviour
         {
             if (settings.ShowTaiko || settings.ShowBpm)
             {
-                // 顶部条从上方滑入 / 滑出
-                GUI.matrix = saved * Matrix4x4.Translate(new Vector3(0, -(1 - p) * (layout.TopHeight + 8), 0));
+                // 太鼓条从它那一边（上或下）滑入 / 滑出；关掉太鼓条、只剩 BPM 框时跟着四轨面板从左或右滑
+                var away = (1 - p) * ((settings.ShowTaiko ? layout.TopHeight : layout.PanelWidth) + 8);
+                GUI.matrix = saved * (settings.ShowTaiko
+                    ? Matrix4x4.Translate(new Vector3(0, layout.TaikoBottom ? away : -away, 0))
+                    : Matrix4x4.Translate(new Vector3(layout.LanesRight ? away : -away, 0, 0)));
                 TopBarView.Draw(Frame, layout, settings);
             }
 
             if (settings.ShowLanes)
             {
-                // 四轨面板从左侧滑入 / 滑出
-                GUI.matrix = saved * Matrix4x4.Translate(new Vector3(-(1 - p) * (layout.PanelWidth + 8), 0, 0));
+                // 四轨面板从它那一边（左或右）滑入 / 滑出
+                var away = (1 - p) * (layout.PanelWidth + 8);
+                GUI.matrix = saved * Matrix4x4.Translate(new Vector3(layout.LanesRight ? away : -away, 0, 0));
                 LaneView.Draw(Frame, layout, settings);
             }
         }
@@ -328,6 +550,14 @@ internal sealed class Overlay : MonoBehaviour
         {
             GUI.matrix = saved;
             Painter.Alpha = 1f;
+        }
+    }
+
+    private static void Black(Rect r)
+    {
+        if (r.width > 0 && r.height > 0)
+        {
+            GUI.DrawTexture(r, Texture2D.whiteTexture, ScaleMode.StretchToFill, false, 0f, Color.black, 0f, 0f);
         }
     }
 }

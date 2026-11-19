@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 using System.Runtime.CompilerServices;
 using RhythmHint.Core;
 
@@ -52,6 +53,11 @@ internal readonly struct LevelState
         ? Lang.M("{0}，编辑器{1}", State, EditorPlaying ? Lang.M("播放中") : Lang.M("编辑中"))
         : new Message(State.ToString());
 }
+
+/// <summary>本关的曲名等信息：认「同一首歌」、给编辑器显示和找歌曲文件用。</summary>
+/// <param name="SongFile">自定义关卡的歌曲文件完整路径；官方关卡为空。</param>
+/// <param name="Offset">音乐文件里的位置 = 砖块时间 + Offset（秒，scrConductor.addoffset）。</param>
+internal readonly record struct LevelInfo(string Song, string Artist, string Charter, bool Official, string SongFile, double Offset);
 
 /// <summary>读 ADOFAI 的游戏对象。接口来自反编译 Assembly-CSharp（游戏 Unity 6000.3），游戏大更新后可能要改。</summary>
 internal static class GameReader
@@ -176,6 +182,58 @@ internal static class GameReader
                 _ => "都对不上，多押改按时间判断",
             });
         return FloorHits.From(floors, crotchet);
+    }
+
+    /// <summary>
+    /// 曲名、曲师、谱师、歌曲文件。自定义关卡读 LevelData（编辑器里读编辑器自己的那份）；
+    /// 官方关卡没有 LevelData，用关卡编号（ADOBase.currentLevel，比如 1-X）当曲名。
+    /// </summary>
+    public static LevelInfo ReadInfo(LevelState level)
+    {
+        var data = LevelData();
+        var offset = level.Conductor.addoffset;
+        if (data == null)
+        {
+            return new LevelInfo(ADOBase.currentLevel ?? string.Empty, string.Empty, string.Empty, true, string.Empty, offset);
+        }
+
+        var levelPath = ADOBase.levelPath;
+        var songFile = !string.IsNullOrEmpty(levelPath) && !string.IsNullOrEmpty(data.songFilename)
+            ? Path.Combine(Path.GetDirectoryName(levelPath) ?? string.Empty, data.songFilename)
+            : string.Empty;
+        return new LevelInfo(data.song ?? string.Empty, data.artist ?? string.Empty, data.author ?? string.Empty, false, songFile, offset);
+    }
+
+    /// <summary>这一关的关卡数据（编辑器里读编辑器自己的那份）；游戏自带的老关卡没有为 null。</summary>
+    public static ADOFAI.LevelData? LevelData() => ADOBase.isLevelEditor && ADOBase.editor != null ? ADOBase.editor.levelData
+        : ADOBase.customLevel != null ? ADOBase.customLevel.levelData : null;
+
+    /// <summary>
+    /// 每块砖的初始位置（scrFloor.startPos）、时间和进出方向（entryangle / exitangle，换成数学角，见 PathAngles），
+    /// 编辑器画轨道形状用；要按的砖标出来。
+    /// </summary>
+    public static List<PathPoint> ReadPath(LevelState level, IReadOnlyList<TileHit> hits)
+    {
+        var hitTiles = new HashSet<int>();
+        foreach (var h in hits)
+        {
+            hitTiles.Add(h.TileIndex);
+        }
+
+        var path = new List<PathPoint>(level.Floors.Count);
+        foreach (var f in level.Floors)
+        {
+            if (f != null)
+            {
+                path.Add(new PathPoint(f.seqID, f.startPos.x, f.startPos.y, f.entryTime, hitTiles.Contains(f.seqID), f.entryangle, f.exitangle));
+            }
+        }
+
+        var result = PathAngles.Normalize(path);
+        Main.Mod.Logger.Log(result.Detected
+            ? $"编辑器：砖块方向按游戏的进出角度画（相邻砖对上 {result.Matched}/{result.Pairs}）"
+            : $"编辑器：砖块进出角度和位置对不上（{result.Matched}/{result.Pairs}），按相邻砖的位置画");
+        return result.Points;
     }
 
     /// <summary>变速点：砖块速度倍率（相对关卡起始 BPM）变化的地方各记一个点。</summary>

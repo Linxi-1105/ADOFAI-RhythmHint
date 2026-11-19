@@ -31,6 +31,15 @@ public sealed class Settings : UnityModManager.ModSettings
     public bool ShowTaiko = true;
     public bool ShowBpm = true;
 
+    /// <summary>BPM 框左半边画本关的估算难度（TUF 档位图标）；BPM 框关掉时也不画。</summary>
+    public bool ShowDifficulty = true;
+
+    /// <summary>四轨面板放在屏幕右边（默认左边）。</summary>
+    public bool LanesOnRight;
+
+    /// <summary>太鼓条（连同 BPM 框）放在屏幕下面（默认上面）。</summary>
+    public bool TaikoAtBottom;
+
     /// <summary>整体缩放（在按屏幕高度 1080 换算的基础上再乘）。</summary>
     public float UiScale = 1f;
 
@@ -63,6 +72,12 @@ public sealed class Settings : UnityModManager.ModSettings
     /// <summary>UMM 查到过的最新版本号（见 UpdateNotice）；空 = 没查到过。设置窗口里不显示，恢复默认值也不清。</summary>
     public string LatestVersion = string.Empty;
 
+    /// <summary>
+    /// 设置窗口的首次引导看过第几版（0 = 没看过：第一次打开窗口时自动播放；看完或跳过后记下）。
+    /// 引导内容大改时把 SettingsWindow.GuideRevision 加一，老玩家也会再看一次。恢复默认值不清。
+    /// </summary>
+    public int GuideVersion;
+
     /// <summary>多押转角上限（度）：相邻两块砖转角不超过它、又挨得近，就合成一个多押（见 FingeringOptions.ChordAngle）。</summary>
     /// <remarks>
     /// 1.1.0 之前按时间合并（PseudoChordWindowMs，毫秒；更早叫 ChordWindowMs），分不清多押和极快的连打，
@@ -72,8 +87,11 @@ public sealed class Settings : UnityModManager.ModSettings
 
     // 1.0.0 起排键改成「时间重置法」，旧设置文件里的 UltraWindowMs、PhraseBreakMs、PatternRoll1243 等字段读的时候会被忽略
 
-    /// <summary>主手重置间隔：比它慢右手食指连点，一半到它之间左右食指轮流，一半以内同手轮指。</summary>
-    public int ResetWindowMs = 165;
+    /// <summary>
+    /// 主手重置间隔：比它慢右手食指连点，一半到它之间左右食指轮流，一半以内同手轮指。
+    /// 默认 130 ms（2026-11-19 用户，原来 165）：75 ms 的快段两指交替，50 ms 的短串仍轮指，依据见 FingeringOptions.ResetWindow。
+    /// </summary>
+    public int ResetWindowMs = 130;
 
     /// <summary>紧挨着多押、隔得不超过它的单押放另一只手，让按多押的手专心按多押。</summary>
     public int ChordFocusMs = 450;
@@ -87,15 +105,26 @@ public sealed class Settings : UnityModManager.ModSettings
     /// <summary>轮指时外侧手指先落（K J D F）；关掉是食指先落（J K F D）。</summary>
     public bool OuterRoll = true;
 
-    /// <summary>排法。未配置时继续使用原时间重置法；旧实验开关不迁移成默认启用。</summary>
+    /// <summary>排法：标准（时间重置法，默认）或交替优先（试验性）。</summary>
     public FingeringStyle Style = FingeringStyle.TimeReset;
 
-    /// <summary>审核偏好短串的实验参数（毫秒、音符数），仅审核偏好排法使用。</summary>
+    /// <summary>
+    /// 默认值改过几次（见 <see cref="MigrateDefaults"/>）。0 = 老设置文件或新装；新装时本来就是新默认，迁移不改什么。
+    /// </summary>
+    public int DefaultsRevision;
+
+    /// <summary>交替优先排法的短串参数（毫秒、音符数），只有这个排法用。</summary>
     public int ReviewShortMinGapMs = (int)Math.Round(ReviewDefaults.ReviewShortMinGap * 1000);
     public float ReviewShortMaxGapMs = (float)(ReviewDefaults.ReviewShortMaxGap * 1000);
     public int ReviewShortMinNotes = ReviewDefaults.ReviewShortMinNotes;
     public int ReviewShortMaxNotes = ReviewDefaults.ReviewShortMaxNotes;
     public float ReviewTimingToleranceMs = (float)(ReviewDefaults.ReviewTimingTolerance * 1000);
+
+    /// <summary>进到有专属手序的歌时自动使用（Mods/RhythmHint/Fingerings 里的文件）。</summary>
+    public bool UseCustomFingering = true;
+
+    /// <summary>玩家在分不清时选的手序：一行「谱面指纹 Tab 文件名」，文件名为空表示这一关不用专属手序。</summary>
+    public string FingeringChoices = string.Empty;
 
     /// <summary>左撇子：以左手为主手，整套排法左右镜像（D↔K、F↔J）。</summary>
     public bool LeftHanded;
@@ -107,6 +136,26 @@ public sealed class Settings : UnityModManager.ModSettings
     public bool ChordsOnOtherHand;
 
     public override void Save(UnityModManager.ModEntry modEntry) => Save(this, modEntry);
+
+    /// <summary>
+    /// 默认值改过时，把老设置文件里的旧默认换成新默认，每次改动只换一次（之后玩家自己调的不动）。返回有没有改。
+    /// 2：主手重置间隔默认 165 → 130 ms，还是 165 的换成 130。（1 是 1.3.0 测试版里已删掉的拍点交替用过的，跳过）
+    /// </summary>
+    public bool MigrateDefaults()
+    {
+        if (DefaultsRevision >= 2)
+        {
+            return false;
+        }
+
+        if (ResetWindowMs == 165)
+        {
+            ResetWindowMs = 130;
+        }
+
+        DefaultsRevision = 2;
+        return true;
+    }
 
     public FingeringOptions ToFingering() => new()
     {
@@ -129,11 +178,11 @@ public sealed class Settings : UnityModManager.ModSettings
     /// <summary>排键相关设置的指纹，变了就要重排。</summary>
     public string FingeringKey =>
         $"{ChordAngleDeg}/{ResetWindowMs}/{ChordFocusMs}/{JackWindowMs}/{UseRoll}{OuterRoll}{LeftHanded}{ChordsOnOtherHand}"
-        + $"/{Style}/{ReviewShortMinGapMs}/{ReviewShortMaxGapMs}/{ReviewShortMinNotes}/{ReviewShortMaxNotes}/{ReviewTimingToleranceMs}";
+        + $"/{UseCustomFingering}/{Style}/{ReviewShortMinGapMs}/{ReviewShortMaxGapMs}/{ReviewShortMinNotes}/{ReviewShortMaxNotes}/{ReviewTimingToleranceMs}";
 
     // 设置窗口每一页的「恢复本页默认值」：默认值只写在上面的字段初始值里，这里从一个新实例抄回来
 
-    /// <summary>「预览与校准」页：演示、提示音、画面偏移。</summary>
+    /// <summary>「校准」页：演示、提示音、画面偏移。</summary>
     public void ResetPreview()
     {
         var d = new Settings();
@@ -143,14 +192,17 @@ public sealed class Settings : UnityModManager.ModSettings
         VisualOffsetMs = d.VisualOffsetMs;
     }
 
-    /// <summary>「显示」页：显示内容、自适应游戏画幅、尺寸与速度、按键框。</summary>
+    /// <summary>「外观」页：音符样式、位置、显示内容、自适应游戏画幅、按键框、尺寸与速度。</summary>
     public void ResetDisplay()
     {
         var d = new Settings();
         ShowLanes = d.ShowLanes;
         RoundNotes = d.RoundNotes;
         ShowTaiko = d.ShowTaiko;
+        LanesOnRight = d.LanesOnRight;
+        TaikoAtBottom = d.TaikoAtBottom;
         ShowBpm = d.ShowBpm;
+        ShowDifficulty = d.ShowDifficulty;
         ShrinkGameView = d.ShrinkGameView;
         UiScale = d.UiScale;
         LaneSpeed = d.LaneSpeed;
@@ -160,7 +212,7 @@ public sealed class Settings : UnityModManager.ModSettings
         LightKeysOnPress = d.LightKeysOnPress;
     }
 
-    /// <summary>「排键」页的参数。惯用手和多押用手不动：那是玩家自己的习惯，不是调出来的参数。</summary>
+    /// <summary>「排键」页的参数。惯用手、多押用手和专属手序开关不动：那是玩家自己的习惯，不是调出来的参数。</summary>
     public void ResetFingering()
     {
         var d = new Settings();
@@ -178,6 +230,6 @@ public sealed class Settings : UnityModManager.ModSettings
         ReviewTimingToleranceMs = d.ReviewTimingToleranceMs;
     }
 
-    /// <summary>「状态」页：打开设置窗口的快捷键。</summary>
+    /// <summary>「通用」页：打开设置窗口的快捷键（界面语言不动）。</summary>
     public void ResetHotkey() => SettingsHotkey = new Settings().SettingsHotkey;
 }

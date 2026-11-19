@@ -3,7 +3,9 @@ using UnityEngine;
 
 namespace RhythmHint;
 
-/// <summary>顶部横条：左边 BPM 和剩余时间，右边太鼓式节奏条（圆形音符从右往左滚到判定圈）。</summary>
+/// <summary>
+/// 太鼓条（横条，在屏幕上面或下面）：四轨面板那一侧是 BPM 和剩余时间，其余是太鼓式节奏条（圆形音符从右往左滚到判定圈）。
+/// </summary>
 internal static class TopBarView
 {
     private const float BaseSpeed = 650f;
@@ -11,44 +13,62 @@ internal static class TopBarView
 
     public static void Draw(OverlayFrame f, OverlayLayout l, Settings s)
     {
-        var bar = new Rect(0, 0, Screen.width, l.TopHeight);
-        Painter.Rect(bar, Painter.PanelColor.WithAlpha(Mathf.Clamp01(s.PanelOpacity)));
-        var trackLeft = 0f;
+        // 太鼓条关掉时不画横条，只画 BPM 框（在四轨面板那一列的顶端或底端）
+        if (s.ShowTaiko)
+        {
+            var bar = new Rect(0, l.BarY, Screen.width, l.TopHeight);
+            Painter.Rect(bar, Painter.PanelColor.WithAlpha(Mathf.Clamp01(s.PanelOpacity)));
+        }
+
+        // BPM 框在四轨面板那一侧（面板在右边时框也在右边），节奏条占剩下的宽度
+        var track = new Rect(0, l.BarY, Screen.width, l.TopHeight);
         if (s.ShowBpm)
         {
-            DrawBpmBox(f, l);
-            trackLeft = l.PanelWidth;
+            var box = new Rect(l.LanesRight ? Screen.width - l.PanelWidth : 0, l.BarY, l.PanelWidth, l.TopHeight);
+            DrawBpmBox(f, l, box);
+            if (s.ShowDifficulty)
+            {
+                DifficultyBadge.Draw(box, l.Scale, f.DifficultyTier);
+            }
+
+            track = new Rect(l.LanesRight ? 0 : l.PanelWidth, l.BarY, Screen.width - l.PanelWidth, l.TopHeight);
         }
 
         if (s.ShowTaiko)
         {
-            DrawTrack(f, l, s, new Rect(trackLeft, 0, Screen.width - trackLeft, l.TopHeight));
+            DrawTrack(f, l, s, track);
+
+            // 分隔线在横条靠屏幕中间的那一边
+            var lineY = l.TaikoBottom ? l.BarY : l.BarY + l.TopHeight - (2 * l.Scale);
+            Painter.Rect(new Rect(0, lineY, Screen.width, 2 * l.Scale), new Color(0.3f, 0.3f, 0.34f));
         }
 
-        Painter.Rect(new Rect(0, l.TopHeight - (2 * l.Scale), Screen.width, 2 * l.Scale), new Color(0.3f, 0.3f, 0.34f));
         if (f.Caption.Source.Length > 0)
         {
-            // 说明在太鼓条下面、和四轨面板同一高度：只占面板右边的空间，放不下就缩小字号。
+            // 说明紧挨着横条（在上面时画在它下面，在下面时画在它上面；太鼓条关掉时贴着屏幕边），只占四轨面板以外的宽度，放不下就缩小字号。
             // 复现（用户录屏）：英文、韩文、日文的说明比中文长得多，原来从屏幕左边画起，前半句压在四轨面板底下
-            var left = (s.ShowLanes ? l.PanelWidth : 0) + (16 * l.Scale);
-            Painter.FitText(new Rect(left, l.TopHeight + (6 * l.Scale), Screen.width - (16 * l.Scale) - left, 24 * l.Scale), Lang.T(f.Caption),
-                Mathf.RoundToInt(18 * l.Scale), new Color(1f, 0.85f, 0.4f), true, TextAnchor.MiddleRight);
+            var lanes = s.ShowLanes ? l.PanelWidth : 0;
+            var left = (l.LanesRight ? 0 : lanes) + (16 * l.Scale);
+            var right = Screen.width - (l.LanesRight ? lanes : 0) - (16 * l.Scale);
+            var strip = l.StripHeight;
+            var y = l.TaikoBottom ? Screen.height - strip - (30 * l.Scale) : strip + (6 * l.Scale);
+            Painter.FitText(new Rect(left, y, right - left, 24 * l.Scale), Lang.T(f.Caption),
+                Mathf.RoundToInt(18 * l.Scale), new Color(1f, 0.85f, 0.4f), true, l.LanesRight ? TextAnchor.MiddleLeft : TextAnchor.MiddleRight);
         }
     }
 
-    private static void DrawBpmBox(OverlayFrame f, OverlayLayout l)
+    private static void DrawBpmBox(OverlayFrame f, OverlayLayout l, Rect box)
     {
-        var box = new Rect(0, 0, l.PanelWidth, l.TopHeight);
         Painter.Rect(box, Painter.BpmBoxColor);
         var right = box.width - (18 * l.Scale);
-        Painter.Text(new Rect(0, 8 * l.Scale, right, 64 * l.Scale), Mathf.RoundToInt(f.Bpm).ToString(),
+        Painter.Text(new Rect(box.x, box.y + (8 * l.Scale), right, 64 * l.Scale), Mathf.RoundToInt(f.Bpm).ToString(),
             Mathf.RoundToInt(56 * l.Scale), Color.white, TextAnchor.MiddleRight, true);
-        Painter.Text(new Rect(0, 66 * l.Scale, right, 20 * l.Scale), "BPM",
+        Painter.Text(new Rect(box.x, box.y + (66 * l.Scale), right, 20 * l.Scale), "BPM",
             Mathf.RoundToInt(16 * l.Scale), new Color(0.85f, 0.9f, 1f), TextAnchor.MiddleRight, true);
 
         var left = System.Math.Max(0, f.EndTime - f.Now);
         var text = $"{(int)(left / 60)}:{(int)(left % 60):00}";
-        Painter.Text(new Rect(0, 88 * l.Scale, right, 30 * l.Scale), text,
+        Painter.Text(new Rect(box.x, box.y + (88 * l.Scale), right, 30 * l.Scale), text,
             Mathf.RoundToInt(24 * l.Scale), Color.white, TextAnchor.MiddleRight, true);
     }
 

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using RhythmHint.Core;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -60,10 +61,9 @@ internal sealed class GameCanvases
     /// <summary>是不是自己建的那台摄像机（游戏画面缩放时要跳过它）。</summary>
     public bool Owns(Camera cam) => _camera && cam == _camera;
 
-    /// <param name="left">左侧被面板占掉的宽度（像素）。</param>
-    /// <param name="top">顶部被占掉的高度（像素）。</param>
+    /// <param name="freed">四边被面板占掉的像素（四轨面板在左或右，太鼓条在上或下）。</param>
     /// <param name="gameCameras">游戏在用的摄像机：自己的摄像机要排在它们全部之后画。</param>
-    public void Apply(float left, float top, IReadOnlyList<Camera> gameCameras)
+    public void Apply(ScreenMargins freed, IReadOnlyList<Camera> gameCameras)
     {
         var screen = new Vector2Int(Screen.width, Screen.height);
         if (screen != _screen)
@@ -74,12 +74,12 @@ internal sealed class GameCanvases
         }
 
         float w = screen.x, h = screen.y;
-        float areaW = w - left, areaH = h - top;
+        float areaW = w - (float)(freed.Left + freed.Right), areaH = h - (float)(freed.Top + freed.Bottom);
         var s = Mathf.Min(areaW / w, areaH / h);
         var size = new Vector2(areaW / s, areaH / s);
 
         var cam = EnsureCamera();
-        cam.rect = new Rect(left / w, 0, areaW / w, areaH / h);
+        cam.rect = new Rect((float)freed.Left / w, (float)freed.Bottom / h, areaW / w, areaH / h);
         cam.orthographicSize = size.y / 2;
         cam.transform.position = Origin + new Vector3(size.x / 2, size.y / 2, -10);
 

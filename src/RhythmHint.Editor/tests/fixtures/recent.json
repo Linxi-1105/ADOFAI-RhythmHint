@@ -1,0 +1,27 @@
+{
+  "format": "rhythmhint-editor-recent",
+  "items": [
+    {
+      "id": "16-5cea7782a36abca967cf2ecf",
+      "song": "Sample Song",
+      "artist": "Sample Artist",
+      "charter": "Sample Charter",
+      "notes": 13,
+      "session": "16-5cea7782a36abca967cf2ecf.js",
+      "audio": "16-5cea7782a36abca967cf2ecf-20261118-090000-000.ogg",
+      "fileName": "Sample Artist - Sample Song.json",
+      "exported": 1795050000000
+    },
+    {
+      "id": "8-0123456789abcdef01234567",
+      "song": "<size=40>Second Song</size>",
+      "artist": "Other",
+      "charter": "",
+      "notes": 8,
+      "session": "8-0123456789abcdef01234567.js",
+      "audio": "",
+      "fileName": "Other - Second Song.json",
+      "exported": 1795053600000
+    }
+  ]
+}

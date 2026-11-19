@@ -1,310 +1,610 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
 using UnityEngine;
 
 namespace RhythmHint;
 
 /// <summary>
-/// 独立设置窗口的样式和常用控件（IMGUI）。深色底、橙色强调，和叠加层的配色一致。只能在 OnGUI 里用。
-/// 排版：每项一行，左边固定宽度的名字，右边控件；每行一样高、控件上下居中，行与行之间留空。
+/// 设置窗口的外观：配色、字体、文字、圆角矩形、阴影和图标（IMGUI，只能在 OnGUI 里用）。
+/// 配色和手序编辑器（src/RhythmHint.Editor/editor.css）同一套：深灰底、细边框、橙色强调。
+/// 所有颜色都乘上 <see cref="Alpha"/>（开关窗口、换页时整体淡入淡出）；GUI.DrawTexture 带颜色参数时不看 GUI.color，所以自己乘。
 /// </summary>
 internal static class WindowSkin
 {
-    /// <summary>名字一栏最窄（约 14 个汉字）和最宽的宽度。名字写短，解释放在下面一行。</summary>
-    private const float MinLabelWidth = 250;
-    private const float MaxLabelWidth = 380;
+    public static readonly Color Backdrop = Hex(0x141519);
+    public static readonly Color Surface = Hex(0x1b1d22);
+    public static readonly Color Surface2 = Hex(0x22252b);
+    public static readonly Color Surface3 = Hex(0x2a2e35);
+    public static readonly Color Well = Hex(0x15171b);
+    public static readonly Color Border = Hex(0x2b2e35);
+    public static readonly Color Border2 = Hex(0x383c45);
+    public static readonly Color Text = Hex(0xe9ebef);
+    public static readonly Color Text2 = Hex(0xb3b8c2);
+    public static readonly Color Text3 = Hex(0x7d838e);
+    public static readonly Color Accent = Hex(0xf57829);
+    public static readonly Color Accent2 = Hex(0xff9550);
+    public static readonly Color Blue = Hex(0x3d9ee0);
+    public static readonly Color Purple = Hex(0xb273f2);
+    public static readonly Color Warn = Hex(0xf2c14e);
+    public static readonly Color Danger = Hex(0xef5b5b);
+    public static readonly Color Ok = Hex(0x4cc38a);
 
-    private const float RowHeight = 36;
-    private const float RowGap = 6;
-    private const float ControlHeight = 30;
-    private const float SwitchWidth = 50;
-    private const float SwitchHeight = 26;
+    /// <summary>橙色底上的字（深棕，比纯黑柔和）。</summary>
+    public static readonly Color Ink = Hex(0x1a0d03);
 
-    private static readonly Color Background = new(0.09f, 0.09f, 0.11f, 0.97f);
-    private static readonly Color Surface = new(0.15f, 0.15f, 0.18f, 1f);
-    private static readonly Color SurfaceHover = new(0.22f, 0.22f, 0.26f, 1f);
-    private static readonly Color Text = new(0.9f, 0.9f, 0.93f);
-    private static readonly Color Muted = new(0.6f, 0.6f, 0.66f);
-    private static readonly Color SwitchOff = new(0.3f, 0.3f, 0.34f);
+    private static readonly GUIContent Content = new();
+    private static readonly Dictionary<string, Texture2D?> Icons = new();
 
-    private static readonly GUIContent Measured = new();
+    // 量过的字（宽高、换行高度）：IMGUI 一帧要排好几遍（布局、绘制、鼠标事件），同样的字不重复排版。换字体时清空
+    private static readonly Dictionary<(string, int, Face, bool), Vector2> Sizes = new();
+    private static readonly Dictionary<(string, int, int, Face, bool), float> Heights = new();
+    private static GUIStyle _text = null!;
+    private static GUIStyle _shadow = null!;
+    private static Texture2D _glow = null!;
     private static bool _ready;
-    private static float _widest;
 
-    /// <summary>
-    /// 名字一栏的宽度：英文、韩文的名字常比中文长，按上一帧量到的最长名字加宽（在最窄和最宽之间），控件一栏跟着右移。
-    /// 只在 Layout 事件里改（<see cref="BeginFrame"/>），同一帧的布局和绘制用同一个宽度。
-    /// </summary>
-    public static float LabelWidth { get; private set; } = MinLabelWidth;
+    private static Font? _body;
+    private static Font? _display;
+    private static Font? _mono;
+    private static string? _fontLanguage;
+    private static string[]? _installedFonts;
 
-    public static GUIStyle Window { get; private set; } = null!;
+    /// <summary>每种界面语言的三套字体（换回来时直接用，不重建、不留下没人用的字体）。</summary>
+    private static readonly Dictionary<string, (Font? Body, Font? Display, Font? Mono)> FontSets = new();
 
-    public static GUIStyle Title { get; private set; } = null!;
+    /// <summary>字体：正文、标题（Segoe UI Variable Display）、等宽（数值、键帽）。</summary>
+    public enum Face
+    {
+        Body,
+        Display,
+        Mono,
+    }
 
-    public static GUIStyle Tab { get; private set; } = null!;
+    // 窗口里的字号（1080p 像素）只有这几档，别的字号就近归到这几档（一样近时取大的）：
+    // 系统字体第一次排某个字号的字很慢，档位少，开窗口前要预先排好的字形就少（见 Preload）
+    private static readonly int[] BodySizes = { 12, 13, 14, 15 };
+    private static readonly int[] BodyBoldSizes = { 11, 13, 14, 15 };
+    private static readonly int[] DisplaySizes = { 18, 25, 52 }; // 标题字都是粗体
+    private static readonly int[] MonoSizes = { 12, 13 };
+    private static readonly int[] MonoBoldSizes = { 12, 13, 15, 18 };
 
-    public static GUIStyle TabActive { get; private set; } = null!;
+    private const string IconPrefix = "RhythmHint.SettingsIcons.";
 
-    public static GUIStyle Section { get; private set; } = null!;
+    /// <summary>预热时除了界面文字以外还要排好的字：数字、英文、键名和窗口里用到的符号。</summary>
+    private static readonly string Extra = BuildAscii() + "×—…→←↑↓·−%°：，。、；（）「」！？";
 
-    public static GUIStyle Label { get; private set; } = null!;
+    /// <summary>整体透明度，乘到每次绘制的颜色上。</summary>
+    public static float Alpha { get; set; } = 1f;
 
-    public static GUIStyle Note { get; private set; } = null!;
+    /// <summary>按 1080p 的设计尺寸缩放到当前屏幕。</summary>
+    public static float ScreenScale => Math.Max(0.5f, Screen.height / 1080f);
 
-    public static GUIStyle Value { get; private set; } = null!;
+    public static bool Repaint => Event.current.type == EventType.Repaint;
 
-    public static GUIStyle Button { get; private set; } = null!;
-
-    /// <summary>选中的选项（橙底黑字），和普通按钮一样大。</summary>
-    public static GUIStyle Selected { get; private set; } = null!;
-
-    /// <summary>屏幕键盘上已经分给别的按键框的键：普通底色、橙色字。</summary>
-    public static GUIStyle KeyInUse { get; private set; } = null!;
-
-    /// <summary>第一次用时创建样式（要在 OnGUI 里，GUI.skin 才可用）。</summary>
+    /// <summary>第一次用时准备样式和贴图（要在 OnGUI 里，GUI.skin 才可用）；界面语言变了换一套中日韩字体的先后。</summary>
     public static void Ensure()
     {
-        if (_ready)
+        if (!_ready)
         {
-            return;
-        }
-
-        _ready = true;
-        Window = new GUIStyle(GUI.skin.box) { padding = new RectOffset(24, 24, 18, 16) };
-        Window.normal.background = Solid(Background);
-        Window.onNormal.background = Window.normal.background;
-
-        Title = TextStyle(24, FontStyle.Bold, Text);
-        Section = TextStyle(19, FontStyle.Bold, Painter.Orange);
-        Section.margin = new RectOffset(0, 0, 22, 8);
-        Label = TextStyle(17, FontStyle.Normal, Text);
-        Label.alignment = TextAnchor.MiddleLeft;
-        Label.margin = new RectOffset(0, 8, 0, 0);
-        Note = TextStyle(15, FontStyle.Normal, Muted);
-        Note.wordWrap = true;
-        Note.margin = new RectOffset(0, 0, 0, 8);
-        Value = TextStyle(17, FontStyle.Bold, Text);
-        Value.alignment = TextAnchor.MiddleRight;
-        Value.margin = new RectOffset(8, 0, 0, 0);
-
-        Tab = Boxy(GUI.skin.button, 18, Surface, SurfaceHover, Muted);
-        TabActive = Boxy(GUI.skin.button, 18, Painter.Orange, Painter.Orange, Color.black);
-        TabActive.fontStyle = FontStyle.Bold;
-
-        // 行里的按钮固定高度、上下留出相同的边，正好在一行的正中
-        Button = RowControl(Boxy(GUI.skin.button, 16, Surface, SurfaceHover, Text));
-        Selected = RowControl(Boxy(GUI.skin.button, 16, Painter.Orange, Painter.Orange, Color.black));
-        Selected.fontStyle = FontStyle.Bold;
-        KeyInUse = RowControl(Boxy(GUI.skin.button, 16, Surface, SurfaceHover, Painter.Orange));
-    }
-
-    /// <summary>窗口每帧开头调用：用上一轮量到的最长名字定这一帧的名字栏宽度（换了界面语言后下一帧就对上）。</summary>
-    public static void BeginFrame()
-    {
-        if (Event.current.type != EventType.Layout)
-        {
-            return;
-        }
-
-        LabelWidth = Mathf.Clamp(Mathf.Ceil(_widest) + 12, MinLabelWidth, MaxLabelWidth);
-        _widest = 0;
-    }
-
-    public static void SectionTitle(string text) => GUILayout.Label(text, Section);
-
-    public static void Hint(string text) => GUILayout.Label(text, Note);
-
-    /// <summary>开始一行：左边是名字。和 <see cref="EndRow"/> 配对。</summary>
-    public static void BeginRow(string label)
-    {
-        GUILayout.BeginHorizontal();
-        NameCell(label);
-    }
-
-    /// <summary>一行左边的名字，顺便量它有多宽。</summary>
-    private static void NameCell(string label)
-    {
-        Measure(label);
-        GUILayout.Label(label, Label, GUILayout.Width(LabelWidth), GUILayout.Height(RowHeight));
-    }
-
-    /// <summary>记下这一帧最长的名字有多宽（下一帧的名字栏宽度按它定）。</summary>
-    private static void Measure(string label)
-    {
-        Measured.text = label;
-        _widest = Mathf.Max(_widest, Label.CalcSize(Measured).x);
-    }
-
-    /// <summary>结束一行，控件靠左，下面留一点空。</summary>
-    public static void EndRow()
-    {
-        GUILayout.FlexibleSpace();
-        GUILayout.EndHorizontal();
-        GUILayout.Space(RowGap);
-    }
-
-    /// <summary>一行：名字和开关（橙色、圆点在右为开）。点名字也能切换。</summary>
-    public static bool Switch(string label, bool value)
-    {
-        GUILayout.BeginHorizontal();
-        Measure(label);
-        var clicked = GUILayout.Button(label, Label, GUILayout.Width(LabelWidth), GUILayout.Height(RowHeight));
-        var cell = GUILayoutUtility.GetRect(SwitchWidth, RowHeight, GUILayout.Width(SwitchWidth), GUILayout.Height(RowHeight));
-        var track = new Rect(cell.x, cell.y + ((RowHeight - SwitchHeight) / 2), SwitchWidth, SwitchHeight);
-        clicked |= GUI.Button(track, GUIContent.none, GUIStyle.none);
-        if (Event.current.type == EventType.Repaint)
-        {
-            Fill(track, value ? Painter.Orange : SwitchOff, SwitchHeight / 2);
-            var size = SwitchHeight - 6;
-            var knob = new Rect(value ? track.xMax - size - 3 : track.x + 3, track.y + 3, size, size);
-            Fill(knob, Color.white, size / 2);
-        }
-
-        EndRow();
-        return clicked ? !value : value;
-    }
-
-    /// <summary>一行：名字、滑块、数值，可选的微调按钮（每次加减 step）。</summary>
-    public static float Slider(string label, float value, float min, float max, string format, float step = 0)
-    {
-        GUILayout.BeginHorizontal();
-        NameCell(label);
-        if (step > 0 && GUILayout.Button("−", Button, GUILayout.Width(34)))
-        {
-            value -= step;
-        }
-
-        // 滑块本身很矮，放进一行高的竖直组里上下居中
-        GUILayout.BeginVertical(GUILayout.Height(RowHeight), GUILayout.ExpandWidth(true), GUILayout.MinWidth(140));
-        GUILayout.FlexibleSpace();
-        value = GUILayout.HorizontalSlider(value, min, max);
-        GUILayout.FlexibleSpace();
-        GUILayout.EndVertical();
-        if (step > 0 && GUILayout.Button("+", Button, GUILayout.Width(34)))
-        {
-            value += step;
-        }
-
-        GUILayout.Label(value.ToString(format), Value, GUILayout.Width(64), GUILayout.Height(RowHeight));
-        GUILayout.EndHorizontal();
-        GUILayout.Space(RowGap);
-        return Mathf.Clamp(value, min, max);
-    }
-
-    public static int Slider(string label, int value, int min, int max, int step = 0) =>
-        Mathf.RoundToInt(Slider(label, (float)value, min, max, "0", step));
-
-    /// <summary>一排按钮（和控件一栏对齐），返回被点的那个的下标，没点为 -1。</summary>
-    public static int Buttons(params string[] labels)
-    {
-        var clicked = -1;
-        GUILayout.BeginHorizontal();
-        GUILayout.Space(LabelWidth);
-        for (var i = 0; i < labels.Length; i++)
-        {
-            if (GUILayout.Button(labels[i], Button, GUILayout.MinWidth(56)))
+            _ready = true;
+            _text = new GUIStyle(GUI.skin.label)
             {
-                clicked = i;
+                padding = new RectOffset(0, 0, 0, 0),
+                margin = new RectOffset(0, 0, 0, 0),
+                richText = false,
+                clipping = TextClipping.Overflow,
+            };
+            _shadow = new GUIStyle { border = new RectOffset(ShadowEdge, ShadowEdge, ShadowEdge, ShadowEdge) };
+            _shadow.normal.background = ShadowTexture();
+            _glow = GlowTexture();
+        }
+
+        if (_fontLanguage != Lang.Current)
+        {
+            UseLanguage(Lang.Current); // 换了界面语言：换字体并预热（会卡一下，换语言很少见）
+            WarmGlyphs(GUI.skin.font);
+        }
+
+        // 窗口里的字有限（随设置变的说明、数值），缓存一般几百条；万一涨太多就清掉重来
+        if (Sizes.Count > 4000 || Heights.Count > 4000)
+        {
+            Sizes.Clear();
+            Heights.Clear();
+        }
+    }
+
+    // ---------- 预先准备 ----------
+
+    /// <summary>
+    /// 提前准备（游戏启动后第一帧调用）：读好全部图标、建好当前语言的字体，把界面上会出现的字按用到的几档字号先排进字体贴图。
+    /// 系统字体第一次排这些字很慢（2026-11-19 日志：第一次打开概览页 354 毫秒，第一次换到外观、排键页 130–140 毫秒，换语言 0.3–0.4 秒；
+    /// 用户：每次点选项都卡一下），趁游戏还在载入时做掉。
+    /// </summary>
+    public static void Preload()
+    {
+        Font.textureRebuilt += LogRebuild;
+        var started = Stopwatch.StartNew();
+        var icons = PreloadIcons();
+        var iconMs = started.ElapsedMilliseconds;
+        UseLanguage(Lang.Current);
+        var glyphs = WarmGlyphs(null);
+        Main.Mod.Logger.Log($"设置窗口：预先读好 {icons} 个图标（{iconMs} 毫秒），排好 {glyphs} 个字的字形，共用了 {started.ElapsedMilliseconds} 毫秒");
+    }
+
+    /// <summary>打开窗口时调用：字形万一被别的字挤出字体贴图（比如曲名里的新字让贴图重建），一次补回来，不用等到换页时一页一页地卡。</summary>
+    public static void Rewarm()
+    {
+        if (_fontLanguage == Lang.Current)
+        {
+            WarmGlyphs(null);
+        }
+    }
+
+    private static int PreloadIcons()
+    {
+        var count = 0;
+        foreach (var resource in typeof(WindowSkin).Assembly.GetManifestResourceNames())
+        {
+            if (!resource.StartsWith(IconPrefix, StringComparison.Ordinal) || !resource.EndsWith(".png", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var name = resource.Substring(IconPrefix.Length, resource.Length - IconPrefix.Length - 4);
+            if (!Icons.ContainsKey(name))
+            {
+                Icons[name] = EmbeddedImage.Load(resource);
+                count++;
             }
         }
 
-        GUILayout.EndHorizontal();
-        GUILayout.Space(RowGap);
-        return clicked;
+        return count;
     }
 
-    /// <summary>一行：名字、一段文字（可为空）和几个按钮，例如群号和「复制」；返回被点的按钮下标，没点为 -1。</summary>
-    public static int Info(string label, string text, params string[] buttons)
+    /// <summary>换成某种界面语言的字体（每种语言只建一次）；量过的字作废。</summary>
+    private static void UseLanguage(string language)
     {
-        BeginRow(label);
-        if (text.Length > 0)
+        _fontLanguage = language;
+        if (FontSets.TryGetValue(language, out var set))
         {
-            GUILayout.Label(text, Label, GUILayout.Height(RowHeight));
+            (_body, _display, _mono) = set;
+        }
+        else
+        {
+            LoadFonts(language);
+            FontSets[language] = (_body, _display, _mono);
         }
 
-        var clicked = -1;
-        for (var i = 0; i < buttons.Length; i++)
-        {
-            if (GUILayout.Button(buttons[i], Button, GUILayout.MinWidth(56)))
-            {
-                clicked = i;
-            }
-        }
-
-        EndRow();
-        return clicked;
+        Sizes.Clear();
+        Heights.Clear();
     }
 
     /// <summary>
-    /// 一排选项按钮，当前值高亮；返回新的值。当前值不在选项里（例如手改了设置文件）时也显示出来，保持不变。
-    /// 选项多时每 perRow 个换一行，下一行和控件一栏对齐。
+    /// 把当前语言会显示的字按窗口用到的各档字号、粗细排进字体贴图。已经排好的字很快就跳过。
+    /// fallback 是没有系统字体时用的默认字体（只能在 OnGUI 里取到，别处传 null 就跳过它）。返回排了多少个不同的字。
     /// </summary>
-    public static string Choice(string label, string value, string[] options, int perRow = int.MaxValue)
+    private static int WarmGlyphs(Font? fallback)
     {
-        BeginRow(label);
-        if (Array.IndexOf(options, value) < 0)
+        var all = new HashSet<char>(Lang.AllText() + Extra);
+        all.RemoveWhere(char.IsControl);
+        var text = new string(new List<char>(all).ToArray());
+        var body = _body ?? fallback;
+        var display = _display ?? body;
+        var mono = _mono ?? fallback;
+        Request(body, text, BodySizes, FontStyle.Normal);
+        Request(body, text, BodyBoldSizes, FontStyle.Bold);
+        Request(display, text, new[] { DisplaySizes[0], DisplaySizes[1] }, FontStyle.Bold);
+        Request(display, Extra, new[] { DisplaySizes[2] }, FontStyle.Bold); // 画面偏移的大数字
+        Request(mono, text, new[] { 13 }, FontStyle.Normal); // 运行状态是等宽字，里面有中文
+        Request(mono, Extra, MonoSizes, FontStyle.Normal);
+        Request(mono, text, new[] { 15 }, FontStyle.Bold); // 自定义快捷键的键帽写着「自定义：F8」
+        Request(mono, Extra, MonoBoldSizes, FontStyle.Bold);
+        return text.Length;
+    }
+
+    /// <summary>
+    /// 按原字号和放大后的字号各排一遍：窗口按屏幕高度放大（GUI.matrix），字可能按放大后的字号排
+    /// （2026-11-19 日志：只按原字号预热，第一次进每页仍然 115–343 毫秒）。
+    /// </summary>
+    private static void Request(Font? font, string text, int[] sizes, FontStyle style)
+    {
+        if (font == null || !font.dynamic)
         {
-            GUILayout.Button(value, Selected, GUILayout.MinWidth(56));
+            return;
         }
 
-        for (var i = 0; i < options.Length; i++)
+        var scale = ScreenScale;
+        foreach (var size in sizes)
         {
-            if (i > 0 && i % perRow == 0)
+            font.RequestCharactersInTexture(text, size, style);
+            var scaled = Mathf.RoundToInt(size * scale);
+            if (scaled != size)
             {
-                EndRow();
-                GUILayout.BeginHorizontal();
-                GUILayout.Space(LabelWidth);
+                font.RequestCharactersInTexture(text, scaled, style);
             }
+        }
+    }
 
-            if (GUILayout.Button(options[i], options[i] == value ? Selected : Button, GUILayout.MinWidth(56)))
+    private static int _rebuilds;
+
+    /// <summary>字体贴图每重建一次记一条日志（前 30 次）：新字放不下时 Unity 会把整张贴图重排一遍，打开窗口、换页卡顿多半是它。</summary>
+    private static void LogRebuild(Font font)
+    {
+        if (font == _body || font == _display || font == _mono || font == null)
+        {
+            _rebuilds++;
+            if (_rebuilds <= 30)
             {
-                value = options[i];
+                Main.Mod.Logger.Log($"设置窗口：字体贴图重建第 {_rebuilds} 次（{font?.name ?? "默认"}）");
+            }
+        }
+    }
+
+    private static string BuildAscii()
+    {
+        var chars = new char[95];
+        for (var i = 0; i < chars.Length; i++)
+        {
+            chars[i] = (char)(32 + i);
+        }
+
+        return new string(chars);
+    }
+
+    /// <summary>把字号归到最近的一档（一样近时取大的）。</summary>
+    private static int Snap(Face face, bool bold, int size)
+    {
+        var sizes = face switch
+        {
+            Face.Display => DisplaySizes,
+            Face.Mono => bold ? MonoBoldSizes : MonoSizes,
+            _ => bold ? BodyBoldSizes : BodySizes,
+        };
+        var best = sizes[0];
+        foreach (var s in sizes)
+        {
+            if (Mathf.Abs(s - size) <= Mathf.Abs(best - size))
+            {
+                best = s;
             }
         }
 
-        EndRow();
-        return value;
+        return best;
     }
 
-    private static GUIStyle TextStyle(int size, FontStyle style, Color color)
+    // ---------- 字体 ----------
+
+    /// <summary>
+    /// 用系统字体：标题 Segoe UI Variable Display、正文 Segoe UI，中日韩文字按界面语言排先后
+    /// （日文用 Yu Gothic UI、韩文用 Malgun Gothic、繁中用 JhengHei，免得汉字是别国字形）。
+    /// 只在 Windows 上用；一个都找不到或者建不出来时退回 IMGUI 默认字体（五种语言都能显示，用户确认过）。
+    /// </summary>
+    private static void LoadFonts(string language)
     {
-        var s = new GUIStyle(GUI.skin.label) { fontSize = size, fontStyle = style, wordWrap = false };
-        s.normal.textColor = color;
-        return s;
+        _body = _display = _mono = null;
+        if (Application.platform != RuntimePlatform.WindowsPlayer && Application.platform != RuntimePlatform.WindowsEditor)
+        {
+            return;
+        }
+
+        var cjk = language switch
+        {
+            "ja" => new[] { "Yu Gothic UI", "Meiryo UI", "Microsoft YaHei UI", "Malgun Gothic" },
+            "ko" => new[] { "Malgun Gothic", "Microsoft YaHei UI", "Yu Gothic UI" },
+            "zh-Hant" => new[] { "Microsoft JhengHei UI", "Microsoft YaHei UI", "Malgun Gothic", "Yu Gothic UI" },
+            _ => new[] { "Microsoft YaHei UI", "Microsoft YaHei", "Malgun Gothic", "Yu Gothic UI" },
+        };
+        var started = Stopwatch.StartNew();
+        string[] installed;
+        try
+        {
+            installed = _installedFonts ??= Font.GetOSInstalledFontNames();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException)
+        {
+            Main.Mod.Logger.Warning($"读不到系统字体列表，设置窗口使用默认字体：{ex.Message}");
+            return;
+        }
+
+        _body = Create(installed, new[] { "Segoe UI Variable Text", "Segoe UI" }.Concat(cjk));
+        _display = Create(installed, new[] { "Segoe UI Variable Display", "Segoe UI Semibold", "Segoe UI" }.Concat(cjk));
+        _mono = Create(installed, new[] { "Cascadia Mono", "Consolas" }.Concat(cjk));
+        Main.Mod.Logger.Log($"设置窗口：载入系统字体用了 {started.ElapsedMilliseconds} 毫秒（系统里有 {installed.Length} 种字体；"
+            + $"正文 {_body?.name ?? "默认"}，标题 {_display?.name ?? "默认"}，等宽 {_mono?.name ?? "默认"}）");
     }
 
-    private static GUIStyle Boxy(GUIStyle from, int size, Color normal, Color hover, Color text)
+    private static Font? Create(string[] installed, IEnumerable<string> wanted)
     {
-        var s = new GUIStyle(from) { fontSize = size, padding = new RectOffset(12, 12, 7, 7) };
-        s.normal.background = Solid(normal);
-        s.hover.background = Solid(hover);
-        s.active.background = Solid(hover);
-        s.normal.textColor = text;
-        s.hover.textColor = text == Muted ? Text : text;
-        s.active.textColor = text;
-        return s;
+        var names = wanted.Where(n => Array.IndexOf(installed, n) >= 0).ToArray();
+        if (names.Length == 0)
+        {
+            return null;
+        }
+
+        var font = Font.CreateDynamicFontFromOSFont(names, 16);
+        if (font == null)
+        {
+            Main.Mod.Logger.Warning($"无法创建字体 {string.Join(", ", names)}，设置窗口使用默认字体");
+        }
+
+        return font;
     }
 
-    /// <summary>行里的按钮：固定高度，上下边距让它落在一行正中。</summary>
-    private static GUIStyle RowControl(GUIStyle s)
+    // ---------- 文字 ----------
+
+    private static GUIStyle Style(Face face, int size, bool bold, TextAnchor anchor, bool wrap)
     {
-        var edge = Mathf.RoundToInt((RowHeight - ControlHeight) / 2);
-        s.fixedHeight = ControlHeight;
-        s.padding = new RectOffset(12, 12, 4, 4);
-        s.margin = new RectOffset(3, 3, edge, edge);
-        return s;
+        _text.font = face switch
+        {
+            Face.Display => _display ?? _body,
+            Face.Mono => _mono,
+            _ => _body,
+        };
+        _text.fontSize = Snap(face, bold, size);
+        _text.fontStyle = bold || face == Face.Display ? FontStyle.Bold : FontStyle.Normal;
+        _text.alignment = anchor;
+        _text.wordWrap = wrap;
+        return _text;
     }
 
-    private static void Fill(Rect r, Color c, float radius) =>
-        GUI.DrawTexture(r, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0f, c, 0f, radius);
-
-    private static Texture2D Solid(Color c)
+    /// <summary>写一段字（只在绘制事件里画）。wrap 时在 r 的宽度内换行。</summary>
+    public static void Label(Rect r, string text, int size, Color color, Face face = Face.Body, bool bold = false,
+        TextAnchor anchor = TextAnchor.MiddleLeft, bool wrap = false)
     {
-        var t = new Texture2D(1, 1, TextureFormat.RGBA32, false) { hideFlags = HideFlags.HideAndDontSave };
-        t.SetPixel(0, 0, c);
+        if (!Repaint || text.Length == 0)
+        {
+            return;
+        }
+
+        var style = Style(face, size, bold, anchor, wrap);
+        style.normal.textColor = Fade(color);
+        Content.text = text;
+        style.Draw(r, Content, false, false, false, false);
+    }
+
+    /// <summary>一行字的宽高。</summary>
+    public static Vector2 Measure(string text, int size, Face face = Face.Body, bool bold = false)
+    {
+        var key = (text, size, face, bold);
+        if (!Sizes.TryGetValue(key, out var result))
+        {
+            Content.text = text;
+            result = Style(face, size, bold, TextAnchor.MiddleLeft, false).CalcSize(Content);
+            Sizes[key] = result;
+        }
+
+        return result;
+    }
+
+    /// <summary>在 width 宽度内换行后的高度。</summary>
+    public static float WrappedHeight(string text, int size, float width, Face face = Face.Body, bool bold = false)
+    {
+        if (text.Length == 0)
+        {
+            return 0;
+        }
+
+        var key = (text, size, Mathf.RoundToInt(width), face, bold);
+        if (!Heights.TryGetValue(key, out var result))
+        {
+            Content.text = text;
+            result = Style(face, size, bold, TextAnchor.UpperLeft, true).CalcHeight(Content, key.Item3);
+            Heights[key] = result;
+        }
+
+        return result;
+    }
+
+    /// <summary>放不下时截短并加省略号（导航的说明、文件名这类一行的字）。</summary>
+    public static string Ellipsize(string text, int size, float width, Face face = Face.Body, bool bold = false)
+    {
+        if (Measure(text, size, face, bold).x <= width)
+        {
+            return text;
+        }
+
+        var lo = 0;
+        var hi = text.Length;
+        while (lo < hi)
+        {
+            var mid = (lo + hi + 1) / 2;
+            if (Measure(text.Substring(0, mid) + "…", size, face, bold).x <= width)
+            {
+                lo = mid;
+            }
+            else
+            {
+                hi = mid - 1;
+            }
+        }
+
+        return text.Substring(0, lo).TrimEnd() + "…";
+    }
+
+    // ---------- 形状 ----------
+
+    public static void Fill(Rect r, Color c, float radius = 0)
+    {
+        if (Repaint && r.width > 0 && r.height > 0)
+        {
+            GUI.DrawTexture(r, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0f, Fade(c), 0f, Radius(r, radius));
+        }
+    }
+
+    /// <summary>四个角各自的圆角：左上、右上、右下、左下。</summary>
+    public static void Fill(Rect r, Color c, Vector4 radii)
+    {
+        if (Repaint && r.width > 0 && r.height > 0)
+        {
+            var most = Mathf.Min(r.width, r.height) / 2;
+            radii = new Vector4(Mathf.Min(radii.x, most), Mathf.Min(radii.y, most), Mathf.Min(radii.z, most), Mathf.Min(radii.w, most));
+            GUI.DrawTexture(r, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0f, Fade(c), Vector4.zero, radii);
+        }
+    }
+
+    /// <summary>描边（细边框、选中框）。</summary>
+    public static void Stroke(Rect r, Color c, float width, float radius = 0)
+    {
+        if (Repaint && r.width > 0 && r.height > 0)
+        {
+            GUI.DrawTexture(r, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0f, Fade(c), width, Radius(r, radius));
+        }
+    }
+
+    public static void Circle(Vector2 center, float radius, Color c) =>
+        Fill(new Rect(center.x - radius, center.y - radius, radius * 2, radius * 2), c, radius);
+
+    /// <summary>柔光：中心最亮、往外淡出（主按钮的光晕、横幅右上角的橙光）。</summary>
+    public static void Glow(Rect r, Color c)
+    {
+        if (Repaint)
+        {
+            GUI.DrawTexture(r, _glow, ScaleMode.StretchToFill, true, 0f, Fade(c), 0f, 0f);
+        }
+    }
+
+    /// <summary>软阴影：r 是投影的物体，往外扩 spread 像素淡出（淡出的宽度固定是 <see cref="ShadowEdge"/>，spread 小于它时从物体里面开始淡）。</summary>
+    public static void Shadow(Rect r, float spread, float alpha, float offsetY = 0)
+    {
+        if (!Repaint)
+        {
+            return;
+        }
+
+        var saved = GUI.color;
+        GUI.color = new Color(0, 0, 0, alpha * Alpha);
+        var area = new Rect(r.x - spread, r.y - spread + offsetY, r.width + (spread * 2), r.height + (spread * 2));
+        _shadow.Draw(area, false, false, false, false);
+        GUI.color = saved;
+    }
+
+    /// <summary>四根彩色竖条的标志（和编辑器、桌面图标一样）。bounce 0–1：竖条按节奏轻轻起伏。</summary>
+    public static void Logo(Rect r, float bounce = 0)
+    {
+        var heights = new[] { 0.5f, 0.82f, 1f, 0.64f };
+        var colors = new[] { Accent, Blue, Accent, Purple };
+        var bar = r.width / 5.2f;
+        var gap = (r.width - (bar * 4)) / 3;
+        var now = Time.unscaledTime;
+        for (var i = 0; i < 4; i++)
+        {
+            var wave = bounce > 0 ? 1 - (bounce * 0.28f * (0.5f + (0.5f * Mathf.Sin((now * 3.9f) - (i * 1.6f))))) : 1;
+            var h = r.height * heights[i] * wave;
+            Fill(new Rect(r.x + (i * (bar + gap)), r.yMax - h, bar, h), colors[i], bar * 0.4f);
+        }
+    }
+
+    // ---------- 图标 ----------
+
+    /// <summary>画一个线条图标（白色 PNG 染成 c），名字见 SettingsIcons/icons.svg。</summary>
+    public static void Icon(Rect r, string name, Color c)
+    {
+        if (!Repaint)
+        {
+            return;
+        }
+
+        if (!Icons.TryGetValue(name, out var texture))
+        {
+            texture = EmbeddedImage.Load(IconPrefix + name + ".png");
+            if (texture == null)
+            {
+                Main.Mod.Logger.Warning($"设置窗口图标缺失：{name}");
+            }
+
+            Icons[name] = texture;
+        }
+
+        if (texture != null)
+        {
+            GUI.DrawTexture(r, texture, ScaleMode.ScaleToFit, true, 0f, Fade(c), 0f, 0f);
+        }
+    }
+
+    /// <summary>转一个角度画图标（折叠箭头展开时翻过来）。</summary>
+    public static void Icon(Vector2 center, float size, string name, Color c, float degrees)
+    {
+        if (!Repaint)
+        {
+            return;
+        }
+
+        var saved = GUI.matrix;
+        GUIUtility.RotateAroundPivot(degrees, center);
+        Icon(center, size, name, c);
+        GUI.matrix = saved;
+    }
+
+    /// <summary>以 center 为中心画 size 大小的图标。</summary>
+    public static void Icon(Vector2 center, float size, string name, Color c) =>
+        Icon(new Rect(center.x - (size / 2), center.y - (size / 2), size, size), name, c);
+
+    // ---------- 颜色 ----------
+
+    public static Color Fade(Color c) => new(c.r, c.g, c.b, c.a * Alpha);
+
+    public static Color With(Color c, float alpha) => new(c.r, c.g, c.b, alpha);
+
+    public static Color Mix(Color a, Color b, float t) => Color.Lerp(a, b, Mathf.Clamp01(t));
+
+    private static Color Hex(int rgb) => new(((rgb >> 16) & 0xff) / 255f, ((rgb >> 8) & 0xff) / 255f, (rgb & 0xff) / 255f, 1f);
+
+    private static float Radius(Rect r, float radius) => Mathf.Min(radius, Mathf.Min(r.width, r.height) / 2);
+
+    // ---------- 贴图 ----------
+
+    /// <summary>阴影贴图九宫格的边宽（像素）：也是阴影淡出的宽度。</summary>
+    private const int ShadowEdge = 30;
+
+    /// <summary>64×64 的阴影：中间 4 像素实，往四边按平滑曲线淡出；九宫格拉伸到任意大小，四角是圆的。</summary>
+    private static Texture2D ShadowTexture()
+    {
+        const int size = 64;
+        const float half = 32;
+        const float core = 2;
+        var t = new Texture2D(size, size, TextureFormat.RGBA32, false)
+        {
+            wrapMode = TextureWrapMode.Clamp,
+            filterMode = FilterMode.Bilinear,
+            hideFlags = HideFlags.HideAndDontSave,
+        };
+        for (var y = 0; y < size; y++)
+        {
+            for (var x = 0; x < size; x++)
+            {
+                var d = new Vector2(Mathf.Max(0, Mathf.Abs(x + 0.5f - half) - core), Mathf.Max(0, Mathf.Abs(y + 0.5f - half) - core)).magnitude;
+                var a = 1 - Mathf.Clamp01(d / ShadowEdge);
+                t.SetPixel(x, y, new Color(1, 1, 1, a * a * a));
+            }
+        }
+
         t.Apply();
         return t;
     }
 
-    /// <summary>按 1080p 的设计尺寸缩放到当前屏幕。</summary>
-    public static float ScreenScale => Math.Max(0.5f, Screen.height / 1080f);
+    /// <summary>64×64 的圆形柔光：中心不透明，到边缘按平方曲线透明。</summary>
+    private static Texture2D GlowTexture()
+    {
+        const int size = 64;
+        const float half = (size - 1) / 2f;
+        var t = new Texture2D(size, size, TextureFormat.RGBA32, false)
+        {
+            wrapMode = TextureWrapMode.Clamp,
+            filterMode = FilterMode.Bilinear,
+            hideFlags = HideFlags.HideAndDontSave,
+        };
+        for (var y = 0; y < size; y++)
+        {
+            for (var x = 0; x < size; x++)
+            {
+                var a = 1f - Mathf.Clamp01(new Vector2(x - half, y - half).magnitude / half);
+                t.SetPixel(x, y, new Color(1, 1, 1, a * a));
+            }
+        }
+
+        t.Apply();
+        return t;
+    }
 }

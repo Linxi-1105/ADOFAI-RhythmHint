@@ -22,8 +22,8 @@ internal sealed class GameViewport
     /// <param name="own">Mod 自己的对象：界面文字用的摄像机挂在它下面。</param>
     public GameViewport(Transform own) => _canvases = new GameCanvases(own);
 
-    /// <summary>被让出来的左侧宽度、顶部高度（像素），用来在面板下面铺黑底。</summary>
-    public Vector2 Freed { get; private set; }
+    /// <summary>被让出来的四边（像素），用来在面板下面铺黑底。</summary>
+    public ScreenMargins Freed { get; private set; }
 
     /// <param name="shrinkUi">这一帧界面文字跟着缩（在关卡里，或刚离开关卡、面板还在滑出）。</param>
     public void Apply(float presence, Settings settings, bool shrinkUi)
@@ -35,16 +35,17 @@ internal sealed class GameViewport
         }
 
         var layout = new OverlayLayout(settings);
-        var left = (settings.ShowLanes ? layout.PanelWidth : 0f) * presence;
-        var top = layout.TopHeight * presence;
-        Freed = new Vector2(left, top);
-        double l = left / Screen.width, t = top / Screen.height;
+        // 让出来的区域取整到整数像素，和面板边缘对齐（不留缝）
+        var lanes = Mathf.Round((settings.ShowLanes ? layout.PanelWidth : 0f) * presence);
+        var bar = Mathf.Round(layout.StripHeight * presence);
+        Freed = new ScreenMargins(layout.LanesRight ? 0 : lanes, layout.LanesRight ? lanes : 0, layout.TaikoBottom ? 0 : bar, layout.TaikoBottom ? bar : 0);
+        var f = Freed;
         var cameras = Camera.allCameras.Where(cam => !_canvases.Owns(cam)).ToList();
-        _shrinker.Apply(cameras, l, t);
+        _shrinker.Apply(cameras, new ScreenMargins(f.Left / Screen.width, f.Right / Screen.width, f.Top / Screen.height, f.Bottom / Screen.height));
 
         if (shrinkUi)
         {
-            _canvases.Apply(left, top, cameras);
+            _canvases.Apply(f, cameras);
         }
         else
         {
@@ -56,7 +57,7 @@ internal sealed class GameViewport
     {
         _shrinker.Restore();
         _canvases.Restore();
-        Freed = Vector2.zero;
+        Freed = default;
     }
 
     private static Rect ToRect(ViewRect r) => new((float)r.X, (float)r.Y, (float)r.Width, (float)r.Height);

@@ -18,6 +18,11 @@ public static class Main
     {
         Mod = modEntry;
         Settings = UnityModManager.ModSettings.Load<Settings>(modEntry);
+        if (Settings.MigrateDefaults())
+        {
+            Settings.Save(modEntry);
+            modEntry.Logger.Log($"设置：默认值已更新（主手重置间隔 {Settings.ResetWindowMs} 毫秒）");
+        }
         modEntry.OnToggle = OnToggle;
         modEntry.OnGUI = entry => SettingsGui.Draw(Settings, Overlay);
         modEntry.OnSaveGUI = entry => Settings.Save(entry);

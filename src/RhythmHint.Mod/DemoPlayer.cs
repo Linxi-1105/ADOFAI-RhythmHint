@@ -138,6 +138,7 @@ internal sealed class DemoPlayer
         var beats = BeatGrid.Build(new[] { (0.0, _demo.SecondsPerBeat) }, 0, _demo.LoopSeconds * Loops);
         var notes = NotePlanner.Plan(tiles, settings.ToFingering());
         frame.Load(notes, beats, _demo.LoopSeconds * Loops);
+        frame.DifficultyTier = DifficultyEstimator.Estimate(tiles).Tier; // 设置窗口里预览徽章的样子
         frame.Bpm = (float)bpm;
         frame.Caption = _followingMusic
             ? Lang.M("演示 · 跟随当前音乐 {0:0.#} BPM · 每轮前 4 拍逐拍出现音符，音符到达判定线时应与节拍一致，如有偏差请调整「画面偏移」", bpm)

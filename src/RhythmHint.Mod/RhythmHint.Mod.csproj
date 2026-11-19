@@ -18,7 +18,7 @@
     <DefaultModRepository>$(RepoUrl)/releases/latest/download/Repository.json</DefaultModRepository>
     <ModRepository Condition="'$(ModRepository)' == ''">$(DefaultModRepository)</ModRepository>
     <!-- 装进游戏的都是测试版（用户要求）：版本号带 -dev，在 UMM 列表和「关于」里一眼和发布版分开。
-         UMM 解析版本时去掉非数字，1.2.1-dev 当作 1.2.1，检查更新不受影响。要装不带后缀的加 -p:VersionSuffix= -->
+         UMM 解析版本时去掉非数字，1.3.0-dev 当作 1.3.0，检查更新不受影响。要装不带后缀的加 -p:VersionSuffix= -->
     <VersionSuffix Condition="'$(Deploy)' == 'true' and '$(VersionSuffix)' == ''">dev</VersionSuffix>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
@@ -34,14 +34,24 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- 翻译表（键是中文原文）编进 DLL，安装包还是只有 DLL 和 Info.json -->
+    <!-- 手序编辑器（网页，src/RhythmHint.Editor）随 Mod 装进 Mods/RhythmHint/Editor：游戏里一键打开。
+         session.js、session-audio* 是游戏运行时写的，测试样例在 tests 里，都不打包 -->
+    <EditorFile Include="..\RhythmHint.Editor\*.html;..\RhythmHint.Editor\*.css;..\RhythmHint.Editor\*.js;..\RhythmHint.Editor\icon.ico" Exclude="..\RhythmHint.Editor\session.js" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 翻译表（键是中文原文）编进 DLL -->
     <EmbeddedResource Include="Languages\*.json" LogicalName="RhythmHint.Languages.%(Filename).json" />
+    <!-- 难度徽章：TUF 的 P1–U20 图标（CC BY 4.0，署名见 DifficultyIcons/README.md）编进 DLL -->
+    <EmbeddedResource Include="DifficultyIcons\*.png" LogicalName="RhythmHint.DifficultyIcons.%(Filename).png" />
+    <!-- 设置窗口（F8）的线条图标：白色 64 像素 PNG，绘制时染色。源文件 SettingsIcons/icons.svg，用 tools/make-settings-icons.py 生成 -->
+    <EmbeddedResource Include="SettingsIcons\*.png" LogicalName="RhythmHint.SettingsIcons.%(Filename).png" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- netstandard 也用游戏自带的（2.1）：Unity 6 的模块按 2.1 编译，.NET Framework 参考程序集里只有 2.0。
          UnityEngine.UI / UIModule：设置窗口底下的透明挡板（InputShield）用；Newtonsoft.Json：读翻译表 -->
-    <GameReference Include="Assembly-CSharp;RDTools;UnityEngine;UnityEngine.CoreModule;UnityEngine.IMGUIModule;UnityEngine.TextRenderingModule;UnityEngine.InputLegacyModule;UnityEngine.AudioModule;UnityEngine.UIModule;UnityEngine.UI;Newtonsoft.Json;netstandard" />
+    <GameReference Include="Assembly-CSharp;Assembly-CSharp-firstpass;RDTools;UnityEngine;UnityEngine.CoreModule;UnityEngine.IMGUIModule;UnityEngine.TextRenderingModule;UnityEngine.InputLegacyModule;UnityEngine.AudioModule;UnityEngine.ImageConversionModule;UnityEngine.UIModule;UnityEngine.UI;Newtonsoft.Json;netstandard" />
     <Reference Include="@(GameReference)">
       <HintPath>$(ManagedDir)\%(Identity).dll</HintPath>
       <Private>false</Private>
@@ -79,7 +89,7 @@
   </Target>
 
   <!-- dotnet build -c Release -p:UmmPackage=true：在仓库根目录 artifacts\ 生成 UMM 可直接安装的 RhythmHint-版本.zip。
-       压缩包里只有 RhythmHint/RhythmHint.dll 和 RhythmHint/Info.json（UMM 识别 Info.json 所在的文件夹）。
+       压缩包里是 RhythmHint/RhythmHint.dll、RhythmHint/Info.json（UMM 识别 Info.json 所在的文件夹）和手序编辑器 RhythmHint/Editor/。
        用 MSBuild 的 ZipDirectory：路径分隔符是标准的「/」。0.9.1 用 Windows PowerShell 5.1 的 Compress-Archive 打包，
        路径是「RhythmHint\Info.json」，不是标准 zip 路径，安装器可能认不出。
        同时生成 UMM 的更新清单 artifacts\Repository.json，发 Release 时和压缩包一起上传：
@@ -103,15 +113,17 @@
     </PropertyGroup>
     <RemoveDir Directories="$(PackageStageDir)" />
     <Copy SourceFiles="$(OutDir)$(AssemblyName).dll;$(OutDir)Info.json" DestinationFolder="$(PackageStageDir)$(ModId)" />
+    <Copy SourceFiles="@(EditorFile)" DestinationFolder="$(PackageStageDir)$(ModId)\Editor" />
     <ZipDirectory SourceDirectory="$(PackageStageDir)" DestinationFile="$(PackageZip)" Overwrite="true" />
     <RemoveDir Directories="$(PackageStageDir)" />
     <WriteLinesToFile File="$(ArtifactsDir)Repository.json" Lines="$(RepositoryJsonText)" Overwrite="true" />
     <Message Importance="high" Text="已打包 $(PackageZip)，更新清单 $(ArtifactsDir)Repository.json" />
   </Target>
 
-  <!-- dotnet build -p:Deploy=true：编译后复制到游戏的 Mods 目录（不碰已有的 Settings.xml） -->
+  <!-- dotnet build -p:Deploy=true：编译后复制到游戏的 Mods 目录（不碰已有的 Settings.xml、手序文件夹和编辑器运行时写的 session 文件） -->
   <Target Name="DeployToGame" AfterTargets="WriteInfoJson" Condition="'$(Deploy)' == 'true'">
     <Copy SourceFiles="$(OutDir)$(AssemblyName).dll;$(OutDir)$(AssemblyName).pdb;$(OutDir)Info.json" DestinationFolder="$(ModDeployDir)" />
+    <Copy SourceFiles="@(EditorFile)" DestinationFolder="$(ModDeployDir)\Editor" />
     <Message Importance="high" Text="已复制到 $(ModDeployDir)" />
   </Target>
 </Project>
