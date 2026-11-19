@@ -535,14 +535,20 @@ internal sealed class Ui
         var plus = new Rect(box.x - 8 - 26, cy - 13, 26, 26);
         var track = new Rect(minus.xMax + 10, cy - 11, plus.x - 10 - (minus.xMax + 10), 22);
         var range = max - min;
+        // 玩家这一帧动了这个滑块才取整、写回；没动就原样返回。打开页面、后台预排（SettingsWindow.Prewarm）都会走到这里，
+        // 原来会把手改的、旧版本留下的不在刻度上的值悄悄改掉（2026-11-19 游戏实测：Settings.xml 里的 131 没开排键页就成了 130）
+        var original = value;
+        var touched = false;
         if (StepButton(id + "-", minus, "minus"))
         {
             value -= step;
+            touched = true;
         }
 
         if (StepButton(id + "+", plus, "plus"))
         {
             value += step;
+            touched = true;
         }
 
         var cid = GUIUtility.GetControlID(FocusType.Passive);
@@ -554,6 +560,7 @@ internal sealed class Ui
                 {
                     GUIUtility.hotControl = cid;
                     value = min + (Mathf.Clamp01((e.mousePosition.x - track.x) / track.width) * range);
+                    touched = true;
                     e.Use();
                 }
 
@@ -562,6 +569,7 @@ internal sealed class Ui
                 if (GUIUtility.hotControl == cid)
                 {
                     value = min + (Mathf.Clamp01((e.mousePosition.x - track.x) / track.width) * range);
+                    touched = true;
                     e.Use();
                 }
 
@@ -604,8 +612,8 @@ internal sealed class Ui
 
         Fill(box, Surface2, 7);
         Stroke(box, Border, 1, 7);
-        Label(box, format(value), 13, Text, Face.Mono, true, TextAnchor.MiddleCenter);
-        return value;
+        Label(box, format(touched ? value : original), 13, Text, Face.Mono, true, TextAnchor.MiddleCenter);
+        return touched ? value : original;
     }
 
     /// <summary>加减按钮：小图标，悬停出底色。</summary>
