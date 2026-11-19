@@ -208,8 +208,14 @@ internal sealed class FingeringSource
 
         var candidates = Load(out var broken);
         var choice = FingeringMatcher.Choose(candidates, hits, auto, settings.LeftHanded, chosen);
-        var brokenNote = broken.Count == 0 ? Message.Empty
-            : Lang.M("\n有 {0} 个文件无法读取：{1}（原因见日志）", broken.Count, string.Join("、", broken));
+        foreach (var merge in choice.Merged)
+        {
+            Main.Mod.Logger.Log(merge.SameContent
+                ? $"专属手序：{merge.Dropped} 和 {merge.Kept} 内容一样，当成一份（用 {merge.Kept}）"
+                : $"专属手序：{merge.Dropped} 和 {merge.Kept} 是同一位作者给这一版谱面存的，用较新的 {merge.Kept}");
+        }
+
+        var brokenNote = Notes(broken, choice.OtherKeys);
         var list = choice.Candidates.ConvertAll(c => (c.Candidate.Name, c.MatchedHits, c.TotalHits));
         var byPlayer = choice.Reason == FingeringReason.Chosen;
         FingeringResult result;
@@ -246,6 +252,29 @@ internal sealed class FingeringSource
         _lastKey = key;
         _last = result;
         return result;
+    }
+
+    /// <summary>
+    /// 状态后面补的说明：读不了的文件；像这一关、但键数和 Mod 不同的手序（以后的六键、八键文件，现在不套用，
+    /// 2026-11-19 评审 A：原来悄悄过滤掉，玩家不知道为什么没用上）。
+    /// </summary>
+    private static Message Notes(List<string> broken, List<FingeringCandidate> otherKeys)
+    {
+        var keys = otherKeys.Count switch
+        {
+            0 => Message.Empty,
+            1 => Lang.M("\n{0} 是 {1} 键手序，当前版本只支持 {2} 键，未使用。", otherKeys[0].Name, otherKeys[0].File.Keys, Lanes.Count),
+            _ => Lang.M("\n有 {0} 份像这一关的手序不是 {1} 键，当前版本不支持，未使用：{2}", otherKeys.Count, Lanes.Count,
+                string.Join("、", otherKeys.ConvertAll(c => c.Name))),
+        };
+        if (broken.Count == 0)
+        {
+            return keys;
+        }
+
+        return otherKeys.Count == 0
+            ? Lang.M("\n有 {0} 个文件无法读取：{1}（原因见日志）", broken.Count, string.Join("、", broken))
+            : Lang.M("\n有 {0} 个文件无法读取：{1}（原因见日志）{2}", broken.Count, string.Join("、", broken), keys);
     }
 
     /// <summary>玩家给这个谱面选过的文件名（空串 = 选了都不用）；没选过为 null。存在 Settings.FingeringChoices，一行「指纹 Tab 文件名」。</summary>
@@ -398,6 +427,16 @@ internal sealed class FingeringSource
         try
         {
             var file = CustomFingering.Parse(File.ReadAllText(info.FullName, Encoding.UTF8));
+            if (file.Keys != Lanes.Count)
+            {
+                Main.Mod.Logger.Log($"手序文件 {info.Name} 是 {file.Keys} 键手序，这个版本只支持 {Lanes.Count} 键，不套用（进到像它的那一关时状态里会说明）");
+            }
+
+            if (file.DroppedFields.Count > 0)
+            {
+                Main.Mod.Logger.Warning($"手序文件 {info.Name} 里的字段 {string.Join("、", file.DroppedFields)} 太大，没有读；手序照常使用，编辑器重新保存时这些字段不会保留");
+            }
+
             return new Entry(info.LastWriteTimeUtc, info.Length, file);
         }
         catch (Exception ex) when (ex is FormatException or IOException or UnauthorizedAccessException)

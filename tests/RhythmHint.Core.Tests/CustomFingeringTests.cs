@@ -340,12 +340,13 @@ public class CustomFingeringTests
         Assert.Equal(968, candidate.TotalHits);
     }
 
+    /// <summary>两份不同的手序都像这一关：不猜。（内容完全一样的两份当成一份，见 FingeringCompatTests.IdenticalCopiesAreOneFingering。）</summary>
     [Fact]
     public void TwoLookalikesAreNotGuessed()
     {
         var beats = Rhythm(300);
         var one = Made(Chart(beats), out _);
-        var two = Made(Chart(beats), out _);
+        var two = CustomFingering.From(Chart(beats), NotePlanner.Plan(Chart(beats), Options), leftHanded: false);
 
         var choice = Pick(Updated(beats), null, ("one.json", one), ("two.json", two));
 

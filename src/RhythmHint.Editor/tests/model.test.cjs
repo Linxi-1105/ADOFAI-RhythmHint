@@ -455,14 +455,15 @@ test('fields this editor does not know survive opening and saving', () => {
 
 test('file names avoid control characters, reserved names and half emoji', () => {
   assert.equal(M.suggestedFileName({ song: 'a\u0007b\u007f', artist: '' }), 'ab.json');
-  assert.equal(M.suggestedFileName({ song: 'CON', artist: '' }), 'CON_.json');
-  assert.equal(M.cleanFileName('lpt9'), 'lpt9_');
-  assert.equal(M.cleanFileName('com1.backup'), 'com1_.backup');
+  // 规则和 Mod 的 CustomFingering.SuggestedFileName 一样（保留名前面加 _，按 UTF-16 截到 80、不切开 emoji）
+  assert.equal(M.suggestedFileName({ song: 'CON', artist: '' }), '_CON.json');
+  assert.equal(M.cleanFileName('lpt9'), '_lpt9');
+  assert.equal(M.cleanFileName('com1.backup'), '_com1.backup');
   assert.equal(M.cleanFileName('CONSOLE'), 'CONSOLE');
-  assert.equal(M.cleanFileName(' song. . '), 'song');
+  assert.equal(M.cleanFileName(' song.. '), 'song');
   assert.equal(M.cleanFileName('\u0001'), '');
   const name = M.suggestedFileName({ song: 'a'.repeat(79) + '\u{1F600}\u{1F600}', artist: '' });
-  assert.equal(name, 'a'.repeat(79) + '\u{1F600}.json');
+  assert.equal(name, 'a'.repeat(79) + '.json');
   assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(name), 'no half emoji');
 });
 

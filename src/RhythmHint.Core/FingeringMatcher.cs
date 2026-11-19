@@ -85,7 +85,16 @@ public sealed class FingeringChoice
 
     /// <summary>像这一关的手序和对上比例，从高到低（Unsure 时给玩家选）。</summary>
     public List<(FingeringCandidate Candidate, int MatchedHits, int TotalHits)> Candidates { get; } = new();
+
+    /// <summary>像这一关、但键数和 Mod 不同的手序（以后的六键、八键）：现在不套用，状态里说明。</summary>
+    public List<FingeringCandidate> OtherKeys { get; } = new();
+
+    /// <summary>当成一份的重复文件（日志用）：内容一样的几份，或同一位作者给这一版谱面存过好几次。</summary>
+    public List<FingeringMerge> Merged { get; } = new();
 }
+
+/// <summary>重复的手序文件没参与挑选：<paramref name="Dropped"/> 和 <paramref name="Kept"/> 内容一样（<paramref name="SameContent"/>），或是同一位作者较早存的。</summary>
+public sealed record FingeringMerge(string Dropped, string Kept, bool SameContent);
 
 /// <summary>
 /// 把专属手序对到当前关卡上（手序跟着歌走）：关卡更新后砖块可能增删、个别砖改了角度、整体偏移变了，
@@ -110,13 +119,6 @@ public static class FingeringMatcher
     /// <summary>对上这么多以上（但不够自动用）才列给玩家选，再低就当不是这一关。</summary>
     public const double MinCandidate = 0.3;
 
-    /// <summary>两块砖算「同一块」：间隔相差不超过 4 毫秒或 3%，转角相差不超过 1.5°。</summary>
-    private const double GapTolerance = 0.004;
-
-    private const double GapRatio = 0.03;
-
-    private const double AngleTolerance = 1.5;
-
     /// <summary>
     /// 只认连续对上这么多块砖的整段。节奏只有几种取值，两首无关的歌零散地也能「对上」一半以上（最长公共子序列的性质），
     /// 真正同一首歌更新前后是一长段一长段地对上。
@@ -130,7 +132,15 @@ public static class FingeringMatcher
     private const long MaxCells = 30_000_000;
 
     /// <summary>当前关卡每块砖对应文件里的第几块砖，对不上为 -1。</summary>
-    public static int[] Align(IReadOnlyList<TileHit> current, IReadOnlyList<TileHit> file)
+    public static int[] Align(IReadOnlyList<TileHit> current, IReadOnlyList<TileHit> file) => Align(new Rhythm(current), new Rhythm(file));
+
+    /// <summary>
+    /// 本关最多能有多少块砖对上这份文件的砖（上限：<see cref="Apply"/> 的 MatchedHits 不会超过它）。很便宜（几毫秒），
+    /// 用来在对齐之前跳过不可能对上的文件（BPM、节奏不一样的歌）。做法见 Rhythm.Bound。
+    /// </summary>
+    public static int MatchBound(IReadOnlyList<TileHit> current, IReadOnlyList<TileHit> file) => Rhythm.Bound(new Rhythm(current), new Rhythm(file), MinRun);
+
+    private static int[] Align(Rhythm current, Rhythm file)
     {
         int n = current.Count, m = file.Count;
         var map = new int[n];
@@ -168,29 +178,34 @@ public static class FingeringMatcher
 
         for (var i = 1; i <= n; i++)
         {
-            int s = Start(i), sp = Start(i - 1);
+            // 上一行同一列在 prev 里的位置 = k + shift（每一行的带子起点随对角线挪动）
+            int s = Start(i), shift = s - Start(i - 1);
+            var row = (long)i * width;
+            var left = Unreachable;
+            bool hold = current.Hold[i - 1], first = i == 1;
+            double angle = current.Angle[i - 1], gap = current.Gap[i - 1];
             for (var k = 0; k < width; k++)
             {
                 var j = s + k;
                 if (j < 0 || j > m)
                 {
-                    cur[k] = Unreachable;
+                    cur[k] = left = Unreachable;
                     continue;
                 }
 
                 if (j == 0)
                 {
-                    cur[k] = 0;
-                    dir[((long)i * width) + k] = 2;
+                    cur[k] = left = 0;
+                    dir[row + k] = 2;
                     continue;
                 }
 
-                var up = Get(prev, j - sp);
-                var left = k > 0 ? cur[k - 1] : Unreachable;
-                var diag = Get(prev, j - 1 - sp);
+                var u = k + shift;
+                var up = u >= 0 && u < width ? prev[u] : Unreachable;
+                var diag = u >= 1 && u <= width ? prev[u - 1] : Unreachable;
                 var best = up;
                 byte d = 2;
-                if (diag != Unreachable && Same(current, i - 1, file, j - 1) && diag + 1 >= best)
+                if (diag != Unreachable && diag + 1 >= best && Rhythm.Same(hold, angle, gap, first, file, j - 1))
                 {
                     best = diag + 1;
                     d = 1;
@@ -202,8 +217,8 @@ public static class FingeringMatcher
                     d = 3;
                 }
 
-                cur[k] = best;
-                dir[((long)i * width) + k] = best == Unreachable ? (byte)0 : d;
+                cur[k] = left = best;
+                dir[row + k] = best == Unreachable ? (byte)0 : d;
             }
 
             (prev, cur) = (cur, prev);
@@ -238,8 +253,6 @@ public static class FingeringMatcher
         }
 
         return map;
-
-        static int Get(int[] row, int k) => k >= 0 && k < row.Length ? row[k] : Unreachable;
     }
 
     /// <summary>
@@ -247,7 +260,11 @@ public static class FingeringMatcher
     /// 其余用 <paramref name="auto"/>（同一关的自动排键）。一个自动音符只有一部分砖对上时，压在它上面的专属音符也退回自动，
     /// 保证每块砖正好属于一个音符。键数不同（以后的六键、八键）时整首用自动。
     /// </summary>
-    public static FingeringMatch Apply(CustomFingering file, IReadOnlyList<TileHit> hits, IReadOnlyList<PlannedNote> auto, bool leftHanded)
+    public static FingeringMatch Apply(CustomFingering file, IReadOnlyList<TileHit> hits, IReadOnlyList<PlannedNote> auto, bool leftHanded) =>
+        Apply(file, hits, auto, leftHanded, new Rhythm(hits), null);
+
+    private static FingeringMatch Apply(CustomFingering file, IReadOnlyList<TileHit> hits, IReadOnlyList<PlannedNote> auto, bool leftHanded,
+        Rhythm rhythm, Rhythm? fileRhythm)
     {
         var n = hits.Count;
         var curIndex = IndexByTile(hits);
@@ -272,7 +289,7 @@ public static class FingeringMatcher
 
         if (file.Keys == Lanes.Count)
         {
-            var map = KeepLongRuns(Align(hits, file.Hits));
+            var map = KeepLongRuns(Align(rhythm, fileRhythm ?? new Rhythm(file.Hits)));
             var toCur = new int[file.Hits.Count];
             for (var j = 0; j < toCur.Length; j++)
             {
@@ -379,6 +396,8 @@ public static class FingeringMatcher
     /// <item>否则按节奏对齐：对上不低于 <see cref="MinRatio"/> 且比第二名多 <see cref="MinLead"/> 才自动用</item>
     /// <item>有像的但不够确定（不低于 <see cref="MinCandidate"/>）：不猜，列出来让玩家选</item>
     /// </list>
+    /// 挑之前先把重复的当成一份（2026-11-19 评审 A：同一张谱两份就永远「不确定」）：内容一样的（浏览器重复下载出的「(1)」）只留一份；
+    /// 指纹完全一样的几份里，同一位作者的只留 updatedAt 最新的。键数和 Mod 不同的不套用，像这一关的记进 <see cref="FingeringChoice.OtherKeys"/>。
     /// </summary>
     /// <param name="chosen">玩家给这个谱面指纹选过的文件名；没选过为 null。</param>
     public static FingeringChoice Choose(IReadOnlyList<FingeringCandidate> candidates, IReadOnlyList<TileHit> hits,
@@ -386,7 +405,19 @@ public static class FingeringMatcher
     {
         var chart = CustomFingering.ChartPrint(hits);
         var choice = new FingeringChoice { Chart = chart };
-        var usable = candidates.Where(c => c.File.Keys == Lanes.Count).ToList();
+        var rhythm = new Rhythm(hits);
+        var usable = new List<FingeringCandidate>();
+        foreach (var c in candidates)
+        {
+            if (c.File.Keys == Lanes.Count)
+            {
+                usable.Add(c);
+            }
+            else if (LooksLike(c.File, chart, rhythm))
+            {
+                choice.OtherKeys.Add(c);
+            }
+        }
 
         if (chosen != null)
         {
@@ -399,24 +430,39 @@ public static class FingeringMatcher
             var picked = usable.FirstOrDefault(c => string.Equals(c.Name, chosen, StringComparison.OrdinalIgnoreCase));
             if (picked != null)
             {
-                return Use(choice, picked, Apply(picked.File, hits, auto, leftHanded), FingeringReason.Chosen);
+                return Use(choice, picked, Apply(picked.File, hits, auto, leftHanded, rhythm, null), FingeringReason.Chosen);
             }
         }
 
-        var exact = usable.Where(c => c.File.Charts.Contains(chart)).ToList();
+        usable = WithoutCopies(usable, choice.Merged);
+        var exact = NewestOfEachAuthor(usable.FindAll(c => c.File.Charts.Contains(chart)), choice.Merged);
         if (exact.Count == 1)
         {
-            return Use(choice, exact[0], Apply(exact[0].File, hits, auto, leftHanded), FingeringReason.Exact);
+            return Use(choice, exact[0], Apply(exact[0].File, hits, auto, leftHanded, rhythm, null), FingeringReason.Exact);
         }
 
-        // 砖数差太多不可能对上 MinCandidate，不用算
-        var scored = (exact.Count > 1 ? exact : usable)
-            .Where(c => Math.Min(c.File.Hits.Count, hits.Count) >= MinCandidate * hits.Count)
-            .Select(c => (Candidate: c, Match: Apply(c.File, hits, auto, leftHanded)))
-            .Where(x => x.Match.Ratio >= MinCandidate)
-            .OrderByDescending(x => x.Match.Ratio)
-            .ThenByDescending(x => x.Candidate.File.UpdatedAt)
-            .ToList();
+        return Score(choice, exact.Count > 1 ? exact : usable, exact.Count > 1, hits, auto, leftHanded, rhythm);
+    }
+
+    /// <summary>按节奏对齐给候选打分；不可能对上 <see cref="MinCandidate"/> 的（砖数差太多、节奏片段对不上）先跳过，不做对齐。</summary>
+    private static FingeringChoice Score(FingeringChoice choice, List<FingeringCandidate> pool, bool allExact, IReadOnlyList<TileHit> hits,
+        IReadOnlyList<PlannedNote> auto, bool leftHanded, Rhythm rhythm)
+    {
+        var scored = new List<(FingeringCandidate Candidate, FingeringMatch Match)>();
+        foreach (var c in pool)
+        {
+            var fileRhythm = CouldMatch(c.File, rhythm);
+            if (fileRhythm != null)
+            {
+                var match = Apply(c.File, hits, auto, leftHanded, rhythm, fileRhythm);
+                if (match.Ratio >= MinCandidate)
+                {
+                    scored.Add((c, match));
+                }
+            }
+        }
+
+        scored = scored.OrderByDescending(x => x.Match.Ratio).ThenByDescending(x => x.Candidate.File.UpdatedAt).ToList();
         foreach (var x in scored)
         {
             choice.Candidates.Add((x.Candidate, x.Match.MatchedHits, x.Match.TotalHits));
@@ -430,13 +476,118 @@ public static class FingeringMatcher
 
         var best = scored[0];
         var lead = scored.Count > 1 ? best.Match.Ratio - scored[1].Match.Ratio : 1;
-        if (exact.Count <= 1 && best.Match.Ratio >= MinRatio && lead >= MinLead)
+        if (!allExact && best.Match.Ratio >= MinRatio && lead >= MinLead)
         {
             return Use(choice, best.Candidate, best.Match, FingeringReason.Followed);
         }
 
         choice.Reason = FingeringReason.Unsure;
         return choice;
+    }
+
+    /// <summary>
+    /// 这份文件有没有可能对上本关至少 <see cref="MinCandidate"/>：砖数差太多的、节奏片段对不上的（<see cref="MatchBound"/>）不可能。
+    /// 只是跳过注定对不上的，不改结果。有可能时返回文件的节奏（对齐接着用），不可能为 null。
+    /// </summary>
+    private static Rhythm? CouldMatch(CustomFingering file, Rhythm rhythm)
+    {
+        var n = rhythm.Count;
+        if (Math.Min(file.Hits.Count, n) < MinCandidate * n)
+        {
+            return null;
+        }
+
+        var fileRhythm = new Rhythm(file.Hits);
+        return Rhythm.Bound(rhythm, fileRhythm, MinRun) >= MinCandidate * n ? fileRhythm : null;
+    }
+
+    /// <summary>键数不同的文件像不像这一关：谱面指纹一样，或者按节奏对齐能对上 <see cref="MinCandidate"/> 以上。</summary>
+    private static bool LooksLike(CustomFingering file, string chart, Rhythm rhythm)
+    {
+        if (file.Charts.Contains(chart))
+        {
+            return true;
+        }
+
+        var fileRhythm = CouldMatch(file, rhythm);
+        return fileRhythm != null && KeepLongRuns(Align(rhythm, fileRhythm)).Count(i => i >= 0) >= MinCandidate * rhythm.Count;
+    }
+
+    /// <summary>
+    /// 内容一样的几份（键数、惯用手、砖块、每个音符的键和长按都一样，套到关卡上结果一定一样）只留一份：updatedAt 新的，再是名字短的
+    /// （「Song.json」而不是浏览器重复下载出的「Song (1).json」）。保留原来的顺序。
+    /// </summary>
+    private static List<FingeringCandidate> WithoutCopies(List<FingeringCandidate> candidates, List<FingeringMerge> merged)
+    {
+        var kept = new List<FingeringCandidate>();
+        foreach (var c in candidates.OrderByDescending(c => c.File.UpdatedAt).ThenBy(c => c.Name.Length).ThenBy(c => c.Name, StringComparer.Ordinal))
+        {
+            var same = kept.Find(k => SamePlay(k.File, c.File));
+            if (same == null)
+            {
+                kept.Add(c);
+            }
+            else
+            {
+                merged.Add(new FingeringMerge(c.Name, same.Name, SameContent: true));
+            }
+        }
+
+        return candidates.FindAll(kept.Contains);
+    }
+
+    /// <summary>
+    /// 指纹完全一样的几份里，同一位作者（去掉标签、首尾空白，不分大小写）的只留 updatedAt 最新的那份。
+    /// 没写作者的不算同一位；最新的有好几份一样新时分不出来，这一位的都留着（照旧让玩家选）。
+    /// </summary>
+    private static List<FingeringCandidate> NewestOfEachAuthor(List<FingeringCandidate> exact, List<FingeringMerge> merged)
+    {
+        var result = new List<FingeringCandidate>(exact);
+        foreach (var group in exact.GroupBy(c => CustomFingering.PlainText(c.File.Author).ToLowerInvariant()).Where(g => g.Key.Length > 0))
+        {
+            var newest = group.Max(c => c.File.UpdatedAt);
+            var winners = group.Where(c => c.File.UpdatedAt == newest).ToList();
+            if (winners.Count != 1)
+            {
+                continue;
+            }
+
+            foreach (var older in group.Where(c => !ReferenceEquals(c, winners[0])))
+            {
+                result.Remove(older);
+                merged.Add(new FingeringMerge(older.Name, winners[0].Name, SameContent: false));
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>套到关卡上结果一定一样：键数、惯用手、每块砖（砖号、时间、长按、转角）、每个音符的砖和键、长按都一样。</summary>
+    private static bool SamePlay(CustomFingering a, CustomFingering b)
+    {
+        if (a.Keys != b.Keys || a.LeftHanded != b.LeftHanded || a.Hits.Count != b.Hits.Count || a.Notes.Count != b.Notes.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < a.Hits.Count; i++)
+        {
+            if (!a.Hits[i].Equals(b.Hits[i]))
+            {
+                return false;
+            }
+        }
+
+        for (var i = 0; i < a.Notes.Count; i++)
+        {
+            PlannedNote x = a.Notes[i], y = b.Notes[i];
+            if (x.TileIndex != y.TileIndex || x.LastTileIndex != y.LastTileIndex || !x.Lanes.SequenceEqual(y.Lanes))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static FingeringChoice Use(FingeringChoice choice, FingeringCandidate candidate, FingeringMatch match, FingeringReason reason)
@@ -501,28 +652,6 @@ public static class FingeringMatcher
         }
 
         return note;
-    }
-
-    private static bool Same(IReadOnlyList<TileHit> a, int i, IReadOnlyList<TileHit> b, int j)
-    {
-        if ((a[i].HoldSeconds > 0) != (b[j].HoldSeconds > 0))
-        {
-            return false;
-        }
-
-        double aa = a[i].Angle, ba = b[j].Angle;
-        if (!double.IsNaN(aa) && !double.IsNaN(ba) && Math.Abs(aa - ba) > AngleTolerance)
-        {
-            return false;
-        }
-
-        if (i == 0 || j == 0)
-        {
-            return true;
-        }
-
-        double ga = a[i].Time - a[i - 1].Time, gb = b[j].Time - b[j - 1].Time;
-        return Math.Abs(ga - gb) <= Math.Max(GapTolerance, GapRatio * Math.Max(ga, gb));
     }
 
     private static Dictionary<int, int> IndexByTile(IReadOnlyList<TileHit> hits)

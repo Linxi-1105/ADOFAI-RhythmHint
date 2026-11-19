@@ -1,0 +1,288 @@
+{
+  "01-minimal.json": {
+    "keys": 4,
+    "leftHanded": false,
+    "hits": 2,
+    "notes": 2,
+    "song": "",
+    "author": "",
+    "firstHit": [
+      1,
+      1,
+      0,
+      180
+    ]
+  },
+  "02-full-header.json": {
+    "keys": 4,
+    "leftHanded": true,
+    "hits": 6,
+    "notes": 4,
+    "song": "Song",
+    "artist": "Artist",
+    "charter": "Charter",
+    "author": "作者",
+    "comment": "说明",
+    "firstHit": [
+      1,
+      1,
+      0,
+      180
+    ],
+    "noteLanes": [
+      [
+        2
+      ],
+      [
+        1
+      ],
+      [
+        0,
+        1,
+        2
+      ],
+      [
+        3
+      ]
+    ]
+  },
+  "03-integer-written-as-float.json": {
+    "keys": 4,
+    "leftHanded": false,
+    "hits": 2,
+    "notes": 2,
+    "song": "",
+    "author": "",
+    "firstHit": [
+      1,
+      1,
+      0,
+      180
+    ],
+    "noteLanes": [
+      [
+        2
+      ],
+      [
+        1
+      ]
+    ]
+  },
+  "04-unknown-fields.json": {
+    "keys": 4,
+    "leftHanded": false,
+    "hits": 2,
+    "notes": 2,
+    "song": "",
+    "author": "",
+    "firstHit": [
+      1,
+      1,
+      0,
+      180
+    ]
+  },
+  "05-hit-row-extra-items.json": {
+    "keys": 4,
+    "leftHanded": false,
+    "hits": 2,
+    "notes": 2,
+    "song": "",
+    "author": "",
+    "firstHit": [
+      1,
+      1,
+      0,
+      180
+    ]
+  },
+  "06-text-like-a-date.json": {
+    "keys": 4,
+    "leftHanded": false,
+    "hits": 2,
+    "notes": 2,
+    "song": "",
+    "author": "2026-11-18T00:00:00Z",
+    "firstHit": [
+      1,
+      1,
+      0,
+      180
+    ],
+    "comment": "2020-01-01"
+  },
+  "07-null-and-missing-text.json": {
+    "keys": 4,
+    "leftHanded": false,
+    "hits": 2,
+    "notes": 2,
+    "song": "",
+    "author": "",
+    "firstHit": [
+      1,
+      1,
+      0,
+      180
+    ]
+  },
+  "08-left-handed-not-boolean.json": {
+    "keys": 4,
+    "leftHanded": false,
+    "hits": 2,
+    "notes": 2,
+    "song": "",
+    "author": "",
+    "firstHit": [
+      1,
+      1,
+      0,
+      180
+    ]
+  },
+  "09-charts-with-odd-items.json": {
+    "keys": 4,
+    "leftHanded": false,
+    "hits": 2,
+    "notes": 2,
+    "song": "",
+    "author": "",
+    "firstHit": [
+      1,
+      1,
+      0,
+      180
+    ]
+  },
+  "10-updatedAt-not-a-date.json": {
+    "keys": 4,
+    "leftHanded": false,
+    "hits": 2,
+    "notes": 2,
+    "song": "",
+    "author": "",
+    "firstHit": [
+      1,
+      1,
+      0,
+      180
+    ]
+  },
+  "11-long-text.json": {
+    "keys": 4,
+    "hits": 2,
+    "notes": 2,
+    "song": "",
+    "authorLength": 300,
+    "commentLength": 4000
+  },
+  "12-cross-hand-chord.json": {
+    "keys": 4,
+    "hits": 2,
+    "notes": 1,
+    "noteLanes": [
+      [
+        1,
+        2
+      ]
+    ]
+  },
+  "13-six-keys.json": {
+    "keys": 6,
+    "hits": 2,
+    "notes": 2,
+    "noteLanes": [
+      [
+        5
+      ],
+      [
+        0
+      ]
+    ]
+  },
+  "14-duplicate-names-last-wins.json": {
+    "keys": 4,
+    "leftHanded": false,
+    "hits": 2,
+    "notes": 2,
+    "song": "Last",
+    "author": "",
+    "firstHit": [
+      1,
+      1,
+      0,
+      180
+    ]
+  },
+  "15-unsorted-lanes.json": {
+    "keys": 4,
+    "hits": 2,
+    "notes": 1,
+    "noteLanes": [
+      [
+        2,
+        3
+      ]
+    ]
+  },
+  "16-huge-integer-time.json": {
+    "keys": 4,
+    "hits": 2,
+    "notes": 2
+  },
+  "90-lenient-comments.json": {
+    "keys": 4,
+    "leftHanded": false,
+    "hits": 2,
+    "notes": 2,
+    "song": "",
+    "author": "",
+    "firstHit": [
+      1,
+      1,
+      0,
+      180
+    ]
+  },
+  "91-lenient-trailing-commas.json": {
+    "keys": 4,
+    "leftHanded": false,
+    "hits": 2,
+    "notes": 2,
+    "song": "",
+    "author": "",
+    "firstHit": [
+      1,
+      1,
+      0,
+      180
+    ]
+  },
+  "92-lenient-single-quotes.json": {
+    "keys": 4,
+    "leftHanded": false,
+    "hits": 2,
+    "notes": 2,
+    "song": "",
+    "author": "",
+    "firstHit": [
+      1,
+      1,
+      0,
+      180
+    ]
+  },
+  "93-lenient-unquoted-names.json": {
+    "keys": 4,
+    "leftHanded": false,
+    "hits": 2,
+    "notes": 2,
+    "song": "",
+    "author": "",
+    "firstHit": [
+      1,
+      1,
+      0,
+      180
+    ]
+  }
+}

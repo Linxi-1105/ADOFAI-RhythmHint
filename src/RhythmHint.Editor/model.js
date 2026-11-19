@@ -58,6 +58,7 @@
     need(int(keys) && keys >= 1 && keys <= 16, 'badFile', 'keys');
     need(Array.isArray(obj.hits) && obj.hits.length > 0 && obj.hits.length <= MAX_HITS, 'badFile', 'hits');
     need(Array.isArray(obj.notes) && obj.notes.length > 0, 'badFile', 'notes');
+    need(!obj.updatedAt || typeof obj.updatedAt !== 'object', 'badFile', 'updatedAt'); // 同 Mod：写成对象、数组整份拒绝
     const meta = {
       song: textField(obj, 'song', MAX_NAME), artist: textField(obj, 'artist', MAX_NAME), charter: textField(obj, 'charter', MAX_NAME),
       author: textField(obj, 'author', MAX_NAME), comment: textField(obj, 'comment', MAX_COMMENT), leftHanded: obj.leftHanded === true,
@@ -212,16 +213,18 @@
     return (cleanFileName(artist && song ? artist + ' - ' + song : song) || 'fingering') + '.json';
   }
 
-  const RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?=\.|$)/i; // Windows 的保留名（带扩展名也不行）
+  const RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])\s*(\.|$)/i; // Windows 的保留名（带扩展名也不行），同 CustomFingering.ReservedName
 
   /**
-   * 能当 Windows 文件名的名字（不含 .json）：去掉控制字符，路径符号换成 _，保留名后面加 _，
-   * 最多 80 个字符、按码点截（emoji 不会被切成半个），去掉结尾的点和空格。全被去掉时为空串。
+   * 能当 Windows 文件名的名字（不含 .json），和 Mod 的 CustomFingering.SuggestedFileName 逐步一致：去掉控制字符，
+   * 路径符号换成 _，去首尾空白和结尾的点，保留名前面加 _，超过 80 个 UTF-16 字符截到 80（第 80 个是 emoji 的前半个时截到 79）。
+   * 全被去掉时为空串。
    */
   function cleanFileName(text) {
-    const name = String(text || '').replace(/[\u0000-\u001f\u007f-\u009f]/g, '').replace(/[\\/:*?"<>|]/g, '_').trim()
-      .replace(/[. ]+$/, '').replace(RESERVED_NAME, '$1_');
-    return Array.from(name).slice(0, 80).join('').replace(/[. ]+$/, '');
+    let name = String(text || '').replace(/[\u0000-\u001f\u007f-\u009f]/g, '').replace(/[\\/:*?"<>|]/g, '_').trim().replace(/\.+$/, '');
+    if (!name) return '';
+    if (RESERVED_NAME.test(name)) name = '_' + name;
+    return name.length > 80 ? name.slice(0, /[\ud800-\udbff]/.test(name[79]) ? 79 : 80) : name;
   }
 
   /** 草稿里记的文件名能不能直接用：.json 结尾、没有路径和控制字符（游戏给的名字可能比 80 个字符长，不再截）。 */

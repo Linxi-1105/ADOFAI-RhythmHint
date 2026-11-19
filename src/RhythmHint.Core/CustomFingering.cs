@@ -22,9 +22,24 @@ public sealed class CustomFingering
     /// <summary>超过这个大小就不是正常的手序文件（四千个音符约 150 KB），不读。</summary>
     public const int MaxFileBytes = 20 * 1024 * 1024;
 
-    private const int MaxHits = 200_000;
+    /// <summary>键数最多这么多（以后的六键、八键都在里面）。</summary>
+    public const int MaxKeys = 16;
+
+    private const int MaxHits = FingeringReader.MaxHits;
     private const int MaxNameLength = 300;
     private const int MaxCommentLength = 4000;
+
+    /// <summary>建议的文件名（不含 .json）最多这么多个 UTF-16 字符。</summary>
+    private const int MaxFileNameLength = 80;
+
+    /// <summary>第 1 版定下的顶层字段；别的都是以后的版本加的（<see cref="Extra"/>）。</summary>
+    private static readonly HashSet<string> KnownFields = new(StringComparer.Ordinal)
+    {
+        "format", "schemaVersion", "keys", "song", "artist", "charter", "author", "comment", "leftHanded", "charts", "updatedAt", "hits", "notes",
+    };
+
+    /// <summary>Windows 的保留设备名：后面带扩展名也不能当文件名（NUL.json 等于 NUL）。</summary>
+    private static readonly Regex ReservedName = new(@"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])\s*(\.|$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     /// <summary>曲名、曲师、谱师：显示用，也用来认「同一首歌」。</summary>
     public string Song { get; set; } = string.Empty;
@@ -58,6 +73,40 @@ public sealed class CustomFingering
 
     /// <summary>每个音符按哪几个键。音符按顺序、不重不漏地覆盖 <see cref="Hits"/>；时间取自它的第一块砖。</summary>
     public List<PlannedNote> Notes { get; } = new();
+
+    /// <summary>
+    /// 不认识的顶层字段（以后的版本加的、别的工具写的）：读的时候原样留下，写的时候跟在已知字段后面、hits 前面写回去，
+    /// 用旧版 Mod 重新导出、编辑器再保存也不丢（2026-11-19 评审 A 高1：1.3.x 会丢）。和已知字段同名的不写。
+    /// </summary>
+    public JObject Extra { get; } = new();
+
+    /// <summary>读的时候太大没留下的不认识字段（写日志用）：这些字段保存时会丢掉，手序本身照样能用。</summary>
+    public List<string> DroppedFields { get; } = new();
+
+    /// <summary>是不是第 1 版定下的顶层字段。</summary>
+    public static bool IsKnownField(string name) => KnownFields.Contains(name);
+
+    /// <summary>
+    /// 为本关重新生成一份手序（编辑本关手序）时，从正在用的那份文件带上玩家写的东西：作者、说明、认得的谱面指纹（旧版的也留着）、
+    /// 不认识的顶层字段（编辑器原样读、原样写回）。
+    /// </summary>
+    public void TakeDetailsFrom(CustomFingering used)
+    {
+        Author = used.Author;
+        Comment = used.Comment;
+        foreach (var chart in used.Charts)
+        {
+            if (!Charts.Contains(chart))
+            {
+                Charts.Add(chart);
+            }
+        }
+
+        foreach (var p in used.Extra.Properties())
+        {
+            Extra[p.Name] = p.Value.DeepClone();
+        }
+    }
 
     /// <summary>从当前关卡的砖块和排好的音符生成一份手序（导出给编辑器、测试用）。</summary>
     public static CustomFingering From(IReadOnlyList<TileHit> hits, IReadOnlyList<PlannedNote> notes, bool leftHanded)
@@ -93,21 +142,46 @@ public sealed class CustomFingering
         return hits.Count.ToString(CultureInfo.InvariantCulture) + "-" + BitConverter.ToString(bytes, 0, 12).Replace("-", string.Empty).ToLowerInvariant();
     }
 
-    /// <summary>建议的文件名：「曲师 - 曲名.json」，去掉富文本标签和文件名里不能用的字符。</summary>
+    /// <summary>
+    /// 建议的文件名：「曲师 - 曲名.json」，在 Windows 上一定能用（编辑器 model.js 的 suggestedFileName 是同一规则）：
+    /// 去掉富文本标签和首尾空白；去掉控制字符（U+0000–U+001F、U+007F–U+009F）；\ / : * ? " &lt; &gt; | 换成 _；
+    /// 去掉首尾空白和结尾的点，空了就叫 fingering；第一个点之前（不算结尾的空格）是 CON、PRN、AUX、NUL、COM1–9、LPT1–9 时前面加 _；
+    /// 超过 80 个 UTF-16 字符截到 80，第 80 个是代理对的前一半时截到 79（不把 emoji 切成两半）。
+    /// 复现（2026-11-19 评审 A 低12）：原来按 Path.GetInvalidFileNameChars（Mac 上只有 / 和 \0），CON 照用，截断会切开 emoji。
+    /// </summary>
     public string SuggestedFileName()
     {
         var song = PlainText(Song);
         var artist = PlainText(Artist);
         var name = artist.Length > 0 && song.Length > 0 ? $"{artist} - {song}" : song.Length > 0 ? song : "fingering";
-        var invalid = Path.GetInvalidFileNameChars();
         var sb = new StringBuilder(name.Length);
         foreach (var c in name)
         {
-            sb.Append(Array.IndexOf(invalid, c) >= 0 ? '_' : c);
+            if (char.IsControl(c))
+            {
+                continue;
+            }
+
+            sb.Append(c is '\\' or '/' or ':' or '*' or '?' or '"' or '<' or '>' or '|' ? '_' : c);
         }
 
         var safe = sb.ToString().Trim().TrimEnd('.');
-        return (safe.Length > 80 ? safe.Substring(0, 80) : safe) + ".json";
+        if (safe.Length == 0)
+        {
+            safe = "fingering";
+        }
+
+        if (ReservedName.IsMatch(safe))
+        {
+            safe = "_" + safe;
+        }
+
+        if (safe.Length > MaxFileNameLength)
+        {
+            safe = safe.Substring(0, char.IsHighSurrogate(safe[MaxFileNameLength - 1]) ? MaxFileNameLength - 1 : MaxFileNameLength);
+        }
+
+        return safe + ".json";
     }
 
     /// <summary>去掉游戏曲名里的富文本标签（&lt;color=…&gt; 之类）和首尾空白。</summary>
@@ -158,6 +232,14 @@ public sealed class CustomFingering
         w.WriteEndArray();
         w.WritePropertyName("updatedAt");
         w.WriteValue(UpdatedAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+        foreach (var p in Extra.Properties())
+        {
+            if (!IsKnownField(p.Name))
+            {
+                w.WritePropertyName(p.Name);
+                p.Value.WriteTo(w);
+            }
+        }
     }
 
     /// <summary>hits：[砖号, 时间, 长按, 转角或 null]；notes：[第一块砖号, 最后一块砖号, [[轨道, 长按], …]]。一项一行，方便看 diff。</summary>
@@ -214,12 +296,15 @@ public sealed class CustomFingering
         w.WriteEndArray();
     }
 
-    /// <summary>读一份手序文件。格式不对时抛 <see cref="FormatException"/>，消息说明哪里不对（写日志用）。</summary>
+    /// <summary>
+    /// 读一份手序文件。格式不对时抛 <see cref="FormatException"/>，消息说明哪里不对（写日志用）。
+    /// 不把像日期的文字自动转成日期（作者、说明恰好写成日期时间时原来整份拒绝）；怎么读见 <see cref="FingeringReader"/>。
+    /// </summary>
     public static CustomFingering Parse(string json)
     {
         try
         {
-            return Read(Load(json));
+            return Read(FingeringReader.Load(json));
         }
         catch (Exception ex) when (ex is ArgumentException or OverflowException or InvalidCastException)
         {
@@ -229,33 +314,37 @@ public sealed class CustomFingering
         }
     }
 
-    /// <summary>
-    /// 解析 JSON。不让 Newtonsoft 把像日期的文字自动转成日期（作者、说明恰好写成日期时间时原来整份拒绝）；
-    /// 注释、结尾多余的逗号照旧接受，JSON 后面多出别的内容照旧拒绝（同 JObject.Parse）。
-    /// </summary>
-    private static JObject Load(string json)
+    private static CustomFingering Read(FingeringReader.RawFile raw)
     {
-        try
+        var result = ReadHeader(raw.Header);
+        ReadHits(raw, result);
+        ReadNotes(raw, result);
+        Check(result);
+        foreach (var chart in raw.Charts)
         {
-            using var reader = new JsonTextReader(new StringReader(json)) { DateParseHandling = DateParseHandling.None };
-            var root = JObject.Load(reader);
-            while (reader.Read())
-            {
-                if (reader.TokenType != JsonToken.Comment)
-                {
-                    throw new FormatException("不是有效的 JSON：结尾还有多余的内容");
-                }
-            }
+            result.Charts.Add(chart); // 读的时候已经去掉了重复的、不是文字的、超过 100 个字的
+        }
 
-            return root;
-        }
-        catch (JsonException ex)
+        // 旧文件没有 charts：至少认得它自己记下的那一版
+        var own = ChartPrint(result.Hits);
+        if (!result.Charts.Contains(own))
         {
-            throw new FormatException("不是有效的 JSON：" + ex.Message, ex);
+            result.Charts.Add(own);
         }
+
+        foreach (var p in raw.Header.Properties())
+        {
+            if (!IsKnownField(p.Name))
+            {
+                result.Extra[p.Name] = p.Value.DeepClone();
+            }
+        }
+
+        result.DroppedFields.AddRange(raw.Dropped);
+        return result;
     }
 
-    private static CustomFingering Read(JObject root)
+    private static CustomFingering ReadHeader(JObject root)
     {
         if ((string?)root["format"] != Format)
         {
@@ -285,30 +374,43 @@ public sealed class CustomFingering
             UpdatedAt = DateTimeOffset.TryParse((string?)root["updatedAt"], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var at)
                 ? at : DateTimeOffset.MinValue,
         };
-        if (result.Keys < 1 || result.Keys > 16)
+        if (result.Keys < 1 || result.Keys > MaxKeys)
         {
-            throw new FormatException("keys 必须是 1–16");
+            throw new FormatException($"keys 必须是 1–{MaxKeys}");
         }
 
-        if (root["hits"] is not JArray hits || hits.Count == 0 || hits.Count > MaxHits)
+        return result;
+    }
+
+    private static void ReadHits(FingeringReader.RawFile raw, CustomFingering result)
+    {
+        if (raw.Hits == null || raw.HitCount == 0 || raw.HitCount > MaxHits)
         {
             throw new FormatException($"hits 必须是 1–{MaxHits} 项的数组");
         }
 
-        foreach (var item in hits)
+        foreach (var h in raw.Hits)
         {
-            if (item is not JArray h || h.Count < 3)
+            if (!h.IsArray || h.Count < 3)
             {
                 throw new FormatException("hits 的每一项必须是 [砖号, 时间, 长按, 转角]");
             }
 
-            var angle = h.Count > 3 && h[3].Type != JTokenType.Null ? Num(h[3], "转角") : double.NaN;
-            result.Hits.Add(new TileHit(Int(h[0], "砖号"), Num(h[1], "时间"), Num(h[2], "长按"), angle));
+            var angle = h.Count > 3 && !h.D.IsNull ? Num(h.D, "转角") : double.NaN;
+            result.Hits.Add(new TileHit(Int(h.A, "砖号"), Num(h.B, "时间"), Num(h.C, "长按"), angle));
         }
+    }
 
-        if (root["notes"] is not JArray notes || notes.Count == 0)
+    private static void ReadNotes(FingeringReader.RawFile raw, CustomFingering result)
+    {
+        if (raw.Notes == null || raw.NoteCount == 0)
         {
             throw new FormatException("notes 必须是非空数组");
+        }
+
+        if (raw.NoteCount > MaxHits)
+        {
+            throw new FormatException($"notes 超过 {MaxHits} 项"); // 每个音符至少一块砖，不可能对得上 hits
         }
 
         var timeOf = new Dictionary<int, double>(result.Hits.Count);
@@ -322,59 +424,38 @@ public sealed class CustomFingering
             timeOf[h.TileIndex] = h.Time;
         }
 
-        foreach (var item in notes)
+        foreach (var n in raw.Notes)
         {
-            if (item is not JArray n || n.Count != 3 || n[2] is not JArray lanes)
+            if (!n.IsArray || n.Count != 3 || n.Lanes == null)
             {
                 throw new FormatException("notes 的每一项必须是 [第一块砖号, 最后一块砖号, [[轨道, 长按], …]]");
             }
 
-            var first = Int(n[0], "砖号");
+            var first = Int(n.First, "砖号");
             if (!timeOf.TryGetValue(first, out var time))
             {
                 throw new FormatException($"notes 里的砖号 {first} 不在 hits 里");
             }
 
-            var note = new PlannedNote(first, time) { LastTileIndex = Int(n[1], "砖号") };
-            foreach (var laneItem in lanes)
+            var note = new PlannedNote(first, time) { LastTileIndex = Int(n.Last, "砖号") };
+            foreach (var pair in n.Lanes)
             {
-                if (laneItem is not JArray pair || pair.Count != 2)
+                if (!pair.IsArray || pair.Count != 2)
                 {
                     throw new FormatException("轨道必须写成 [轨道, 长按]");
                 }
 
-                var lane = Int(pair[0], "轨道");
+                var lane = Int(pair.A, "轨道");
                 if (lane < 0 || lane >= result.Keys || note.Lanes.ContainsKey(lane))
                 {
                     throw new FormatException($"砖 {first} 的轨道 {lane} 超出范围或重复");
                 }
 
-                note.Lanes[lane] = Num(pair[1], "长按");
+                note.Lanes[lane] = Num(pair.B, "长按");
             }
 
             result.Notes.Add(note);
         }
-
-        Check(result);
-        if (root["charts"] is JArray charts)
-        {
-            foreach (var chart in charts)
-            {
-                if (chart.Type == JTokenType.String && ((string)chart!).Length <= 100 && !result.Charts.Contains((string)chart!))
-                {
-                    result.Charts.Add((string)chart!);
-                }
-            }
-        }
-
-        // 旧文件没有 charts：至少认得它自己记下的那一版
-        var own = ChartPrint(result.Hits);
-        if (!result.Charts.Contains(own))
-        {
-            result.Charts.Add(own);
-        }
-
-        return result;
     }
 
     /// <summary>砖块按时间排好、不重复；音符按顺序、不重不漏地覆盖全部砖块；每个音符 1 到键数个键。</summary>
@@ -447,37 +528,11 @@ public sealed class CustomFingering
 
     private static bool IsFinite(double value) => !double.IsNaN(value) && !double.IsInfinity(value);
 
-    private static int Int(JToken? token, string what)
-    {
-        if (token == null || token.Type != JTokenType.Integer)
-        {
-            throw new FormatException(what + " 必须是整数");
-        }
+    private static int Int(JToken? token, string what) => FingeringReader.Int(FingeringReader.Scalar.Of(token), what);
 
-        var value = (long)token;
-        if (value < int.MinValue || value > int.MaxValue)
-        {
-            throw new FormatException(what + " 超出范围");
-        }
+    private static int Int(FingeringReader.Scalar value, string what) => FingeringReader.Int(value, what);
 
-        return (int)value;
-    }
-
-    private static double Num(JToken? token, string what)
-    {
-        if (token == null || (token.Type != JTokenType.Integer && token.Type != JTokenType.Float))
-        {
-            throw new FormatException(what + " 必须是数字");
-        }
-
-        var value = (double)token;
-        if (!IsFinite(value))
-        {
-            throw new FormatException(what + " 必须是有限数");
-        }
-
-        return value;
-    }
+    private static double Num(FingeringReader.Scalar value, string what) => FingeringReader.Num(value, what);
 
     private static string Str(JObject root, string name, int max)
     {

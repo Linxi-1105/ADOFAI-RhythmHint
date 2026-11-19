@@ -255,5 +255,8 @@
   "更新清单格式不对": "The update information is invalid",
   "下载失败": "Download failed",
   "下载的文件不完整": "The downloaded file is incomplete",
-  "安装失败": "Installation failed"
+  "安装失败": "Installation failed",
+  "\n{0} 是 {1} 键手序，当前版本只支持 {2} 键，未使用。": "\n{0} is a {1}-key fingering. This version supports only {2} keys, so it is not used.",
+  "\n有 {0} 份像这一关的手序不是 {1} 键，当前版本不支持，未使用：{2}": "\n{0} fingering(s) that look like this level are not {1}-key and are not supported by this version, so they are not used: {2}",
+  "\n有 {0} 个文件无法读取：{1}（原因见日志）{2}": "\n{0} file(s) could not be read: {1} (see the log for details){2}"
 }

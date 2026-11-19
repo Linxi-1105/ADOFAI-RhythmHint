@@ -105,7 +105,7 @@ test('file names typed in the panel are cleaned', () => {
   const input = h.el('fName');
   input.value = 'nul';
   input.dispatch('change', { target: input });
-  assert.equal(h.t.state.doc.fileName, 'nul_.json');
+  assert.equal(h.t.state.doc.fileName, '_nul.json');
   input.value = 'a\u0001b';
   input.dispatch('change', { target: input });
   assert.equal(h.t.state.doc.fileName, 'ab.json');

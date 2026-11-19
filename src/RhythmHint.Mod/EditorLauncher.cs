@@ -77,17 +77,8 @@ internal static class EditorLauncher
         var used = snapshot.Fingering.UsedFile.Length > 0 ? source.Get(snapshot.Fingering.UsedFile) : null;
         if (used != null)
         {
-            fingering.Author = used.Author;
-            fingering.Comment = used.Comment;
-
-            // 作者为更新版重新保存时，手序同时认得旧版和这一版
-            foreach (var chart in used.Charts)
-            {
-                if (!fingering.Charts.Contains(chart))
-                {
-                    fingering.Charts.Add(chart);
-                }
-            }
+            // 作者、说明，旧版的谱面指纹（作者为更新版重新保存时，手序同时认得旧版和这一版），以后的版本加的字段（编辑器原样写回）
+            fingering.TakeDetailsFrom(used);
         }
 
         var labels = settings.KeyLabels.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);

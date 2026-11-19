@@ -9,7 +9,7 @@ namespace RhythmHint.Core.Tests;
 /// </summary>
 public class EditorContractTests
 {
-    private static string Fixtures
+    internal static string Fixtures
     {
         get
         {
