@@ -284,3 +284,121 @@ test('the song script written by the Mod decodes to the same bytes', () => {
   const bytes = globalThis.EditorPlayer.bytesFromBase64(sandbox.window.RHYTHMHINT_AUDIO['recent/sample.ogg']);
   assert.deepEqual(Array.from(bytes), Array.from({ length: 256 }, (_, i) => i));
 });
+
+// ---------- 2026-11-19 评审 D：循环、暂停、解码和波形 ----------
+
+test('a loop shorter than LOOP_MIN never wraps: start == end used to jump back every frame and never sound', () => {
+  const { p, ctx, sources } = decodedSetup();
+  p.seek(10);
+  p.play();
+  let t = 0;
+  for (let f = 0; f < 60; f++) { ctx.currentTime += 1 / 60; t = p.wrapLoop(p.time(), 10, 10); }
+  assert.equal(sources.length, 1); // 声源只在开始播放时建了一次
+  assert.ok(t > 10.9, String(t));
+});
+
+test('a loop wraps once each time the picture passes its end', () => {
+  const { p, ctx, sources } = decodedSetup();
+  p.seek(5);
+  p.play();
+  let wraps = 0;
+  for (let f = 0; f < 150; f++) { // 2.5 秒放 1 秒长的循环
+    ctx.currentTime += 1 / 60;
+    const before = sources.length;
+    const t = p.wrapLoop(p.time(), 5, 6);
+    if (sources.length > before) { wraps++; assert.equal(t, 5); }
+  }
+  assert.equal(wraps, 2);
+});
+
+test('the loop end passed to the clicks is a picture time: with visual calibration the clicks run on to the matching beat', () => {
+  const { p, starts } = setup();
+  p.calibration = 0.09;
+  // 画面 9.95 = 音乐 10.04；循环终点画面 10.00 = 音乐 10.09：10.05、10.08 两拍在绕回之前就听到了，10.12 不排
+  schedule(p, 9.95, [10.05, 10.08, 10.12], 10);
+  assert.equal(starts.length, 2);
+});
+
+test('pausing right after the song begins, before the next frame, keeps the <audio> silent', () => {
+  withFakeClock(clock => {
+    const el = slowStartAudio(clock, 0.1);
+    let plays = 0;
+    const play = el.play;
+    el.play = function () { plays++; return play.call(this); };
+    const p = new globalThis.EditorPlayer(el);
+    p.hasAudio = true;
+    p.baseOffset = -1; // 画面走到 1 秒时音乐开头
+    p.seek(0);
+    p.play();
+    clock.now += 1.01; // 刚越过音乐开头，下一帧还没来得及取画面时间
+    p.pause();
+    assert.equal(plays, 0);
+    assert.equal(el.paused, true);
+    near(p.time(), 1.01);
+  });
+});
+
+test('decoding hands the whole byte buffer over without another copy', () => {
+  const seen = [];
+  globalThis.OfflineAudioContext = class { decodeAudioData(data) { seen.push(data); return Promise.resolve({}); } };
+  try {
+    const bytes = globalThis.EditorPlayer.bytesFromBase64(Buffer.from([1, 2, 3, 4, 5]).toString('base64'));
+    globalThis.EditorPlayer.decode(bytes, 48000);
+    assert.equal(seen[0], bytes.buffer);
+    globalThis.EditorPlayer.decode(new Uint8Array([9, 8, 7, 6, 5, 4]).subarray(1, 5)); // 只占缓冲的一段：只取这一段
+    assert.deepEqual(Array.from(new Uint8Array(seen[1])), [8, 7, 6, 5]);
+  } finally {
+    delete globalThis.OfflineAudioContext;
+  }
+});
+
+test('long song scripts decode in pieces to the same bytes', () => {
+  const raw = Buffer.alloc(2.5 * 1024 * 1024 + 2);
+  for (let i = 0; i < raw.length; i++) raw[i] = (i * 7919) >> 3 & 255;
+  for (const n of [raw.length, 1, 2, 3]) {
+    const bytes = globalThis.EditorPlayer.bytesFromBase64(raw.subarray(0, n).toString('base64'));
+    assert.equal(bytes.length, n);
+    assert.ok(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length).equals(raw.subarray(0, n)), String(n));
+  }
+  // 浏览器自带的换法（node 里没有，借 Buffer 装一个）
+  Uint8Array.fromBase64 = s => new Uint8Array(Buffer.from(s, 'base64'));
+  try {
+    assert.deepEqual(Array.from(globalThis.EditorPlayer.bytesFromBase64(Buffer.from([7, 8, 9]).toString('base64'))), [7, 8, 9]);
+  } finally {
+    delete Uint8Array.fromBase64;
+  }
+});
+
+/** 原来的整首算法（每个采样开方再取最大）：分段算出来要和它一样。 */
+function wholePeaks(buffer, perSecond) {
+  const frames = Math.max(1, Math.floor(buffer.sampleRate / perSecond));
+  const out = new Uint8Array(Math.ceil(buffer.length / frames));
+  for (let c = 0; c < buffer.numberOfChannels; c++) {
+    const data = buffer.getChannelData(c);
+    for (let i = 0; i < data.length; i++) {
+      const k = (i / frames) | 0, v = Math.round(Math.sqrt(Math.min(1, Math.abs(data[i]))) * 255);
+      if (v > out[k]) out[k] = v;
+    }
+  }
+  return out;
+}
+
+test('the waveform is built in slices: a step stops at its deadline and the finished part is already right', () => {
+  const sampleRate = 4400, length = sampleRate * 40 + 123;
+  const channels = [new Float32Array(length), new Float32Array(length)];
+  for (let i = 0; i < length; i++) {
+    channels[0][i] = Math.sin(i / 7) * ((i >> 9) % 5) / 4;
+    channels[1][i] = i % 997 === 0 ? -1.5 : Math.cos(i / 3) * 0.1;
+  }
+  const buffer = { sampleRate, length, numberOfChannels: 2, getChannelData: c => channels[c] };
+  const expected = wholePeaks(buffer, 100);
+  const wave = globalThis.EditorPlayer.waveform(buffer, 100);
+  assert.equal(wave.perSecond, 100);
+  assert.equal(wave.peaks.length, expected.length);
+  assert.equal(wave.step(-Infinity), false); // 期限已过：只算一段就交还
+  assert.ok(wave.done > 0 && wave.done < expected.length, String(wave.done));
+  assert.deepEqual(Array.from(wave.peaks.subarray(0, wave.done)), Array.from(expected.subarray(0, wave.done)));
+  assert.ok(wave.peaks.subarray(wave.done).every(v => v === 0)); // 没算到的先画成没有声音
+  while (!wave.step(-Infinity));
+  assert.deepEqual(Array.from(wave.peaks), Array.from(expected));
+});

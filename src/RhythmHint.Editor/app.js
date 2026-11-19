@@ -272,13 +272,15 @@
     tag.src = doc.audio.script + '?v=' + Date.now();
     tag.onload = async () => {
       tag.remove();
-      const text = take();
+      let text = take();
       if (typeof text !== 'string' || state.doc !== doc) return;
       try {
-        const buffer = await window.EditorPlayer.decode(window.EditorPlayer.bytesFromBase64(text), player.ctx && player.ctx.sampleRate);
+        const bytes = window.EditorPlayer.bytesFromBase64(text);
+        text = null; // 换成字节后不再留着几十 MB 的文本，解码期间就能回收
+        const buffer = await window.EditorPlayer.decode(bytes, player.ctx && player.ctx.sampleRate);
         if (state.doc !== doc || manualAudio) return; // 解码期间换了关卡或手动选了音乐
         player.useBuffer(buffer);
-        if (!state.waveform) state.waveform = window.peaksFromBuffer(buffer, 100); // 自制关卡游戏里读不到采样，这里补上波形
+        if (!state.waveform) startWaveform(buffer); // 自制关卡游戏里读不到采样，这里补上波形
         renderAudioName();
       } catch (e) {
         console.warn('RhythmHint: decoding the song failed, keeping <audio>', e);
@@ -297,10 +299,22 @@
       const buffer = await window.EditorPlayer.decode(new Uint8Array(await file.arrayBuffer()), player.ctx && player.ctx.sampleRate);
       if (manualAudio !== file.name || player.el.src !== url) return; // 解码期间又换了音乐
       player.useBuffer(buffer);
-      state.waveform = window.peaksFromBuffer(buffer, 100);
+      startWaveform(buffer);
     } catch (e) {
       toast(state.t('audio.failed', errorText(e)), 'error');
     }
+  }
+  // 解码好的音乐分段算波形，每帧算一点、算好的先画（整首一次算完时长歌会让画面冻住零点几秒、打拍声漏掉）
+  const WAVE_MS = 3; // 每帧最多花在算波形上的毫秒数
+  let waveJob = null;
+  function startWaveform(buffer) {
+    waveJob = window.EditorPlayer.waveform(buffer, 100);
+    state.waveform = waveJob;
+  }
+  function stepWaveform() {
+    if (!waveJob) return;
+    // 换了关卡或音乐（波形换成了别的）就不用再算
+    if (state.waveform !== waveJob || waveJob.step(performance.now() + WAVE_MS)) waveJob = null;
   }
   $('loadAudio').addEventListener('click', () => $('audioInput').click());
   $('audioInput').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) loadAudioFile(f); });
@@ -991,13 +1005,17 @@
     if (state.timeTarget !== null) { state.time = state.timeTarget; state.timeTarget = null; }
     if (player.playing) { player.pause(); state.time = player.time(); }
     else { player.seek(state.time); player.play(); }
-    state.playing = player.playing;
-    renderPlayButton();
-    restart($('playBtn'), 'swap');
+    renderPlayButton(true);
     state.lastTime = state.time;
   }
-  function renderPlayButton() {
+  /**
+   * 播放按钮跟着播放器：播放中显示暂停。播放器自己停下（放到歌曲末尾）时由 frame 调用，换关卡时由 loadDoc 调用；
+   * swap 为 true 时播一下换图标的动画（按按钮、歌曲放完）。
+   */
+  function renderPlayButton(swap) {
+    state.playing = player.playing;
     $('playBtn').innerHTML = '<svg><use href="#i-' + (state.playing ? 'pause' : 'play') + '"/></svg>';
+    if (swap) restart($('playBtn'), 'swap');
     $('playBtn').title = state.t(state.playing ? 'tr.pause' : 'tr.play');
   }
   $('playBtn').addEventListener('click', togglePlay);
@@ -1008,9 +1026,15 @@
     if (!state.doc) return;
     state.loop[which] = state.time;
     if (state.loop.a !== null && state.loop.b !== null && state.loop.b < state.loop.a) [state.loop.a, state.loop.b] = [state.loop.b, state.loop.a];
-    if (state.loop.a !== null && state.loop.b !== null) state.loop.on = true;
+    if (state.loop.a !== null && state.loop.b !== null) state.loop.on = loopLongEnough();
     player.cancelClicks();
     renderLoop();
+  }
+  /** 区间太短不开循环（暂停时按 [ 再按 ] 起点就等于终点：每帧都跳回起点，一直没有声音），提示一下。 */
+  function loopLongEnough() {
+    if (state.loop.b - state.loop.a >= window.EditorPlayer.LOOP_MIN) return true;
+    toast(state.t('loop.tooShort'), 'warn');
+    return false;
   }
   function renderLoop() {
     $('loopA').classList.toggle('on', state.loop.a !== null);
@@ -1021,7 +1045,7 @@
   $('loopB').addEventListener('click', () => setLoop('b'));
   $('loopBtn').addEventListener('click', () => {
     if (state.loop.on) { state.loop = { a: null, b: null, on: false }; }
-    else if (state.loop.a !== null && state.loop.b !== null) state.loop.on = true;
+    else if (state.loop.a !== null && state.loop.b !== null) state.loop.on = loopLongEnough();
     player.cancelClicks();
     renderLoop();
   });
@@ -1052,7 +1076,7 @@
     const box = state.box;
     if (!box || !state.doc) return;
     if (!player.playing && dt > 0) {
-      const h = canvas.clientHeight, y = box.y1;
+      const h = view.h, y = box.y1; // 画布高度用 resize 时量好的，不每帧重新量
       const k = y < BOX_EDGE ? (BOX_EDGE - y) / BOX_EDGE : y > h - BOX_EDGE ? -(y - (h - BOX_EDGE)) / BOX_EDGE : 0;
       if (k) {
         const notes = state.doc.notes, speed = Math.sign(k) * Math.min(2, k * k) * 1400; // 像素每秒
@@ -1079,10 +1103,11 @@
       else state.time += d * 0.22;
     }
     if (state.doc) {
+      stepWaveform();
       if (player.playing) {
         const prev = state.lastTime;
         let t = player.time();
-        if (state.loop.on && state.loop.b !== null && t >= state.loop.b) { t = state.loop.a; player.seek(t); }
+        if (state.loop.on) t = player.wrapLoop(t, state.loop.a, state.loop.b);
         const end = songEnd();
         if (t > end) { togglePlay(); t = end; }
         state.time = t;
@@ -1096,26 +1121,41 @@
         }
         state.lastTime = t;
       }
-      state.playing = player.playing;
-      $('timeNow').textContent = fmt(state.time);
-      $('timeEnd').textContent = '/ ' + fmt(songEnd()).replace(/\.\d+$/, '');
+      if (state.playing !== player.playing) { // 播放器自己停了（放到歌曲末尾、换关卡）：停在它停的地方，按钮变回播放
+        if (!player.playing) state.time = player.time();
+        renderPlayButton(true);
+      }
+      renderClock();
     }
     view.draw(state);
-    if (prefs.track && state.doc) track.draw(state.time, state.t('view.track'), state.t('view.experimental'));
+    // 卡片藏起来时不画：画布大小是 0，轨道预览会每帧重新量尺寸
+    if (prefs.track && state.doc && !$('trackCard').hidden) track.draw(state.time, state.t('view.track'), state.t('view.experimental'));
     drawMinimap();
     requestAnimationFrame(frame);
   }
 
+  /** 播放条上的时间：文字变了才改（每帧都改会让页面每帧重新排版）。 */
+  let clockText = '', endText = '';
+  function renderClock() {
+    const now = fmt(state.time), end = '/ ' + fmt(songEnd()).replace(/\.\d+$/, '');
+    if (now !== clockText) $('timeNow').textContent = clockText = now;
+    if (end !== endText) $('timeEnd').textContent = endText = end;
+  }
+
   // ---------- 概览 ----------
   const mini = $('minimap'), mg = mini.getContext('2d');
-  function drawMinimap() {
+  const miniSize = { w: 0, h: 0, dpr: 1 };
+  /** 量概览画布、按像素比分配像素。只在尺寸、像素比变了时量：每帧量会在刚改完时间文字后强制页面重新排版。 */
+  function sizeMinimap() {
     const r = mini.getBoundingClientRect(), dpr = Math.max(1, window.devicePixelRatio || 1);
-    if (mini.width !== Math.round(r.width * dpr) || mini.height !== Math.round(r.height * dpr)) {
-      mini.width = Math.round(r.width * dpr);
-      mini.height = Math.round(r.height * dpr);
-    }
+    Object.assign(miniSize, { w: r.width, h: r.height, dpr });
+    mini.width = Math.round(r.width * dpr);
+    mini.height = Math.round(r.height * dpr);
+  }
+  if (window.ResizeObserver) new ResizeObserver(() => sizeMinimap()).observe(mini); // 概览刚显示出来、大小变了
+  function drawMinimap() {
+    const { w, h, dpr } = miniSize;
     mg.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const w = r.width, h = r.height;
     mg.clearRect(0, 0, w, h);
     const doc = state.doc;
     if (!doc || !w) return;
@@ -1641,6 +1681,7 @@
   function resize() {
     view.resize();
     if (prefs.track) track.resize();
+    sizeMinimap();
     const left = openPanel ? 354 : 0;
     const target = insetTween ? insetTween.to : state.leftInset;
     if (left !== target) {
@@ -1656,6 +1697,13 @@
     if (k >= 1) insetTween = null;
   }
   window.addEventListener('resize', resize);
+  // 拖到缩放比例不同的显示器上：像素比变了不一定有 resize 事件，按新的像素比重新分配画布像素（不然会糊）。
+  // 每次只盯「现在的像素比」，变了就重新量、换成盯新的
+  (function watchPixelRatio() {
+    if (!window.matchMedia) return;
+    const query = window.matchMedia('(resolution: ' + (window.devicePixelRatio || 1) + 'dppx)');
+    if (query.addEventListener) query.addEventListener('change', () => { resize(); watchPixelRatio(); }, { once: true });
+  })();
 
   // ---------- 开始 ----------
   langSelect.value = I18N.LANGUAGES.some(([c]) => c === pickLanguage()) ? pickLanguage() : 'en';

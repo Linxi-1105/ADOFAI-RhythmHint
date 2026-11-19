@@ -7,6 +7,9 @@
   'use strict';
 
   const START_LEAD = 0.02; // 解码好的音乐提前 20 毫秒排好再放：起点准确落在排定的采样上
+  const LOOP_MIN = 0.05; // 循环区间至少 50 毫秒：起点等于终点时每帧都跳回起点、重建声源，永远不出声
+  const BASE64_PIECE = 4 << 18; // 歌曲数据按 1 MB 文字一段换成字节（4 的倍数），不用先拼出一整份二进制字符串
+  const WAVE_SLICE = 100; // 波形每段算多少个峰值（每秒 100 个峰值时是 1 秒音乐）
 
   class Player {
     constructor(el) {
@@ -89,12 +92,17 @@
       });
     }
 
+    /** 自己的时钟走到的谱面时间（没有音乐、还没到音乐开头时用）。 */
+    clockTime(now = performance.now()) {
+      return this.clock + (now - this.clockAt) / 1000 * this.rate;
+    }
+
     time() {
       const now = performance.now();
       if (!this.playing) return this.clock;
       if (this.buffer) return this.bufferPosition() - this.offset;
       if (!this.hasAudio || this.preroll) {
-        const t = this.clock + (now - this.clockAt) / 1000 * this.rate;
+        const t = this.clockTime(now);
         if (this.preroll && t + this.offset >= 0) this.startAudio(t);
         return t;
       }
@@ -133,6 +141,16 @@
           if (this.playing && this.preroll) { this.preroll = false; this.el.play().catch(() => {}); }
         }
       }
+    }
+
+    /**
+     * A-B 循环（画面时间）：播放中走过终点就跳回起点，返回这一帧的画面时间。
+     * 区间短于 LOOP_MIN 不绕回（界面也不让开）：起点等于终点时每帧都会跳回起点、重建声源，永远不出声。
+     */
+    wrapLoop(t, a, b) {
+      if (!this.playing || a === null || b === null || !(b - a >= LOOP_MIN) || t < b) return t;
+      this.seek(a);
+      return a;
     }
 
     play() {
@@ -175,6 +193,9 @@
       if (this.buffer) {
         this.clock = this.time();
         this.stopSource();
+      } else if (this.preroll || !this.hasAudio) {
+        // 还没到音乐开头（或没有音乐）：按自己的时钟记位置。不能调 time()，刚越过音乐开头时它会接上音乐、调 el.play()
+        this.clock = this.clockTime();
       } else {
         // 先停 <audio> 再记位置：停住后 time() 就是它真正停的地方，原地继续时不用再跳一次（跳一次在 OGG、MP3 里就可能错位）
         this.el.pause();
@@ -303,16 +324,20 @@
       this.pending.clear();
     }
 
-    /** 把未来 120 毫秒的打拍声交给 Web Audio，排在音乐放到那一拍的同一个采样上。 */
+    /**
+     * 把未来 120 毫秒的打拍声交给 Web Audio，排在音乐放到那一拍的同一个采样上。
+     * visualTime、loopEnd 是画面时间（循环在画面走到终点时绕回）；音符按音乐拍点时间排，两者差一个画面校准。
+     */
     scheduleClicks(visualTime, notes, firstNoteAt, loopEnd = Infinity) {
       const ctx = this.ctx;
       if (!this.playing || !ctx || ctx.state !== 'running') return;
       if (!this.buffer && this.hasAudio && !this.preroll && (this.mediaStart !== null || this.el.seeking || this.el.paused || this.el.readyState < 3)) return;
 
-      const musicTime = visualTime + (this.hasAudio ? this.calibration : 0);
+      const calibration = this.hasAudio ? this.calibration : 0;
+      const musicTime = visualTime + calibration;
       const now = this.renderedBeat(musicTime);
       // 还没到音乐开头：<audio> 起播要多久事先不知道，音乐开头之后的拍子等它真正走起来再排
-      const until = Math.min(now + 0.12 * this.rate, loopEnd, this.preroll ? this.calibration - this.offset : Infinity);
+      const until = Math.min(now + 0.12 * this.rate, loopEnd + calibration, this.preroll ? this.calibration - this.offset : Infinity);
       const from = Math.max(this.scheduledUntil ?? musicTime, musicTime - 0.02 * this.rate);
       for (let i = firstNoteAt(from); i < notes.length && notes[i].time < until; i++) {
         this.click(notes[i].lanes.length > 1, (notes[i].time - now) / this.rate);
@@ -382,35 +407,62 @@
     }
   }
 
-  /** Mod 另存的歌曲数据（base64 文本）换回字节。 */
+  /**
+   * Mod 另存的歌曲数据（base64 文本）换回字节。浏览器自带 Uint8Array.fromBase64 时直接用；
+   * 没有时一段一段换，不先拼出和文件一样大的二进制字符串（64 MB 的歌少占 64 MB）。
+   */
   Player.bytesFromBase64 = function (text) {
-    const binary = atob(text), out = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+    if (typeof Uint8Array.fromBase64 === 'function') return Uint8Array.fromBase64(text);
+    const pad = text.endsWith('==') ? 2 : text.endsWith('=') ? 1 : 0;
+    const out = new Uint8Array(Math.floor(text.length * 3 / 4) - pad);
+    for (let i = 0, o = 0; i < text.length; i += BASE64_PIECE) {
+      const binary = atob(text.slice(i, i + BASE64_PIECE));
+      for (let k = 0; k < binary.length; k++) out[o++] = binary.charCodeAt(k);
+    }
     return out;
   };
 
-  /** 整首解码（离线的 AudioContext，不用等玩家点一下页面；解出来的声音哪个 AudioContext 都能放）。 */
+  /**
+   * 整首解码（离线的 AudioContext，不用等玩家点一下页面；解出来的声音哪个 AudioContext 都能放）。
+   * 字节占满整个缓冲时直接交出去、不再拷一份（几十 MB 的歌）；解码会拿走这块内存，之后 bytes 不能再用。
+   */
   Player.decode = function (bytes, sampleRate) {
     const Offline = root.OfflineAudioContext || root.webkitOfflineAudioContext;
     if (!Offline) return Promise.reject(new Error('Web Audio unavailable'));
-    const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    const whole = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength;
+    const data = whole ? bytes.buffer : bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
     return new Offline(2, 1, sampleRate || 48000).decodeAudioData(data);
   };
 
-  /** 从解码好的音乐算波形（每秒 perSecond 个峰值，0–255）。 */
-  function peaksFromBuffer(buffer, perSecond) {
+  /**
+   * 从解码好的音乐算波形（每秒 perSecond 个峰值，0–255），分段算：step(deadline) 一段段算到 performance.now() 过了 deadline
+   * （至少算一段），算完返回 true。没算到的峰值是 0，算好的部分先能画。整首一次算完时 5 分钟的歌占主线程 130 毫秒、
+   * 20 分钟 500 毫秒，画面会冻住、打拍声可能漏掉。
+   */
+  Player.waveform = function (buffer, perSecond) {
     const frames = Math.max(1, Math.floor(buffer.sampleRate / perSecond));
-    const out = new Uint8Array(Math.ceil(buffer.length / frames));
-    for (let c = 0; c < buffer.numberOfChannels; c++) {
-      const data = buffer.getChannelData(c);
-      for (let i = 0; i < data.length; i++) {
-        const k = (i / frames) | 0, v = Math.round(Math.sqrt(Math.min(1, Math.abs(data[i]))) * 255);
-        if (v > out[k]) out[k] = v;
-      }
-    }
-    return { peaks: out, perSecond: buffer.sampleRate / frames };
-  }
+    const peaks = new Uint8Array(Math.ceil(buffer.length / frames));
+    const channels = Array.from({ length: buffer.numberOfChannels }, (_, c) => buffer.getChannelData(c));
+    let done = 0;
+    return {
+      peaks, perSecond: buffer.sampleRate / frames,
+      get done() { return done; },
+      step(deadline) {
+        do {
+          const end = Math.min(peaks.length, done + WAVE_SLICE);
+          for (let k = done; k < end; k++) {
+            const from = k * frames, to = Math.min(buffer.length, from + frames);
+            let max = 0;
+            for (const data of channels) for (let i = from; i < to; i++) { const v = Math.abs(data[i]); if (v > max) max = v; }
+            peaks[k] = Math.round(Math.sqrt(Math.min(1, max)) * 255); // 先取最大再开方：和逐个采样开方取最大一样，快几倍
+          }
+          done = end;
+        } while (done < peaks.length && performance.now() < deadline);
+        return done >= peaks.length;
+      },
+    };
+  };
 
+  Player.LOOP_MIN = LOOP_MIN;
   root.EditorPlayer = Player;
-  root.peaksFromBuffer = peaksFromBuffer;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

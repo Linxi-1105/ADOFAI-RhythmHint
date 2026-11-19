@@ -51,7 +51,9 @@ class FakePlayer {
   setVolume() {} setRate() {} setHitSound() {} cancelClicks() {} scheduleClicks() {} useBuffer() {}
   seek(t) { this.clock = t; } pause() { this.playing = false; } play() { this.playing = true; } time() { return this.clock; }
   load() { return Promise.resolve(false); }
+  wrapLoop(t) { return t; } // 假播放器不走时间，不用绕回
 }
+FakePlayer.LOOP_MIN = 0.05; // 循环区间下限，同 audio.js 的 LOOP_MIN
 FakePlayer.decode = async () => ({});
 FakePlayer.bytesFromBase64 = () => new Uint8Array(0);
 class FakeTrack { constructor() { this.zoomTarget = 1; } setDoc() {} draw() {} resize() {} setZoom(z) { return z; } }

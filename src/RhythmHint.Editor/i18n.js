@@ -223,6 +223,8 @@
     'err.badFile': ['文件内容有误（{0}）', '檔案內容有誤（{0}）', 'The file is damaged ({0})', '파일 내용에 오류가 있습니다({0})', 'ファイルの内容に誤りがあります（{0}）'],
     'err.notJson': ['不是有效的 JSON', '不是有效的 JSON', 'Not valid JSON', '올바른 JSON이 아닙니다', '有効な JSON ではありません'],
     'err.notSession': ['游戏导出的数据不完整', '遊戲匯出的資料不完整', 'The data exported by the game is incomplete', '게임에서 내보낸 데이터가 불완전합니다', 'ゲームが書き出したデータが不完全です'],
+
+    'loop.tooShort': ['循环起点和终点太近，未开启循环。', '循環起點和終點太近，未開啟循環。', 'The loop start and end are too close. The loop is not turned on.', '반복 시작점과 끝점이 너무 가까워 반복을 켜지 않았습니다.', 'ループの開始点と終了点が近すぎるため、ループをオンにしていません。'],
   };
 
   const INDEX = { 'zh-Hans': 0, 'zh-Hant': 1, en: 2, ko: 3, ja: 4 };

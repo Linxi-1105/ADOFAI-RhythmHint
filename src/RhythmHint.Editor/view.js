@@ -23,6 +23,7 @@
     judgeLine: '#474752', judgeFill: '#29292e', judgeRim: '#80808c', judgeInner: '#52525c', ballShadow: 'rgba(0,0,0,0.75)',
   };
   const FLASH_MS = 180; // LaneView.FlashSeconds
+  const DOT_STEP = 22; // 背景点阵的间距（CSS 像素）
 
   function hexToRgb(hex) {
     const n = parseInt(hex.slice(1), 16);
@@ -161,12 +162,32 @@
       if (state.box) this.drawBox(state.box);
     }
 
+    /** 背景点阵：跟着谱面滚动。一格一个点画成小图块，整块铺一次（原来每帧画约 4000 个小方块）。 */
     drawDots(state) {
-      const g = this.g, step = 22;
-      const shift = ((state.time * state.pxPerSec) % step + step) % step;
-      g.fillStyle = COLORS.dot;
-      for (let y = -step + shift; y < this.h; y += step)
-        for (let x = (state.leftInset % step); x < this.w; x += step) g.fillRect(x, y, 1.5, 1.5);
+      const dots = this.dotTile();
+      if (!dots) return;
+      const g = this.g, step = DOT_STEP, k = dots.scale;
+      const x0 = state.leftInset % step, y0 = ((state.time * state.pxPerSec) % step + step) % step;
+      g.save();
+      g.translate(x0, y0); // 图块的原点就是一个点
+      g.scale(k, k);
+      g.fillStyle = dots.pattern;
+      g.fillRect(0, -y0 / k, (this.w - x0) / k, this.h / k);
+      g.restore();
+    }
+
+    /** 点阵的小图块按屏幕像素画（像素比变了重画），铺的时候缩回一格 DOT_STEP 宽。没有离屏画布时不画点阵。 */
+    dotTile() {
+      if (this.dots && this.dots.dpr === this.dpr) return this.dots;
+      const doc = root.document, size = Math.max(1, Math.round(DOT_STEP * this.dpr));
+      if (!doc || !doc.createElement) return null;
+      const tile = doc.createElement('canvas');
+      tile.width = tile.height = size;
+      const tg = tile.getContext('2d');
+      tg.fillStyle = COLORS.dot;
+      tg.fillRect(0, 0, 1.5 * this.dpr, 1.5 * this.dpr);
+      this.dots = { dpr: this.dpr, pattern: this.g.createPattern(tile, 'repeat'), scale: DOT_STEP / size };
+      return this.dots;
     }
 
     /** 整块面板：一张卡片、一行标题，轨道列是游戏面板的底色，时间尺、波形、间隔这几列稍亮，列之间细线隔开。 */
@@ -345,7 +366,7 @@
       g.clip();
       for (let i = this.firstVisible(t0 - 30); i < doc.notes.length && doc.notes[i].time <= t1; i++) {
         const n = doc.notes[i], r = refs.get(n.tile);
-        if (!r) continue;
+        if (!r || n.time + r.lanes.reduce((m, l) => Math.max(m, l[1]), 0) < t0) continue; // 连长按尾巴都过了判定线：看不见
         const differs = r.lastTile !== n.lastTile || r.lanes.map(l => l[0]).join() !== lanesOf(n, state).map(l => l[0]).join();
         const y = this.yAt(n.time, state), color = colorOf(r);
         g.globalAlpha = differs ? 1 : 0.22;
