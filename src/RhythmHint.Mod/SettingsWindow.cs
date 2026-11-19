@@ -336,9 +336,14 @@ internal sealed partial class SettingsWindow
         Fill(help, With(Surface3, helpHover), 8);
         Icon(help.center, 19, "help", Mix(Text2, Text, helpHover));
 
-        if (UpdateNotice.Newer is { } newer)
+        var text = AutoUpdater.State switch
         {
-            var text = Lang.T("有新版本 {0}", newer);
+            UpdateState.Installed => Lang.T("重启后更新到 {0}", AutoUpdater.Version),
+            UpdateState.Downloading => Lang.T("正在下载新版本 {0}", AutoUpdater.Version),
+            _ => UpdateNotice.Newer is { } newer ? Lang.T("有新版本 {0}", newer) : null,
+        };
+        if (text != null)
+        {
             var w = Measure(text, 13, Face.Body, true).x + 46;
             var pill = new Rect(help.x - 10 - w, 15, w, 30);
             if (_ui.Click(pill))
@@ -428,7 +433,7 @@ internal sealed partial class SettingsWindow
         Page.Rules => ("hand", Lang.T("排键"), Lang.T("排法、惯用手、轮指")),
         Page.Custom => ("pen", Lang.T("专属手序"), Lang.T("为一首歌定制并分享")),
         Page.Calib => ("target", Lang.T("校准"), Lang.T("演示预览与画面偏移")),
-        Page.General => ("gear", Lang.T("通用"), Lang.T("语言、快捷键、运行状态")),
+        Page.General => ("gear", Lang.T("通用"), Lang.T("语言、快捷键、更新、运行状态")),
         Page.About => ("info", Lang.T("关于"), Lang.T("版本、交流群、仓库")),
         _ => ("home", Lang.T("概览"), Lang.T("快速上手与当前状态")),
     };

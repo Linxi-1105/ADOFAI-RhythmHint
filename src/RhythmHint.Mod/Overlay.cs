@@ -187,6 +187,7 @@ internal sealed class Overlay : MonoBehaviour
             if (!_preloaded)
             {
                 _preloaded = true;
+                AutoUpdater.Start(this);
                 Preload();
             }
 

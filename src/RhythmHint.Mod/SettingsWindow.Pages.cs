@@ -353,7 +353,7 @@ internal sealed partial class SettingsWindow
 
     private void GeneralPage(Settings s, Overlay overlay)
     {
-        PageHeader(Page.General, Lang.T("界面语言、打开本窗口的按键和 Mod 的运行状态。"));
+        PageHeader(Page.General, Lang.T("界面语言、打开本窗口的按键、自动更新和 Mod 的运行状态。"));
 
         // 语言名用它自己的文字写（不翻译），「跟随游戏」翻译；三个一行
         _ui.BeginCard("language", "globe", Lang.T("界面语言"));
@@ -389,6 +389,10 @@ internal sealed partial class SettingsWindow
         _ui.Hint(Lang.T("也可在 Unity Mod Manager（Ctrl+F10）中打开本窗口。"));
         _ui.EndCard();
 
+        _ui.BeginCard("update", "download", Lang.T("更新"));
+        s.AutoUpdate = _ui.Switch("autoUpdate", "refresh", Lang.T("自动更新"), Lang.T("启动游戏时检查新版本并在后台下载安装，下次启动游戏时生效。"), s.AutoUpdate);
+        _ui.EndCard();
+
         _ui.BeginCard("state", "log", Lang.T("运行状态"));
         var status = overlay.Status;
         var sw = _ui.Width - (Ui.Pad * 2) - 28;
@@ -403,7 +407,7 @@ internal sealed partial class SettingsWindow
 
         ResetFooter(overlay, "general", () =>
         {
-            s.ResetHotkey();
+            s.ResetGeneral();
             _hotkeyPicker.Close();
         }, Lang.T("界面语言保持不变。"));
     }
@@ -434,25 +438,63 @@ internal sealed partial class SettingsWindow
 
     // ---------- 关于 ----------
 
+    /// <summary>
+    /// 关于页顶部的更新卡片：自动更新装好了（重启生效）、正在下载、失败了（重试 / 下载页），
+    /// 或者只知道有新版本（自动更新关着、测试版）时照旧给 UMM 一键更新和下载页。
+    /// </summary>
+    private void UpdateCard(string? home)
+    {
+        var state = AutoUpdater.State;
+        if (state == UpdateState.Installed)
+        {
+            _ui.BeginCard("update", fill: new Color(0.11f, 0.16f, 0.13f), border: With(Ok, 0.35f));
+            _ui.Row(null, Lang.T("已安装新版本 {0}", AutoUpdater.Version), Lang.T("重启游戏后生效。旧版文件备份于 Mod 文件夹的 .update 目录。"), 0, 36);
+            _ui.EndCard();
+            return;
+        }
+
+        if (state == UpdateState.Downloading)
+        {
+            _ui.BeginCard("update", fill: new Color(0.17f, 0.155f, 0.11f), border: With(Warn, 0.35f));
+            _ui.Row(null, Lang.T("正在下载新版本 {0}", AutoUpdater.Version), Lang.T("下载并安装完成后，重启游戏即可生效。"), 0, 36);
+            _ui.EndCard();
+            return;
+        }
+
+        if (UpdateNotice.Newer is not { } newer)
+        {
+            return;
+        }
+
+        _ui.BeginCard("update", fill: new Color(0.17f, 0.155f, 0.11f), border: With(Warn, 0.35f));
+        var failed = state == UpdateState.Failed;
+        var text = failed
+            ? Lang.T("自动更新失败（{0}）。可重试，或从交流 QQ 群的群文件、夸克网盘下载。", Lang.T(AutoUpdater.Error))
+            : Lang.T("可在 UMM 安装器的 Mods 页右键本 Mod，选择 Update 一键更新；也可从交流 QQ 群的群文件下载。");
+        var retry = Lang.T("重试");
+        var label = Lang.T("打开下载页");
+        var rw = failed ? Ui.ButtonWidth(retry, "refresh") : 0;
+        var dw = string.IsNullOrEmpty(home) ? 0 : Ui.ButtonWidth(label, "download");
+        var gap = rw > 0 && dw > 0 ? 8 : 0;
+        var r = _ui.Row(null, Lang.T("有新版本 {0}", newer), text, rw + gap + dw, 36);
+        if (rw > 0 && _ui.Button("retry", new Rect(r.x, r.y, rw, r.height), retry, "refresh", ButtonKind.Primary) && Main.Overlay != null)
+        {
+            AutoUpdater.Start(Main.Overlay, now: true);
+        }
+
+        if (dw > 0 && _ui.Button("download", new Rect(r.xMax - dw, r.y, dw, r.height), label, "download", failed ? ButtonKind.Normal : ButtonKind.Primary))
+        {
+            Browser.Open(home + "/releases/latest");
+        }
+
+        _ui.EndCard();
+    }
+
     private void AboutPage()
     {
         PageHeader(Page.About, Lang.T("仅提供视觉提示，不修改判定。"));
         var info = Main.Mod.Info;
-        if (UpdateNotice.Newer is { } newer)
-        {
-            _ui.BeginCard("update", fill: new Color(0.17f, 0.155f, 0.11f), border: With(Warn, 0.35f));
-            var home = info.HomePage;
-            var text = Lang.T("可在 UMM 安装器的 Mods 页右键本 Mod，选择 Update 一键更新；也可从交流 QQ 群的群文件下载。");
-            var label = Lang.T("打开下载页");
-            var bw = string.IsNullOrEmpty(home) ? 0 : Ui.ButtonWidth(label, "download");
-            var r = _ui.Row(null, Lang.T("有新版本 {0}", newer), text, bw, 36);
-            if (bw > 0 && _ui.Button("download", r, label, "download", ButtonKind.Primary))
-            {
-                Browser.Open(home + "/releases/latest");
-            }
-
-            _ui.EndCard();
-        }
+        UpdateCard(info.HomePage);
 
         _ui.BeginCard("identity");
         var id = _ui.Take(92);

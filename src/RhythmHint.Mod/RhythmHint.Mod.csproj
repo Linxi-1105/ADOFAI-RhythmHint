@@ -51,7 +51,7 @@
   <ItemGroup>
     <!-- netstandard 也用游戏自带的（2.1）：Unity 6 的模块按 2.1 编译，.NET Framework 参考程序集里只有 2.0。
          UnityEngine.UI / UIModule：设置窗口底下的透明挡板（InputShield）用；Newtonsoft.Json：读翻译表 -->
-    <GameReference Include="Assembly-CSharp;Assembly-CSharp-firstpass;RDTools;UnityEngine;UnityEngine.CoreModule;UnityEngine.IMGUIModule;UnityEngine.TextRenderingModule;UnityEngine.InputLegacyModule;UnityEngine.AudioModule;UnityEngine.ImageConversionModule;UnityEngine.UIModule;UnityEngine.UI;Newtonsoft.Json;netstandard" />
+    <GameReference Include="Assembly-CSharp;Assembly-CSharp-firstpass;RDTools;UnityEngine;UnityEngine.CoreModule;UnityEngine.IMGUIModule;UnityEngine.TextRenderingModule;UnityEngine.InputLegacyModule;UnityEngine.AudioModule;UnityEngine.ImageConversionModule;UnityEngine.UIModule;UnityEngine.UI;UnityEngine.UnityWebRequestModule;Newtonsoft.Json;netstandard" />
     <Reference Include="@(GameReference)">
       <HintPath>$(ManagedDir)\%(Identity).dll</HintPath>
       <Private>false</Private>
@@ -60,6 +60,8 @@
       <HintPath>$(ManagedDir)\UnityModManager\UnityModManager.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- 自动更新解压发布包（Core 的 ModUpdate）：.NET Framework 自带，游戏的 Managed 里也有 System.IO.Compression.dll -->
+    <Reference Include="System.IO.Compression" />
   </ItemGroup>
 
   <Target Name="CheckGameDir" BeforeTargets="ResolveAssemblyReferences">
@@ -93,20 +95,27 @@
        用 MSBuild 的 ZipDirectory：路径分隔符是标准的「/」。0.9.1 用 Windows PowerShell 5.1 的 Compress-Archive 打包，
        路径是「RhythmHint\Info.json」，不是标准 zip 路径，安装器可能认不出。
        同时生成 UMM 的更新清单 artifacts\Repository.json，发 Release 时和压缩包一起上传：
-       游戏里的 UMM 读它提示新版本，UMM 安装器 Mods 页右键可按其中的 DownloadUrl 一键更新 -->
+       游戏里的 UMM 读它提示新版本，UMM 安装器 Mods 页右键可按其中的 DownloadUrl 一键更新。
+       还生成 Mod 自动更新用的 artifacts\update.json（版本、地址、压缩包的 SHA-256，见 Core 的 ModUpdate），也一起上传；
+       再复制一份 CHANGELOG.md 到 artifacts\（2026-11-19 用户：夸克网盘里也放一份更新记录）。
+       带后缀的测试包（-p:VersionSuffix=dev）只打压缩包、不写这些，免得覆盖发版用的清单 -->
   <Target Name="PackageForUmm" AfterTargets="WriteInfoJson" Condition="'$(UmmPackage)' == 'true'">
     <Error Condition="'$(ModRepository)' != '$(DefaultModRepository)'"
            Text="打发布包时不能改 ModRepository（现在是 $(ModRepository)），否则玩家收不到更新提示。" />
     <PropertyGroup>
-      <ArtifactsDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '..', '..', 'artifacts'))</ArtifactsDir>
+      <!-- 试自动更新时可用 -p:PackageOutDir=别的文件夹 打一个假的新版本，不碰 artifacts 里发版用的清单 -->
+      <ArtifactsDir Condition="'$(PackageOutDir)' != ''">$([MSBuild]::EnsureTrailingSlash('$(PackageOutDir)'))</ArtifactsDir>
+      <ArtifactsDir Condition="'$(PackageOutDir)' == ''">$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '..', '..', 'artifacts'))</ArtifactsDir>
       <PackageStageDir>$(ArtifactsDir)stage\</PackageStageDir>
       <PackageZip>$(ArtifactsDir)$(ModId)-$(Version).zip</PackageZip>
+      <ReleasePackage Condition="'$(VersionSuffix)' == ''">true</ReleasePackage>
+      <PackageUrl>$(RepoUrl)/releases/download/v$(Version)/$(ModId)-$(Version).zip</PackageUrl>
       <RepositoryJsonText>{
   "Releases": [
     {
       "Id": "$(ModId)",
       "Version": "$(Version)",
-      "DownloadUrl": "$(RepoUrl)/releases/download/v$(Version)/$(ModId)-$(Version).zip"
+      "DownloadUrl": "$(PackageUrl)"
     }
   ]
 }</RepositoryJsonText>
@@ -116,8 +125,22 @@
     <Copy SourceFiles="@(EditorFile)" DestinationFolder="$(PackageStageDir)$(ModId)\Editor" />
     <ZipDirectory SourceDirectory="$(PackageStageDir)" DestinationFile="$(PackageZip)" Overwrite="true" />
     <RemoveDir Directories="$(PackageStageDir)" />
-    <WriteLinesToFile File="$(ArtifactsDir)Repository.json" Lines="$(RepositoryJsonText)" Overwrite="true" />
-    <Message Importance="high" Text="已打包 $(PackageZip)，更新清单 $(ArtifactsDir)Repository.json" />
+    <GetFileHash Files="$(PackageZip)" Algorithm="SHA256" HashEncoding="hex" Condition="'$(ReleasePackage)' == 'true'">
+      <Output TaskParameter="Hash" PropertyName="PackageSha256" />
+    </GetFileHash>
+    <PropertyGroup Condition="'$(ReleasePackage)' == 'true'">
+      <UpdateJsonText>{
+  "format": "rhythmhint-update",
+  "version": "$(Version)",
+  "url": "$(PackageUrl)",
+  "sha256": "$(PackageSha256.ToLowerInvariant())"
+}</UpdateJsonText>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(ArtifactsDir)Repository.json" Lines="$(RepositoryJsonText)" Overwrite="true" Condition="'$(ReleasePackage)' == 'true'" />
+    <WriteLinesToFile File="$(ArtifactsDir)update.json" Lines="$(UpdateJsonText)" Overwrite="true" Condition="'$(ReleasePackage)' == 'true'" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\..\..\CHANGELOG.md" DestinationFolder="$(ArtifactsDir)" Condition="'$(ReleasePackage)' == 'true'" />
+    <Message Importance="high" Condition="'$(ReleasePackage)' == 'true'" Text="已打包 $(PackageZip)；Repository.json、update.json、CHANGELOG.md 在 $(ArtifactsDir)" />
+    <Message Importance="high" Condition="'$(ReleasePackage)' != 'true'" Text="已打包测试包 $(PackageZip)（不写更新清单）" />
   </Target>
 
   <!-- dotnet build -p:Deploy=true：编译后复制到游戏的 Mods 目录（不碰已有的 Settings.xml、手序文件夹和编辑器运行时写的 session 文件） -->

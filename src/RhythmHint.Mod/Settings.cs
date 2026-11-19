@@ -72,6 +72,9 @@ public sealed class Settings : UnityModManager.ModSettings
     /// <summary>UMM 查到过的最新版本号（见 UpdateNotice）；空 = 没查到过。设置窗口里不显示，恢复默认值也不清。</summary>
     public string LatestVersion = string.Empty;
 
+    /// <summary>启动游戏时检查新版本，在后台下载安装，下次启动生效（AutoUpdater）。</summary>
+    public bool AutoUpdate = true;
+
     /// <summary>
     /// 设置窗口的首次引导看过第几版（0 = 没看过：第一次打开窗口时自动播放；看完或跳过后记下）。
     /// 引导内容大改时把 SettingsWindow.GuideRevision 加一，老玩家也会再看一次。恢复默认值不清。
@@ -232,4 +235,10 @@ public sealed class Settings : UnityModManager.ModSettings
 
     /// <summary>「通用」页：打开设置窗口的快捷键（界面语言不动）。</summary>
     public void ResetHotkey() => SettingsHotkey = new Settings().SettingsHotkey;
+
+    public void ResetGeneral()
+    {
+        ResetHotkey();
+        AutoUpdate = new Settings().AutoUpdate;
+    }
 }

@@ -109,7 +109,7 @@ It's only an estimate, **not an official TUF rating**: most P-tier charts are wi
    - You can also unzip it by hand and put the `RhythmHint` folder into `<game folder>\Mods\`
 3. Start the game and press `Ctrl+F10` to check that it is enabled
 
-To update later, just install the new `RhythmHint-<version>.zip`; there's no need to reinstall UMM, and your settings are kept. When a new version is out, the title bar of the settings window tells you, and you can right-click the mod on the Mods tab of the UMM installer and choose **Update** to update in one click (1.1.0 and earlier don't have this yet). See the [changelog](CHANGELOG.en.md) for what changed in each version.
+From 1.3.1 on, the mod updates itself: when the game starts it checks for a new version, downloads and installs it in the background, and the update takes effect the next time you start the game; your settings are kept (you can turn this off on the General page). If the download fails, right-click the mod on the Mods tab of the UMM installer and choose **Update**, or install the new `RhythmHint-<version>.zip`; there's no need to reinstall UMM. See the [changelog](CHANGELOG.en.md) for what changed in each version.
 
 To build it yourself, see the [development notes](docs/开发说明.md) (in Chinese).
 
