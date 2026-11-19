@@ -1391,9 +1391,12 @@
     }
   }
 
+  // 正在存进游戏（等文件夹权限、写文件）：这期间再按 Ctrl+S、再点保存不再发起一次（2026-11-19：原来每按一次就多一个权限提示、多写一次）。
+  // 存的途中又改的不在这次的文件里，照样算没保存，存完再按一次就行
+  let saving = false;
   async function saveToGame() {
     const doc = state.doc;
-    if (!doc) return;
+    if (!doc || saving) return;
     const text = M.toFileText(doc);
     if (!window.showDirectoryPicker) {
       // 下载不算保存（2026-11-19 评审：玩家没把文件放进去也显示已保存）：照旧提示放到哪里，没保存的标记留着
@@ -1406,6 +1409,7 @@
       doc, history: state.history, step: state.history.current, metaEdits, base: M.baseFor(doc),
       target: { fileName: doc.fileName, usedFile: doc.usedFile, meta: { charts: doc.meta.charts } },
     };
+    saving = true;
     try {
       let dir = await fingeringsFolder();
       if (!dir) return;
@@ -1432,6 +1436,8 @@
     } catch (e) {
       if (e && e.name === 'AbortError') return; // 玩家在选文件夹时点了取消
       toast(state.t('save.failed', errorText(e)), 'error');
+    } finally {
+      saving = false;
     }
   }
 

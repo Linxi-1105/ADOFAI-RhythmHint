@@ -302,6 +302,40 @@ test('renaming the file while saving keeps the new name and stays unsaved', asyn
   assert.equal(dirty(h), true);
 });
 
+test('saving again while a save is still running does not start a second save', async () => {
+  // 复现：存进游戏要等文件夹权限，这期间再按 Ctrl+S、在输入框里按 Ctrl+S、再点保存按钮，每次都又发起一次保存（又问一次权限、又写一次文件）
+  const s = session(), { dir, gate, idb } = slowFolder();
+  let asks = 0;
+  const ask = dir.requestPermission;
+  dir.requestPermission = () => { asks++; return ask(); };
+  const h = boot({ session: s, idb, picks: [] });
+  h.frames(2);
+  const doc = h.t.state.doc;
+  editSingle(h, doc.notes[0]);
+  h.key('s', { ctrlKey: true });
+  await h.until(() => gate.grant, 'permission prompt');
+  editSingle(h, doc.notes[1]); // 保存途中又改了一处
+  h.key('s', { ctrlKey: true });
+  h.key('s', { ctrlKey: true, target: h.el('fAuthor') });
+  h.el('saveBtn').click();
+  await h.wait(20);
+  assert.equal(asks, 1, 'only the first save is running');
+  gate.grant();
+  await h.until(() => dir.files.size === 1, 'file written');
+  await h.wait(20);
+  assert.equal(dirty(h), true, 'the edit made while saving is not in the file');
+
+  // 存完了再按一次：照常保存，这次连那一处一起存进去
+  gate.grant = null;
+  h.key('s', { ctrlKey: true });
+  await h.until(() => gate.grant, 'permission prompt again');
+  gate.grant();
+  await h.until(() => !dirty(h), 'saved again');
+  assert.equal(asks, 2);
+  const written = JSON.parse([...dir.files.values()][0]);
+  assert.deepEqual(written.notes[1][2].map(l => l[0]), lanesOf(doc.notes[1]));
+});
+
 // ---------- 恢复后「放弃」 ----------
 
 test('discarding restored progress after editing elsewhere keeps that edit and stays unsaved', async () => {
