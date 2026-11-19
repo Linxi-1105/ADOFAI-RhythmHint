@@ -91,7 +91,7 @@ If the automatic fingering doesn't suit you, make your own for a song, or use on
 
 1. In the song (before starting or while paused is fine), press F8 → Custom fingering → Edit this level's fingering. The fingering editor opens in your browser with the level's tiles, music and both auto styles
 2. Drag notes to other lanes, or select them and press D F J K. Click Save to game when you're done, and the game switches over right away
-3. Fingering files live in `Mods/RhythmHint/Fingerings`. Send one to a friend and they just drop it into the same folder
+3. Fingering files live in `Mods/RhythmHint/Fingerings`. Send one to a friend and they just drop it into the same folder. The mod keeps a backup in `Documents\RhythmHint\FingeringsBackup` and restores your fingerings if UMM uninstalls or reverts the mod
 4. Can't finish in one go? Just close the page; your changes are kept. To open the editor without the game, bookmark the page or click Create desktop shortcut on the Custom fingering page. History on the editor's left bar lists recent levels; click one to pick up where you left off
 
 Once a file is in the folder there's nothing else to do: it's used automatically for its song. If the chart gets updated, the parts that still match keep your fingering, the rest use auto fingering, and you get a notice when the level starts. If several files look like the same song, the Custom fingering page lists them so you pick once. Details: [custom fingering guide](docs/专属手序.md) (in Chinese).

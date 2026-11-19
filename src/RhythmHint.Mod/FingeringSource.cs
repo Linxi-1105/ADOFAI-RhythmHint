@@ -66,8 +66,20 @@ internal sealed class FingeringSource
     private float _nextPoll;
     private string _lastKey = string.Empty;
     private FingeringResult? _last;
+    private bool _restoreChecked;
+    private bool _backupPending;
+    private bool _backupWarned;
 
     public static string Folder => Path.Combine(Main.Mod.Path, "Fingerings");
+
+    /// <summary>手序的备份（文档\RhythmHint\FingeringsBackup，见 <see cref="FingeringBackup"/>）；找不到文档文件夹时为 null，不备份。</summary>
+    public static string? Backup => _backup.Value;
+
+    private static readonly Lazy<string?> _backup = new(() =>
+    {
+        var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        return string.IsNullOrEmpty(documents) ? null : Path.Combine(documents, "RhythmHint", "FingeringsBackup");
+    });
 
     /// <summary>
     /// 游戏装在浏览器不让网页写的文件夹里时（Steam 默认的 C:\Program Files (x86)），编辑器存到这里，每秒搬进 <see cref="Folder"/>；
@@ -103,6 +115,12 @@ internal sealed class FingeringSource
         }
 
         _nextPoll = Time.unscaledTime + 1;
+        if (!_restoreChecked)
+        {
+            _restoreChecked = true;
+            RestoreFromBackup(); // 要在搬中转文件夹之前：搬的时候会建出空的手序文件夹，就看不出整个文件夹被删过了
+        }
+
         if (Inbox != null)
         {
             foreach (var name in FingeringInbox.MoveInto(Inbox, Folder))
@@ -113,11 +131,63 @@ internal sealed class FingeringSource
         var signature = Signature();
         if (signature == _signature)
         {
+            if (_backupPending)
+            {
+                BackUp();
+            }
+
             return false;
         }
 
         _signature = signature;
+        BackUp();
         return true;
+    }
+
+    /// <summary>手序文件夹整个不见了（UMM 卸载、回退会删掉整个 Mod 文件夹）时，从文档里的备份还原。</summary>
+    private static void RestoreFromBackup()
+    {
+        if (Backup == null)
+        {
+            return;
+        }
+
+        try
+        {
+            var restored = FingeringBackup.RestoreIfMissing(Folder, Backup);
+            if (restored.Count > 0)
+            {
+                Main.Mod.Logger.Log($"专属手序：手序文件夹不见了（UMM 卸载、回退会删掉整个 Mod 文件夹），从 {Backup} 还原了 {restored.Count} 份：{string.Join("、", restored)}");
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Main.Mod.Logger.Warning($"专属手序：从备份 {Backup} 还原失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>把手序文件夹同步到备份；有文件正被占用时下一秒再试。一直失败只记一次日志。</summary>
+    private void BackUp()
+    {
+        if (Backup == null)
+        {
+            return;
+        }
+
+        try
+        {
+            _backupPending = !FingeringBackup.Mirror(Folder, Backup);
+            _backupWarned = false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _backupPending = true;
+            if (!_backupWarned)
+            {
+                _backupWarned = true;
+                Main.Mod.Logger.Warning($"专属手序：备份到 {Backup} 失败，稍后再试：{ex.Message}");
+            }
+        }
     }
 
     /// <summary>给这一关挑手序。没开专属手序、没有对得上的文件时用自动排键。</summary>
