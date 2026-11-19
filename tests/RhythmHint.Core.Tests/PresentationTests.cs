@@ -68,6 +68,30 @@ public class PresentationTests
         Assert.All(demo.Tiles, t => Assert.InRange(t.Time, 0, demo.LoopSeconds));
     }
 
+    [Theory]
+    [InlineData(150)]
+    [InlineData(160)]
+    [InlineData(200)]
+    public void SettingsDemo_SameShortRunShowsTheSelectedFingeringStyle(double bpm)
+    {
+        var regular = DemoChart.BuildForSettings(bpm, FingeringStyle.TimeReset);
+        var experimental = DemoChart.BuildForSettings(bpm, FingeringStyle.ReviewPreferenceV1);
+
+        Assert.Equal(regular.Tiles.Select(hit => hit.Time), experimental.Tiles.Select(hit => hit.Time));
+        Assert.Contains(regular.Tiles, hit => hit.HoldSeconds > 0);
+        Assert.All(experimental.Tiles, hit => Assert.Equal(0, hit.HoldSeconds));
+        var start = experimental.SecondsPerBeat * 8.5;
+        var end = experimental.SecondsPerBeat * 10;
+        var timeReset = NotePlanner.Plan(regular.Tiles, new FingeringOptions()).Where(note => note.Time >= start && note.Time < end).ToArray();
+        var preview = NotePlanner.Plan(experimental.Tiles, new FingeringOptions { Style = FingeringStyle.ReviewPreferenceV1 })
+            .Where(note => note.Time >= start && note.Time < end).ToArray();
+
+        Assert.Equal(4, timeReset.Length);
+        Assert.Equal(timeReset.Select(note => note.Time), preview.Select(note => note.Time));
+        Assert.Contains(timeReset, note => note.Lanes.ContainsKey(0) || note.Lanes.ContainsKey(3));
+        Assert.Equal(new[] { 2, 1, 2, 1 }, preview.Select(note => Assert.Single(note.Lanes.Keys)));
+    }
+
     [Fact]
     public void Holds_ActiveFromPressUntilRelease()
     {

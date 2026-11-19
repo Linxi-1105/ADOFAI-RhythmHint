@@ -69,6 +69,12 @@ The window can be dragged and saves automatically when closed, and clicking arou
 
 The interface language can be changed on the Status page: 简体中文, 繁體中文, English, 한국어 and 日本語. By default it follows the game's language, and languages without a translation show English.
 
+## Review key assignments
+
+Export the current level from the Status page in the Mod settings, then open the JSON in the local [RhythmHint Studio](tools/review-editor/README.md). Drag notes between lanes and export a review file to keep your changes. You can also open `.adofai` files for an offline preview and select the music separately; use an in-game export for authoritative review data.
+
+The existing time-reset style remains the default. The fingering settings offer an optional style based on review preferences, and you can switch back at any time. See the [review guide](docs/排键审核指南.md) and [optional rules](docs/审核偏好实验规则.md) (in Chinese).
+
 ## Installation
 
 1. Install [Unity Mod Manager](https://www.nexusmods.com/site/mods/21) (0.27 or later, using the DoorstopProxy method)
