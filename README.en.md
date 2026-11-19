@@ -24,13 +24,39 @@ So I made this mod: it turns every level's tiles into falling notes, so you can 
 
 <img src="docs/images/anatomy.webp" alt="Parts of the screen" width="880">
 
-- **Four lanes on the left**: one note for every tile you need to press. Orange for single notes, blue for doubles, purple for triples and quads, and holds get a tail. You can switch the bars to round notes like the taiko bar in the settings
-- **Key boxes at the bottom**: light up when you press D F J K
-- **Taiko bar at the top**: a long stretch of the upcoming rhythm at a glance
-- **Top left**: current BPM and time left
-- **Fit game view beside panel**: the game view and its UI text (combo, judgments, pause menu) shrink into the space next to the panel, so nothing is covered (you can turn this off in the settings)
+- **Four lanes**: one note for every tile you need to press. Orange for single notes, blue for doubles, purple for triples and quads, and holds get a tail. Notes can be bars or round notes like the ones on the taiko bar
+- **Key boxes at the bottom**: light up when you press D F J K; the keys can be changed
+- **Taiko bar**: a long stretch of the upcoming rhythm at a glance
+- **Lane side of the taiko bar**: current BPM, time left, and a difficulty estimated from the level's tiles (experimental)
+- **Fit game view beside panel**: the game view and its UI text (combo, judgments, pause menu) shrink into the space next to the panel, so nothing is covered
+
+The four-lane panel can sit on the left or the right, and the taiko bar at the top or the bottom; the game view moves out of the way.
 
 The panel slides in when a level starts and out when it ends. It also hides when you pause with Esc, so it never covers the pause menu, and it freezes when you die and continues when you restart. Works with official levels, custom levels, and editor playtests and autoplay.
+
+## Settings
+
+Press **F8** in game (the hotkey can be changed).
+
+<img src="docs/images/demo.webp" alt="Settings window and demo" width="880">
+
+Outside a level, a demo that follows the menu music plays next to the settings window, so you see every change right away.
+
+<img src="docs/images/settings.en.webp" alt="Appearance and Fingering pages of the settings window" width="760">
+
+| Page | What it's for |
+|---|---|
+| Overview | Current status, a few display switches, and shortcuts to Appearance, Fingering and Custom fingering |
+| Appearance | Note style (bars / circles), panel position, which parts to show, keys, size |
+| Fingering | Fingering style, dominant hand, chord hand, rolls and thresholds |
+| Custom fingering | Make your own fingering for this song, open the fingering folder |
+| Calibration | Visual offset: adjust here if notes and music don't line up |
+| General | Interface language, the hotkey that opens the settings, status |
+| About | Version, player group, repository |
+
+A short guide walks you through it the first time; click the question mark in the top right to see it again. The window can be dragged and saves when closed, and clicking around in it never triggers the game.
+
+The interface comes in 简体中文, 繁體中文, English, 한국어 and 日本語, and follows the game's language by default.
 
 ## How keys are assigned
 
@@ -38,42 +64,43 @@ The panel slides in when a level starts and out when it ends. It also hides when
 
 No external charts are read. Each level only looks at the gaps between its own tiles and follows the habits of most ADOFAI players:
 
-- Slow (more than 165 ms apart): **tap with the right index finger, J**
+- Slow (more than 130 ms apart): **tap with the right index finger, J**
 - A bit faster: **J F, alternating index fingers**
-- Very fast (within 82 ms): two fingers of one hand take turns, **K J D F**
+- Very fast (within 65 ms): two fingers of one hand take turns, **K J D F**
 - After a pause it always starts again from the **right hand**
-- Doubles go to the **right hand, J K**, when possible; single notes right next to a double go to the **left hand**, so the right hand can focus on the double. A double is never split across hands
+- Doubles go to the **right hand, J K**, when possible; single notes right next to a double go to the **left hand**. A double is never split across hands
 - The same hand never goes index finger first, then outer finger (F→D, J→K); rolls always start with the outer finger
 - The same key is never pressed twice within 150 ms
 
-Left-handed players can set the dominant hand to left in the settings, which mirrors the whole layout: left F as the main key, doubles on D F, and rolls become D F K J.
+These thresholds follow how a strong player actually plays: we went through a perfect clear of Avantgarde frame by frame. Fast sections at 75 ms per note alternate both index fingers, while bursts around 50 ms still roll.
 
-If you like single notes on one hand and chords on the other, set "Chord hand" to "Other hand": for example, J on the right hand stays the main key, doubles go to D F on the left, and single notes next to a double move to the right hand.
+Triples and quads are recognized too (purple): for a triple, the chord hand presses two keys and the other hand's index finger adds one; a quad uses all four keys. Which tiles count as pressed together depends on how far the path turns between them: tiles the creator drew bunched together form a chord, while fast streams that just have a very high BPM are not mistaken for doubles.
 
-Triples and quads are recognized too (purple): for a triple, the chord hand presses two keys and the other hand's index finger adds one; a quad uses all four keys.
-Which tiles count as pressed together depends on how far the path turns between them: tiles the creator drew bunched together (a tiny turn angle) form a chord, while fast streams with normal angles and just a very high BPM are no longer mistaken for doubles.
+On the Fingering page you can also:
 
-If something doesn't feel right, the thresholds and rolls can all be adjusted in the settings.
+- **Change the fingering style**: the default, Standard, is the set of rules above; Alternate first (experimental) alternates both index fingers on fast short runs of four or five notes, with fewer hand changes around chords. You can switch back at any time
+- **Play left-handed**: set the dominant hand to left to mirror everything, with left F as the main key and rolls as D F K J
+- **Put chords on the other hand**: for example, single notes on right J and doubles on left D F, with single notes next to a double moving to the right hand
+- **Adjust the thresholds and rolls** if something doesn't feel right
 
-## Settings
+## Custom fingering
 
-Press **F8** in game.
+If the automatic fingering doesn't suit you, make your own for a song, or use one someone shared.
 
-<img src="docs/images/demo.webp" alt="Settings window and demo" width="880">
+<img src="docs/images/editor.en.webp" alt="Fingering editor" width="880">
 
-Outside a level, opening the settings plays a demo next to the window that follows the menu music, so you can see every change right away. If notes and music don't line up, adjust "Visual offset" here until notes land right on the beat.
+1. In the song (before starting or while paused is fine), press F8 → Custom fingering → Edit this level's fingering. The fingering editor opens in your browser with the level's tiles, music and both auto styles
+2. Drag notes to other lanes, or select them and press D F J K. Click Save to game when you're done, and the game switches over right away
+3. Fingering files live in `Mods/RhythmHint/Fingerings`. Send one to a friend and they just drop it into the same folder
+4. Can't finish in one go? Just close the page; your changes are kept. To open the editor without the game, bookmark the page or click Create desktop shortcut on the Custom fingering page. History on the editor's left bar lists recent levels; click one to pick up where you left off
 
-<img src="docs/images/settings.en.webp" alt="Display and fingering pages of the settings window" width="760">
+Once a file is in the folder there's nothing else to do: it's used automatically for its song. If the chart gets updated, the parts that still match keep your fingering, the rest use auto fingering, and you get a notice when the level starts. If several files look like the same song, the Custom fingering page lists them so you pick once. Details: [custom fingering guide](docs/专属手序.md) (in Chinese).
 
-The window can be dragged and saves automatically when closed, and clicking around in it never triggers the game.
+## Estimated difficulty (experimental)
 
-The interface language can be changed on the Status page: 简体中文, 繁體中文, English, 한국어 and 日本語. By default it follows the game's language, and languages without a translation show English.
+In a level, the left half of the BPM box shows a TUF-style difficulty tier (P1–U20) estimated only from the tiles you press in that level. It works for official levels and workshop charts alike.
 
-## Review key assignments
-
-Export the current level from the Status page in the Mod settings, then open the JSON in the local [RhythmHint Studio](tools/review-editor/README.md). Drag notes between lanes and export a review file to keep your changes. You can also open `.adofai` files for an offline preview and select the music separately; use an in-game export for authoritative review data.
-
-The existing time-reset style remains the default. The fingering settings offer an optional style based on review preferences, and you can switch back at any time. See the [review guide](docs/排键审核指南.md) and [optional rules](docs/审核偏好实验规则.md) (in Chinese).
+It's only an estimate, **not an official TUF rating**: most P-tier charts are within 1–2 tiers, G and U tiers are often 3–4 tiers off, and U-tier charts that need many keys tend to be rated too low. You can turn it off on the Appearance page. Method and accuracy: [difficulty estimate notes](docs/难度估算.md) (in Chinese).
 
 ## Installation
 
@@ -82,22 +109,25 @@ The existing time-reset style remains the default. The fingering settings offer 
    - You can also unzip it by hand and put the `RhythmHint` folder into `<game folder>\Mods\`
 3. Start the game and press `Ctrl+F10` to check that it is enabled
 
-To update later, just install the new `RhythmHint-<version>.zip`; there's no need to reinstall UMM. When a new version is out, the title bar of the F8 settings window tells you, and you can right-click the mod on the Mods tab of the UMM installer and choose **Update** to update in one click (1.1.0 and earlier don't have this yet). See the [changelog](CHANGELOG.en.md) for what changed in each version.
+To update later, just install the new `RhythmHint-<version>.zip`; there's no need to reinstall UMM, and your settings are kept. When a new version is out, the title bar of the settings window tells you, and you can right-click the mod on the Mods tab of the UMM installer and choose **Update** to update in one click (1.1.0 and earlier don't have this yet). See the [changelog](CHANGELOG.en.md) for what changed in each version.
 
 To build it yourself, see the [development notes](docs/开发说明.md) (in Chinese).
 
 ## Troubleshooting
 
-- **No hints showing**: F8 → the Status page tells you why; the UMM log `Managed\UnityModManager\Log.txt` has it too
-- **Not using D F J K**: on the Display page, click "Custom" and pick your own four keys on the on-screen keyboard (Shift, Space and arrow keys work too)
+- **No hints showing**: F8 → Status on the General page tells you why; the UMM log `Managed\UnityModManager\Log.txt` has it too
+- **Not using D F J K**: under Key boxes on the Appearance page, click Custom and pick your own four keys on the on-screen keyboard (Shift, Space, arrow keys, the numpad, F1–F12 and mouse side buttons all work). The hotkey that opens the settings is changed on the General page
+- **Notes and music don't line up**: adjust Visual offset on the Calibration page until notes land right on the beat
 - **Does it affect my results?** No, judgment is not touched at all
 
 ## Credits
 
 - Inspired by, and technically based on, the video [《【冰与火之舞·全节奏提示】CE-TX Dramatic Entrance!》](https://www.bilibili.com/video/BV17Agv6sEug) by Bilibili creator **Winkle雪线**. Thank you!
+- The Alternate first fingering style was contributed by [Linxi-1105](https://github.com/Linxi-1105)
 - Built on [Unity Mod Manager](https://www.nexusmods.com/site/mods/21)
-- Screenshots are from the official level CI-X "REINCARNA✝ION!! ~Idol Graduation~" (7th Beat Games), music *REINCARNA✝ION!! Idol Graduation* by Turbo ft. Moon Jelly
+- Difficulty icons from [The Universal Forums Assets](https://github.com/T21C/T21C-assets) (`pguDiff/`, © 2022-2024 the Universal Forums, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)), scaled from 800×800 to 192×192. Using these icons does not mean TUF endorses this mod
+- In-game screenshots are from the official level CI-X "REINCARNA✝ION!! ~Idol Graduation~" (7th Beat Games), music *REINCARNA✝ION!! Idol Graduation* by Turbo ft. Moon Jelly; the editor screenshot is from the official level XO-X (7th Beat Games)
 
 ## License
 
-The code is open source under [MIT](LICENSE). The level visuals and music in the screenshots belong to their original creators.
+The code is open source under [MIT](LICENSE). The difficulty icons are used under CC BY 4.0 (see above). The level visuals and music in the screenshots belong to their original creators.

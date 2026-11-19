@@ -4,6 +4,21 @@
 
 What changed in each version, newest first.
 
+## 1.3.0 · 2026-11-19
+
+- The settings window is redesigned: F8 opens it with pages on the left (Overview, Appearance, Fingering, Custom fingering, Calibration, General, About), icons and animations; a short guide plays the first time it opens, and the question mark in the top right shows it again. The window sits in the middle of the area the hint panels leave free and moves aside when they switch sides
+- Custom fingering: make your own fingering for a song, or use one someone shared. Put it in Mods/RhythmHint/Fingerings and it's used automatically for that song; if the chart is updated, parts that no longer match use auto fingering, with a notice when the level starts
+- New fingering editor: F8 → Custom fingering → Edit this level's fingering opens the level in your browser with its music, both auto styles for comparison, beat lines and a track preview (experimental); drag notes to change lanes, and saved changes take effect in the game right away; five languages
+- The fingering editor can be closed halfway and keeps your changes; History on the left lists the levels you recently opened from the game, click one to pick up where you left off. The Custom fingering page can create a desktop shortcut, so the editor opens without the game
+- The fingering editor uses the game's visual calibration, plays hit sounds on the musical beat, and shows a faint path through hidden tiles; practice speed changes the pitch of the music
+- Estimated difficulty (experimental): in a level, the left side of the BPM box shows a TUF difficulty tier estimated from the level's tiles. It's for reference only and not an official TUF rating; turn it off on the Appearance page
+- New fingering style option on the Fingering page: Standard (default) and Alternate first (experimental: fast short runs alternate both index fingers, with fewer hand changes around chords). Alternate first was contributed by Linxi-1105
+- The main-hand reset gap now defaults to 130 ms instead of 165 ms: fast sections around 75 ms alternate both index fingers, bursts within 65 ms still roll on one hand, and notes 130 ms or more apart are tapped with one finger. It follows a frame-by-frame study of an Avantgarde perfect clear and matches the keys in that video 86% of the time (44% before). Settings still at 165 ms are moved to 130 ms automatically
+- The four-lane panel can go on the right and the taiko bar at the bottom
+- With the taiko bar off, its whole strip is gone and the game view no longer makes room for it; BPM and time left stay in the four-lane panel's column
+- The on-screen keyboard for custom keys adds the numpad, F1–F12, editing keys such as Insert and Home, and mouse side buttons; the hotkey that opens the settings window can be customized the same way
+- Buttons in the settings window now show their result right below them
+
 ## 1.2.1 · 2026-11-18
 
 - Fixed: with Fit game view beside panel on, only the top edge of the autoplay button in the editor's bottom-right corner could be clicked during playback
