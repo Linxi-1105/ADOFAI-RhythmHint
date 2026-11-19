@@ -208,6 +208,7 @@ svg .fill, svg.fill { fill: currentColor; stroke: none; }
 .drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 14px 6px 16px; }
 .drawer-head h2 { margin: 0; font: 600 15px/1 var(--font-display); }
 .drawer-body { padding: 6px 16px 16px; overflow: auto; display: flex; flex-direction: column; gap: 12px; }
+.drawer-body > * { flex-shrink: 0; } /* 内容比面板高时滚动，不把按钮压扁 */
 .drawer-body h3 { margin: 6px 0 0; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
 .facts { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; }
 .facts dt { color: var(--text-3); }

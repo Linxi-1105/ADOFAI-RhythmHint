@@ -112,6 +112,7 @@
         <div class="location"><span class="loc-icon"><svg><use href="#i-folder"/></svg></span>
           <span class="loc-text"><b id="fFolderName"></b><small id="fFolder"></small></span>
           <button class="icon-btn small" id="copyFolder" data-i18n-title="file.copy"><svg><use href="#i-copy"/></svg></button></div>
+        <button class="btn wide" id="changeFolder" hidden><svg><use href="#i-folder"/></svg><span data-i18n="file.changeFolder"></span></button>
       </div>
       <div class="stat-grid" id="fStats"></div>
       <button class="btn wide" data-action="open"><svg><use href="#i-open"/></svg><span data-i18n="file.open"></span></button>
@@ -168,6 +169,7 @@
     <div class="drawer-body" data-panel-body="keys">
       <h3 data-i18n="keys.custom"></h3>
       <div class="keymap" id="keymap"></div>
+      <div class="note-callout warn" id="keysClash" hidden></div>
       <small class="muted" data-i18n="keys.customHint"></small>
       <label class="switch line"><input type="checkbox" id="autoNext" checked><i></i><span data-i18n="keys.autoNext"></span></label>
       <button class="btn wide" id="keysReset"><svg><use href="#i-revert"/></svg><span data-i18n="keys.reset"></span></button>

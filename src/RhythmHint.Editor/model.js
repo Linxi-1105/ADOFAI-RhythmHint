@@ -13,6 +13,12 @@
   const FILE_FORMAT = 'rhythmhint-fingering';
   const SESSION_FORMAT = 'rhythmhint-editor-session';
   const SCHEMA_VERSION = 1;
+  // 和 CustomFingering 一样的上限：Mod 读不了的文件编辑器也不收，免得存出去游戏里用不上
+  const MAX_FILE_BYTES = 20 * 1024 * 1024; // 打开文件时超过就不读（CustomFingering.MaxFileBytes）
+  const MAX_HITS = 200000; // CustomFingering.MaxHits
+  const MAX_NAME = 300, MAX_COMMENT = 4000; // CustomFingering 的 MaxNameLength、MaxCommentLength：超出的截掉
+  // 手序文件里认得的顶层字段。别的字段原样留着、保存时写回（2026-11-19 评审：以后的版本加的字段不能被这一版编辑器弄丢）
+  const KNOWN_FIELDS = new Set(['format', 'schemaVersion', 'keys', 'song', 'artist', 'charter', 'author', 'comment', 'leftHanded', 'charts', 'updatedAt', 'hits', 'notes']);
 
   class FingeringError extends Error {
     constructor(code, detail) {
@@ -23,29 +29,53 @@
   }
 
   const finite = v => typeof v === 'number' && Number.isFinite(v);
+  // 整数：JSON 里写成 1.0 的读出来就是 1，照样算（Mod 那边也放宽）
   const int = v => Number.isInteger(v);
+  const int32 = v => int(v) && v >= -2147483648 && v <= 2147483647; // 砖号：Mod 读成 int
   function need(ok, code, detail) { if (!ok) throw new FingeringError(code, detail); }
 
   /** 按轨道排好的 [[轨道, 长按]]。 */
   const sortLanes = lanes => lanes.slice().sort((a, b) => a[0] - b[0]);
   const laneKey = lanes => sortLanes(lanes).map(l => l[0]).join('+');
+  /** 按哪几个键、哪个键长按：比较改没改用它（D 长按 + K 镜像成 D + K 长按也算改了）。 */
+  const noteKey = lanes => sortLanes(lanes).map(l => l[0] + ':' + l[1]).join('+');
+
+  /** 文字字段：没有或 null 当空，不是文字整份拒绝（Mod 也拒绝，不能悄悄变成空的再存出去）。 */
+  function textField(obj, name, max) {
+    const v = obj[name];
+    if (v === undefined || v === null) return '';
+    need(typeof v === 'string', 'badFile', name);
+    return v.slice(0, max);
+  }
 
   /** 读一份手序（文件里的 fingering 段，或单独的手序文件）。 */
   function parseFingering(obj) {
-    need(obj && typeof obj === 'object', 'notFingering');
+    need(obj && typeof obj === 'object' && !Array.isArray(obj), 'notFingering');
     need(obj.format === FILE_FORMAT, 'notFingering');
     need(int(obj.schemaVersion) && obj.schemaVersion >= 1, 'badFile', 'schemaVersion');
     need(obj.schemaVersion <= SCHEMA_VERSION, 'tooNew');
     const keys = obj.keys === undefined ? 4 : obj.keys;
     need(int(keys) && keys >= 1 && keys <= 16, 'badFile', 'keys');
-    need(Array.isArray(obj.hits) && obj.hits.length > 0, 'badFile', 'hits');
+    need(Array.isArray(obj.hits) && obj.hits.length > 0 && obj.hits.length <= MAX_HITS, 'badFile', 'hits');
     need(Array.isArray(obj.notes) && obj.notes.length > 0, 'badFile', 'notes');
+    const meta = {
+      song: textField(obj, 'song', MAX_NAME), artist: textField(obj, 'artist', MAX_NAME), charter: textField(obj, 'charter', MAX_NAME),
+      author: textField(obj, 'author', MAX_NAME), comment: textField(obj, 'comment', MAX_COMMENT), leftHanded: obj.leftHanded === true,
+      // 这份手序认得的谱面指纹（C# CustomFingering.Charts）：原样带回去，Mod 保存时会加上新版的
+      charts: Array.isArray(obj.charts) ? obj.charts.filter(c => typeof c === 'string' && c.length <= 100) : [],
+    };
+    const { hits, index } = parseHits(obj.hits);
+    // 不认识的顶层字段按原来的顺序记成 [名字, 值]（不放进普通对象：名字可能是 __proto__）
+    const otherFields = Object.keys(obj).filter(k => !KNOWN_FIELDS.has(k)).map(k => [k, obj[k]]);
+    return { keys, meta, hits, notes: parseNotes(obj.notes, hits, index, keys), otherFields };
+  }
 
+  function parseHits(list) {
     const hits = [];
     const index = new Map();
     let lastTile = -Infinity, lastTime = -Infinity;
-    obj.hits.forEach(h => {
-      need(Array.isArray(h) && h.length >= 3 && int(h[0]) && finite(h[1]) && finite(h[2]) && h[2] >= 0, 'badFile', 'hit');
+    list.forEach(h => {
+      need(Array.isArray(h) && h.length >= 3 && int32(h[0]) && finite(h[1]) && finite(h[2]) && h[2] >= 0, 'badFile', 'hit');
       need(h[0] > lastTile && h[1] >= lastTime, 'badFile', 'hitOrder');
       const angle = h.length > 3 && h[3] !== null ? h[3] : null;
       need(angle === null || finite(angle), 'badFile', 'angle');
@@ -53,10 +83,13 @@
       hits.push({ tile: h[0], time: h[1], hold: h[2], angle });
       lastTile = h[0]; lastTime = h[1];
     });
+    return { hits, index };
+  }
 
+  function parseNotes(list, hits, index, keys) {
     const notes = [];
     let next = 0;
-    obj.notes.forEach(n => {
+    list.forEach(n => {
       need(Array.isArray(n) && n.length === 3 && int(n[0]) && int(n[1]) && Array.isArray(n[2]), 'badFile', 'note');
       const first = index.get(n[0]), last = index.get(n[1]);
       need(first === next && last !== undefined && last >= first, 'badFile', 'coverage');
@@ -71,19 +104,7 @@
       next = last + 1;
     });
     need(next === hits.length, 'badFile', 'coverage');
-
-    const text = v => typeof v === 'string' ? v.slice(0, 4000) : '';
-    return {
-      keys,
-      meta: {
-        song: text(obj.song), artist: text(obj.artist), charter: text(obj.charter),
-        author: text(obj.author), comment: text(obj.comment), leftHanded: obj.leftHanded === true,
-        // 这份手序认得的谱面指纹（C# CustomFingering.Charts）：原样带回去，Mod 保存时会加上新版的
-        charts: Array.isArray(obj.charts) ? obj.charts.filter(c => typeof c === 'string' && c.length <= 100) : [],
-      },
-      hits,
-      notes,
-    };
+    return notes;
   }
 
   function emptyExtras() {
@@ -91,12 +112,22 @@
       audio: null, fileName: '', saveFolder: '', saveStartIn: '', usedFile: '', language: '', roundNotes: false, sessionId: '', hitSound: '', fromGame: false };
   }
 
+  /**
+   * 每个音符：orig 是打开时按的键；filled 是不是自动补齐的（来源，不变）；confirmed 是玩家看过、按了它现在的键；
+   * auto 是还要不要检查（markReview 算，画布按它描黄色虚线）。
+   */
   function finish(fingering, extras) {
     const doc = Object.assign(emptyExtras(), extras, fingering);
-    doc.notes.forEach(n => { n.orig = n.lanes.map(l => l.slice()); if (n.auto === undefined) n.auto = false; });
+    doc.notes.forEach(n => { n.orig = n.lanes.map(l => l.slice()); n.filled = n.filled === true; n.confirmed = false; n.auto = n.filled; });
     if (!doc.fileName) doc.fileName = suggestedFileName(doc.meta);
     doc.signature = signature(doc.hits);
+    remember(doc);
     return doc;
+  }
+
+  /** 记下打开时的作者、说明、文件名（草稿还要不要留着、放弃时回到哪里）。打开文件后改了文件名要再记一次。 */
+  function remember(doc) {
+    doc.opened = { author: doc.meta.author, comment: doc.meta.comment, fileName: doc.fileName };
   }
 
   /** 读游戏给的会话（session.js 里的 window.RHYTHMHINT_SESSION）。 */
@@ -104,7 +135,7 @@
     need(s && s.format === SESSION_FORMAT, 'notSession');
     const fingering = parseFingering(s.fingering);
     const auto = Array.isArray(s.fromAuto) ? s.fromAuto : [];
-    fingering.notes.forEach((n, i) => { n.auto = auto[i] === 1 || auto[i] === true; });
+    fingering.notes.forEach((n, i) => { n.filled = auto[i] === 1 || auto[i] === true; });
     const refs = { standard: refMap(s.references && s.references.standard), alternate: refMap(s.references && s.references.alternate) };
     return finish(fingering, {
       keyLabels: Array.isArray(s.keyLabels) && s.keyLabels.length === fingering.keys ? s.keyLabels.map(String) : defaultLabels(fingering.keys),
@@ -178,10 +209,24 @@
 
   function suggestedFileName(meta) {
     const song = plain(meta.song), artist = plain(meta.artist);
-    let name = artist && song ? artist + ' - ' + song : song || 'fingering';
-    name = name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim().replace(/\.+$/, '');
-    return (name.length > 80 ? name.slice(0, 80) : name) + '.json';
+    return (cleanFileName(artist && song ? artist + ' - ' + song : song) || 'fingering') + '.json';
   }
+
+  const RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?=\.|$)/i; // Windows 的保留名（带扩展名也不行）
+
+  /**
+   * 能当 Windows 文件名的名字（不含 .json）：去掉控制字符，路径符号换成 _，保留名后面加 _，
+   * 最多 80 个字符、按码点截（emoji 不会被切成半个），去掉结尾的点和空格。全被去掉时为空串。
+   */
+  function cleanFileName(text) {
+    const name = String(text || '').replace(/[\u0000-\u001f\u007f-\u009f]/g, '').replace(/[\\/:*?"<>|]/g, '_').trim()
+      .replace(/[. ]+$/, '').replace(RESERVED_NAME, '$1_');
+    return Array.from(name).slice(0, 80).join('').replace(/[. ]+$/, '');
+  }
+
+  /** 草稿里记的文件名能不能直接用：.json 结尾、没有路径和控制字符（游戏给的名字可能比 80 个字符长，不再截）。 */
+  const usableFileName = name => typeof name === 'string' && name.length > 5 && name.length <= 255 && /\.json$/i.test(name)
+    && !/[\\/:*?"<>|\u0000-\u001f]/.test(name) && !RESERVED_NAME.test(name);
 
   const MAX_NUMBERED = 99; // 同 Mod 的 FingeringInbox.MaxNumbered
 
@@ -233,20 +278,43 @@
     };
     const hits = doc.hits.map(h => JSON.stringify([h.tile, round6(h.time), round6(h.hold), h.angle === null ? null : Math.round(h.angle * 1000) / 1000]));
     const notes = doc.notes.map(n => JSON.stringify([n.tile, n.lastTile, sortLanes(n.lanes).map(l => [l[0], round6(l[1])])]));
+    // 不认识的字段原样跟在认得的后面、hits 前面；一个个拼，名字是数字的也不会被 JS 挪到最前面
+    const others = (doc.otherFields || []).map(([k, v]) => ',' + JSON.stringify(k) + ':' + JSON.stringify(v)).join('');
     const json = JSON.stringify(head);
-    return json.slice(0, -1) + ',"hits":[\n' + hits.join(',\n') + '],"notes":[\n' + notes.join(',\n') + ']}';
+    return json.slice(0, -1) + others + ',"hits":[\n' + hits.join(',\n') + '],"notes":[\n' + notes.join(',\n') + ']}';
   }
 
   // ---------- 编辑 ----------
 
-  /** 把一个音符改成按 targets 这几个轨道（个数不变）；长按按轨道顺序跟过去。不合法返回 null。 */
+  /** count 个互不相同、在范围里的轨道。 */
+  function validLanes(doc, lanes, count) {
+    if (!Array.isArray(lanes) || lanes.length !== count) return false;
+    const seen = new Set();
+    return lanes.every(l => int(l) && l >= 0 && l < doc.keys && !seen.has(l) && seen.add(l));
+  }
+
+  /**
+   * 把一个音符改成按 targets 这几个轨道（个数不变）：targets[i] 是现在第 i 个键（按轨道排）挪去的轨道，长按跟着键走
+   * （2026-11-19 评审：原来按轨道顺序重新分长按，镜像后 D 长按没有变成 K 长按；Mod 的镜像是跟着键的）。不合法返回 null。
+   */
   function withLanes(doc, note, targets) {
-    if (!Array.isArray(targets) || targets.length !== note.lanes.length) return null;
-    const sorted = targets.slice().sort((a, b) => a - b);
-    for (let i = 0; i < sorted.length; i++)
-      if (!int(sorted[i]) || sorted[i] < 0 || sorted[i] >= doc.keys || (i > 0 && sorted[i] === sorted[i - 1])) return null;
-    const holds = sortLanes(note.lanes).map(l => l[1]);
-    return sorted.map((lane, i) => [lane, holds[i]]);
+    const from = sortLanes(note.lanes);
+    if (!validLanes(doc, targets, from.length)) return null;
+    return sortLanes(targets.map((lane, i) => [lane, from[i][1]]));
+  }
+
+  /**
+   * 按 pairs（[[轨道, 想要的长按]]）排这个音符，长按用音符自己的：按长短一一对上，最长的给想要最长的那个键。
+   * 参考排法、草稿记下的长按和这次的一样时就是原样；对不太上时也不会改动长按本身（时间以游戏为准）。
+   */
+  function withHolds(doc, note, pairs) {
+    if (!Array.isArray(pairs) || !pairs.every(Array.isArray)) return null;
+    const lanes = pairs.map(p => p[0]);
+    if (!validLanes(doc, lanes, note.lanes.length)) return null;
+    const want = pairs.map(p => (finite(p[1]) ? p[1] : 0));
+    const holds = note.lanes.map(l => l[1]).sort((a, b) => b - a);
+    const order = want.map((_, i) => i).sort((a, b) => want[b] - want[a] || a - b);
+    return sortLanes(order.map((i, rank) => [lanes[i], holds[rank]]));
   }
 
   /** 一次编辑：{ 音符 id: 新的 lanes }。任何一个不合法就整次不做，返回 null。 */
@@ -256,9 +324,18 @@
       const lanes = fn(note);
       if (lanes === undefined) continue;
       if (lanes === null) return null;
-      if (laneKey(lanes) !== laneKey(note.lanes)) change.set(note.id, lanes);
+      if (noteKey(lanes) !== noteKey(note.lanes)) change.set(note.id, lanes);
     }
     return change;
+  }
+
+  /** 检查器里直接点选的几个键：还在的键带着自己的长按，换掉的键按轨道顺序换到新点的键上。 */
+  function pickedLanes(note, targets) {
+    const from = sortLanes(note.lanes).map(l => l[0]);
+    if (!Array.isArray(targets) || targets.length !== from.length) return null;
+    const added = targets.filter(l => !from.includes(l)).sort((a, b) => a - b);
+    let k = 0;
+    return from.map(l => (targets.includes(l) ? l : added[k++]));
   }
 
   const ops = {
@@ -276,11 +353,11 @@
       return withLanes(doc, n, n.lanes.map(l => l[0] === from ? to : l[0]));
     }),
     /** 直接指定轨道（检查器里点选）。 */
-    set: (doc, note, targets) => plan(doc, [note], n => withLanes(doc, n, targets)),
-    /** 套用参考排法（分组不一样的音符跳过）。 */
+    set: (doc, note, targets) => plan(doc, [note], n => { const mapped = pickedLanes(n, targets); return mapped && withLanes(doc, n, mapped); }),
+    /** 套用参考排法（分组不一样的音符跳过）：参考在哪个键长按，套过来也在那个键。 */
     reference: (doc, notes, which) => plan(doc, notes, n => {
       const r = refLanes(doc, n, which);
-      return r ? withLanes(doc, n, r.map(l => l[0])) : undefined;
+      return r ? withHolds(doc, n, r) : undefined;
     }),
     /** 恢复成打开时的样子。 */
     revert: (doc, notes) => plan(doc, notes, n => n.orig.map(l => l.slice())),
@@ -363,30 +440,112 @@
     return '';
   }
 
+  /** auto：自动补齐的音符有几个（来源，看过了也照样算；还要检查几处看 reviewList）。 */
   function stats(doc, jackSet) {
     let changed = 0, auto = 0;
-    doc.notes.forEach(n => { if (laneKey(n.lanes) !== laneKey(n.orig)) changed++; if (n.auto) auto++; });
+    doc.notes.forEach(n => { if (isChanged(n)) changed++; if (n.filled) auto++; });
     return { notes: doc.notes.length, changed, auto, jacks: jackSet ? jackSet.size : 0 };
   }
 
-  const isChanged = n => laneKey(n.lanes) !== laneKey(n.orig);
+  const isChanged = n => noteKey(n.lanes) !== noteKey(n.orig);
   const handOf = (doc, lane) => lane < doc.keys / 2 ? 0 : 1;
+
+  // ---------- 待检查 ----------
+  // 2026-11-19 评审：自动补齐的音符改过、或者玩家选中它按了它现在的键（看过了，就这么按），就不用再检查
+
+  /** 重算每个音符还要不要检查（n.auto）。每次改动后调用。 */
+  function markReview(doc) {
+    doc.notes.forEach(n => { n.auto = n.filled && !n.confirmed && !isChanged(n); });
+  }
+
+  /** 这几个音符看过了：自动补齐的记成确认过。返回新确认了几个。 */
+  function confirm(notes) {
+    let count = 0;
+    notes.forEach(n => { if (n.filled && !n.confirmed) { n.confirmed = true; count++; } });
+    return count;
+  }
+
+  /** 待检查的位置（音符 id，按顺序）：还要检查的自动补齐音符（连着的一段只算一处，跳到开头）和连按。 */
+  function reviewList(doc, jackSet) {
+    const ids = [];
+    let last = false;
+    for (const n of doc.notes) {
+      if (n.auto && !last) ids.push(n.id);
+      else if (!n.auto && jackSet && jackSet.has(n.id)) ids.push(n.id);
+      last = n.auto;
+    }
+    return ids;
+  }
+
+  /** 下一处：from（当前选中的音符）后面的第一处，到尾了从头再来；没有为 -1。 */
+  function nextReview(list, from) {
+    if (!list.length) return -1;
+    const after = list.find(id => id > from);
+    return after !== undefined ? after : list[0];
+  }
 
   /**
    * 草稿：这一关在编辑器里现在的样子（每个音符按哪几个键），改到一半关掉网页、下次从「历史」打开时接着改。
    * 存全部音符而不只是改过的：游戏重新导出这一关时原来的排法可能变了（比如换了排法、用上了保存的文件），照样能还原。
    * saved：和保存到游戏的文件一样；changed：和打开时相比改了几处；time：最后改动的时间。
-   * tiles（2026-11-19 起）：按砖号记 [第一块砖号, 最后一块砖号, 键, 改过的记 1]，游戏重新导出时多押分组变了也能逐条对上；
+   * tiles（2026-11-19 起）：按砖号记 [第一块砖号, 最后一块砖号, 键, 改过的记 1, 各键的长按]，游戏重新导出时多押分组变了也能逐条对上；
+   * 后两项可以没有：没改过也没长按的只记前三项，有长按的第 4 项记 1 或 0、第 5 项记长按（套回去时长按跟着原来那个键）。
    * lanes 照旧按第几个音符记，旧版编辑器（1.3.1 及以前）读的是它。session、leftHanded 是哪一关、当时的惯用手。
+   * 后来加的（旧版编辑器不认，照样能用）：confirmed 是看过的自动补齐音符 [第一块砖号, 最后一块砖号]，fileName 是文件面板里的文件名。
    */
   function draftOf(doc, saved, time) {
     return {
       signature: doc.signature, session: doc.sessionId, leftHanded: doc.meta.leftHanded === true,
       lanes: doc.notes.map(n => n.lanes.map(l => l[0])),
-      tiles: doc.notes.map(n => [n.tile, n.lastTile, n.lanes.map(l => l[0])].concat(isChanged(n) ? [1] : [])),
-      author: doc.meta.author, comment: doc.meta.comment,
+      tiles: doc.notes.map(draftEntry),
+      author: doc.meta.author, comment: doc.meta.comment, fileName: doc.fileName,
+      confirmed: doc.notes.filter(n => n.confirmed).map(n => [n.tile, n.lastTile]),
       saved: saved === true, changed: stats(doc).changed, time: finite(time) ? time : Date.now(),
     };
+  }
+
+  function draftEntry(n) {
+    const entry = [n.tile, n.lastTile, n.lanes.map(l => l[0])];
+    const holds = n.lanes.some(l => l[1] > 0);
+    if (isChanged(n) || holds) entry.push(isChanged(n) ? 1 : 0);
+    if (holds) entry.push(n.lanes.map(l => round6(l[1])));
+    return entry;
+  }
+
+  /** 草稿里的作者、说明、文件名：类型不对或文件名不能用的照这一次打开时的。 */
+  function draftMeta(doc, draft) {
+    const text = (v, fallback) => (typeof v === 'string' ? v : fallback);
+    return {
+      author: text(draft && draft.author, doc.meta.author), comment: text(draft && draft.comment, doc.meta.comment),
+      fileName: draft && usableFileName(draft.fileName) ? draft.fileName : doc.fileName,
+    };
+  }
+
+  /** 草稿里记着看过的自动补齐音符（按砖号对上的音符 id）。 */
+  function draftConfirmed(doc, draft) {
+    if (!draft || !Array.isArray(draft.confirmed)) return [];
+    const byTile = new Map(doc.notes.map(n => [n.tile, n]));
+    return draft.confirmed.map(e => Array.isArray(e) && byTile.get(e[0]))
+      .filter((n, i) => n && n.filled && n.lastTile === draft.confirmed[i][1]).map(n => n.id);
+  }
+
+  /** 和打开时完全一样（键位、作者、说明、文件名都没变，也没有看过的待检查）：不用留草稿。 */
+  function untouched(doc) {
+    const o = doc.opened || {};
+    return doc.notes.every(n => !isChanged(n) && !n.confirmed)
+      && doc.meta.author === o.author && doc.meta.comment === o.comment && doc.fileName === o.fileName;
+  }
+
+  /**
+   * 浏览器里的草稿太多时删哪些（list：[{ key, saved, time }]）：留 keep 份。
+   * 先删已保存的（游戏里有文件），再删没保存的，各自从最久没改的删起；protect 是正在编辑的那一份，不删。
+   */
+  function draftsToDrop(list, keep, protect) {
+    const extra = list.length - keep;
+    if (extra <= 0) return [];
+    return list.filter(d => d.key !== protect)
+      .sort((a, b) => (b.saved === true) - (a.saved === true) || (finite(a.time) ? a.time : 0) - (finite(b.time) ? b.time : 0))
+      .slice(0, extra).map(d => d.key);
   }
 
   /**
@@ -406,12 +565,15 @@
     for (const [id, targets] of Object.entries(draft.lanes)) {
       const note = doc.notes[Number(id)];
       if (!note || !Array.isArray(targets)) return null;
-      const lanes = withLanes(doc, note, targets);
+      const lanes = withLanes(doc, note, ascending(targets));
       if (!lanes) return null;
-      if (laneKey(lanes) !== laneKey(note.lanes)) change.set(note.id, lanes);
+      if (noteKey(lanes) !== noteKey(note.lanes)) change.set(note.id, lanes);
     }
     return change;
   }
+
+  /** 只记了键、没记长按的（旧草稿）：照旧按轨道顺序分长按。 */
+  const ascending = lanes => lanes.slice().sort((a, b) => a - b);
 
   function draftByTile(doc, draft) {
     const byTile = new Map(doc.notes.map(n => [n.tile, n]));
@@ -422,11 +584,77 @@
       const note = Array.isArray(entry) ? byTile.get(entry[0]) : undefined;
       const targets = note && note.lastTile === entry[1] && Array.isArray(entry[2])
         ? entry[2].map(l => (mirror && int(l) ? doc.keys - 1 - l : l)) : null;
-      const lanes = targets && withLanes(doc, note, targets);
+      const holds = targets && Array.isArray(entry[4]) && entry[4].length === targets.length ? entry[4] : null;
+      const lanes = holds ? withHolds(doc, note, targets.map((l, i) => [l, holds[i]])) : targets && withLanes(doc, note, ascending(targets));
       if (!lanes) { if (Array.isArray(entry) && entry[3] === 1) change.missed++; continue; } // 分组变了（或这一条坏了）：不套；改过的告诉玩家没接上
-      if (laneKey(lanes) !== laneKey(note.lanes)) change.set(note.id, lanes);
+      if (noteKey(lanes) !== noteKey(note.lanes)) change.set(note.id, lanes);
     }
     return change;
+  }
+
+  // ---------- 键位 ----------
+  // 游戏里的键位是 Unity 的 KeyCode 名字或符号本身（Mod 的 KeyBindings、KeyPicker）：单个字符按浏览器的 e.key 认（跟着键盘布局），
+  // 其他的换成浏览器的 KeyboardEvent.code 认（2026-11-19 评审：Keypad4、LeftShift 这类键在编辑器里按了没反应）
+  const UNITY_CODES = {
+    LeftShift: 'ShiftLeft', RightShift: 'ShiftRight', LeftControl: 'ControlLeft', RightControl: 'ControlRight',
+    LeftAlt: 'AltLeft', RightAlt: 'AltRight', LeftCommand: 'MetaLeft', RightCommand: 'MetaRight', LeftWindows: 'MetaLeft', RightWindows: 'MetaRight',
+    Space: 'Space', Tab: 'Tab', Return: 'Enter', Backspace: 'Backspace', CapsLock: 'CapsLock',
+    Insert: 'Insert', Delete: 'Delete', Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
+    UpArrow: 'ArrowUp', DownArrow: 'ArrowDown', LeftArrow: 'ArrowLeft', RightArrow: 'ArrowRight',
+    KeypadPeriod: 'NumpadDecimal', KeypadDivide: 'NumpadDivide', KeypadMultiply: 'NumpadMultiply', KeypadMinus: 'NumpadSubtract',
+    KeypadPlus: 'NumpadAdd', KeypadEnter: 'NumpadEnter', KeypadEquals: 'NumpadEqual',
+    Semicolon: 'Semicolon', Quote: 'Quote', Comma: 'Comma', Period: 'Period', Slash: 'Slash', Backslash: 'Backslash',
+    LeftBracket: 'BracketLeft', RightBracket: 'BracketRight', Minus: 'Minus', Equals: 'Equal', BackQuote: 'Backquote',
+  };
+
+  /** Unity 键名对应的 e.code；单个字符（D、;、[）和认不出的为空串。 */
+  function keyCodeOf(label) {
+    const name = String(label || '');
+    let m;
+    if ((m = /^Alpha([0-9])$/.exec(name))) return 'Digit' + m[1];
+    if ((m = /^Keypad([0-9])$/.exec(name))) return 'Numpad' + m[1];
+    if (/^F([1-9]|1[0-5])$/.test(name)) return name;
+    return Object.prototype.hasOwnProperty.call(UNITY_CODES, name) ? UNITY_CODES[name] : '';
+  }
+
+  /** 按下的键（{ key, code }）是第几条轨道的键；不是为 -1。 */
+  function laneOfKey(labels, e) {
+    return labels.findIndex(label => {
+      const code = keyCodeOf(label);
+      if (code) return e.code === code;
+      return String(label).length === 1 && typeof e.key === 'string' && e.key.length === 1 && e.key.toUpperCase() === String(label).toUpperCase();
+    });
+  }
+
+  /** Shift、Ctrl、Alt、Win 这类键：和别的键一起按时是组合键。 */
+  const isModifier = label => /^(Shift|Control|Alt|Meta)/.test(keyCodeOf(label));
+
+  /** 键帽上显示的字（同 Mod 的 KeyBindings.Display）：长名字缩写，没指定的为空串，单个字母大写。 */
+  function keyDisplay(label) {
+    const name = String(label || '');
+    const short = {
+      KeypadPeriod: 'Num.', KeypadDivide: 'Num/', KeypadMultiply: 'Num*', KeypadMinus: 'Num-', KeypadPlus: 'Num+', KeypadEnter: 'NumEnter',
+      KeypadEquals: 'Num=', PageUp: 'PgUp', PageDown: 'PgDn', Insert: 'Ins', Delete: 'Del', Backspace: 'Bksp', CapsLock: 'Caps',
+      Mouse2: 'MMB', Mouse3: 'MB4', Mouse4: 'MB5', Mouse5: 'MB6', Mouse6: 'MB7', None: '', LeftShift: 'LShift', RightShift: 'RShift',
+      LeftControl: 'LCtrl', RightControl: 'RCtrl', LeftAlt: 'LAlt', RightAlt: 'RAlt', Return: 'Enter',
+      UpArrow: '↑', DownArrow: '↓', LeftArrow: '←', RightArrow: '→',
+    };
+    const m = /^Keypad([0-9])$/.exec(name);
+    if (m) return 'Num' + m[1];
+    if (Object.prototype.hasOwnProperty.call(short, name)) return short[name];
+    return name.length === 1 ? name.toUpperCase() : name;
+  }
+
+  // 编辑器自己的单键快捷键（app.js 的键盘处理）：单个字符按 e.key，其余按 e.code
+  const SHORTCUT_CHARS = new Set(['M', 'N', '[', ']']);
+  const SHORTCUT_CODES = new Set(['Space', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home']);
+
+  /** 和编辑器快捷键重复的轨道键（显示用的名字）：轨道键优先，按下时改键，快捷键用不了，要提示玩家。 */
+  function shortcutClashes(labels) {
+    return labels.filter(label => {
+      const code = keyCodeOf(label);
+      return code ? SHORTCUT_CODES.has(code) : SHORTCUT_CHARS.has(String(label).toUpperCase());
+    }).map(keyDisplay);
   }
 
   const RECENT_FORMAT = 'rhythmhint-editor-recent';
@@ -450,8 +678,9 @@
   }
 
   return {
-    FILE_FORMAT, SESSION_FORMAT, FingeringError, parseFingering, fromSession, fromFileText, toFileText, parseRecent,
-    suggestedFileName, numberedFileName, sameLevelFile, saveName, signature, ops, History, jacks, noteValue, secondsPerBeat, stats, refLanes, laneKey,
-    isChanged, handOf, draftOf, draftChange, plain,
+    FILE_FORMAT, SESSION_FORMAT, MAX_FILE_BYTES, FingeringError, parseFingering, fromSession, fromFileText, toFileText, parseRecent,
+    suggestedFileName, cleanFileName, numberedFileName, sameLevelFile, saveName, signature, ops, History, jacks, noteValue, secondsPerBeat, stats, refLanes, laneKey,
+    isChanged, handOf, draftOf, draftChange, draftMeta, draftConfirmed, draftsToDrop, untouched, remember, plain,
+    markReview, confirm, reviewList, nextReview, keyCodeOf, laneOfKey, isModifier, keyDisplay, shortcutClashes,
   };
 });

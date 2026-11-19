@@ -20,13 +20,20 @@
   function readJson(key) {
     try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; } // 隐私模式下 localStorage 不可用：当作没有
   }
+  /** 存进 localStorage；存不了（写满了、隐私模式）返回 false，要不要告诉玩家由调用的地方决定。 */
   function writeJson(key, value) {
-    try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* 存不了偏好或草稿不影响编辑 */ }
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+      return true;
+    } catch (e) {
+      console.warn('RhythmHint: cannot write ' + key, e);
+      return false;
+    }
   }
   function removeKey(key) {
-    try { localStorage.removeItem(key); } catch (e) { /* 同上 */ }
+    try { localStorage.removeItem(key); } catch (e) { console.warn('RhythmHint: cannot remove ' + key, e); } // 删不掉只是多占点地方
   }
-  const savePrefs = () => writeJson(PREFS_KEY, prefs);
+  const savePrefs = () => writeJson(PREFS_KEY, prefs); // 偏好存不了不影响编辑，不提示（草稿存不了才提示）
 
   // ---------- 状态 ----------
   const session = window.RHYTHMHINT_SESSION;
@@ -91,7 +98,8 @@
   langSelect.addEventListener('change', () => { prefs.language = langSelect.value; savePrefs(); applyLanguage(langSelect.value); });
 
   // ---------- 提示条 ----------
-  function toast(text, kind, actions, ms) {
+  /** 提示条。actions：[[按钮文字, 点了做什么, 是不是主按钮]]；onClose：提示条关掉时（点了按钮或到时间）。返回关掉它的函数。 */
+  function toast(text, kind, actions, ms, onClose) {
     const el = document.createElement('div');
     el.className = 'toast ' + (kind || '');
     const span = document.createElement('span');
@@ -106,8 +114,12 @@
     });
     $('toasts').appendChild(el);
     let timer = setTimeout(close, ms || (actions && actions.length ? 15000 : 4200)); // 有意的延时：提示条显示几秒后自己消失
+    let closed = false;
     function close() {
       clearTimeout(timer);
+      if (closed) return;
+      closed = true;
+      if (onClose) onClose();
       el.classList.add('leave');
       el.addEventListener('animationend', () => el.remove(), { once: true });
     }
@@ -123,16 +135,25 @@
   }
 
   // ---------- 打开 ----------
+  let openSeq = 0; // 每打开一次加一：还在载入的旧请求回来时认得出自己过时了（历史里快速连点两关）
+
+  /** 打开一份：make 每次调用都重新读出一份（另一个标签页改了这一关时用它重新打开）。读不出来时抛出，原来的照旧。 */
+  function openDoc(make, source) {
+    const doc = make();
+    state.make = make;
+    loadDoc(doc, source);
+    return doc;
+  }
+
   function loadDoc(doc, source) {
+    openSeq++;
     player.pause();
     state.doc = doc;
     state.history = new M.History(doc);
     state.source = source;
-    state.selection.clear();
-    state.loop = { a: null, b: null, on: false };
-    state.flash = [];
-    state.press = [];
+    resetView();
     applyNoteStyle();
+    M.remember(doc); // 打开文件时文件名是在读出来之后才换的
     state.time = doc.notes.length ? doc.notes[0].time - 1.2 : 0;
     view.setDoc(doc);
     track.setDoc(doc);
@@ -156,42 +177,82 @@
       .catch(e => { renderAudioName(); toast(state.t('audio.failed', e.message), 'error'); });
     if (doc.audio && doc.audio.script) loadDecoded(doc);
     renderKeymap();
+    renderLoop();
+    renderPlayButton();
     edited(true);
     restoreDraft();
     if (openPanel === 'history') renderHistory();
+    tellClashes();
+  }
+
+  /** 换一关时上一关留下的东西都清掉（2026-11-19 评审：没保存的标记、平滑滚动的目标、循环按钮、播放图标会留着）。 */
+  function resetView() {
+    state.selection.clear();
+    state.loop = { a: null, b: null, on: false };
+    state.flash = [];
+    state.press = [];
+    state.anims.clear();
+    state.hover = null;
+    state.preview = null;
+    state.box = null;
+    state.timeTarget = null;
+    state.zoomAnchor = null;
+    state.playing = false;
+    drag = null;
+    pan = null;
+    pendingModifier = null;
+    metaDirty = false;
+    inspectorKey = '';
+    allowDraft();
   }
 
   function openFromText(text, name) {
     try {
-      const doc = M.fromFileText(text);
-      doc.fileName = name || doc.fileName;
-      loadDoc(doc, 'file');
-      toast(state.t('toast.opened', name || doc.fileName), 'ok');
+      const doc = openDoc(() => {
+        const d = M.fromFileText(text);
+        d.fileName = name || d.fileName;
+        return d;
+      }, 'file');
+      toast(state.t('toast.opened', doc.fileName), 'ok');
     } catch (e) {
       toast(state.t('toast.openFailed', errorText(e)), 'error');
     }
+  }
+
+  /** 打开选的或拖进来的手序文件：和 Mod 一样超过 20 MB 不读；读不出来告诉玩家。 */
+  async function openFile(file) {
+    const limit = M.MAX_FILE_BYTES / 1024 / 1024;
+    if (file.size > M.MAX_FILE_BYTES) { toast(state.t('toast.tooBig', file.name, limit), 'error', null, 8000); return; }
+    let text;
+    try {
+      text = await file.text();
+    } catch (e) {
+      toast(state.t('toast.openFailed', errorText(e)), 'error');
+      return;
+    }
+    openFromText(text, file.name);
   }
 
   function askOpen() {
     if (state.history && state.history.dirty && !window.confirm(state.t('toast.confirmOpen'))) return;
     $('openInput').click();
   }
-  $('openInput').addEventListener('change', async e => {
+  $('openInput').addEventListener('change', e => {
     const file = e.target.files[0];
     e.target.value = '';
-    if (file) openFromText(await file.text(), file.name);
+    if (file) openFile(file);
   });
   document.querySelectorAll('[data-action="open"]').forEach(b => b.addEventListener('click', askOpen));
 
   // 拖进来：手序文件就打开，音乐就载入
   window.addEventListener('dragover', e => e.preventDefault());
-  window.addEventListener('drop', async e => {
+  window.addEventListener('drop', e => {
     e.preventDefault();
     const file = e.dataTransfer.files[0];
     if (!file) return;
     if (/\.json$/i.test(file.name)) {
       if (state.history && state.history.dirty && !window.confirm(state.t('toast.confirmOpen'))) return;
-      openFromText(await file.text(), file.name);
+      openFile(file);
     } else if (file.type.startsWith('audio/') || /\.(ogg|mp3|wav|flac|m4a)$/i.test(file.name)) loadAudioFile(file);
   });
 
@@ -364,6 +425,7 @@
     const parts = folder.split(/[\\/]/).filter(Boolean);
     $('fFolderName').textContent = parts[parts.length - 1] || folder;
     $('fFolder').textContent = folder;
+    $('changeFolder').hidden = !window.showDirectoryPicker || !doc; // 别的浏览器是下载，没有保存位置可换
     if (doc) {
       const s = M.stats(doc, state.jacks);
       const stat = (n, label, hot) => '<div class="stat' + (hot ? ' hot' : '') + '"><b>' + n + '</b><span title="' + esc(label) + '">' + esc(label) + '</span></div>';
@@ -378,11 +440,12 @@
   $('fComment').addEventListener('input', e => { if (state.doc) { state.doc.meta.comment = e.target.value; markMetaDirty(); } });
   $('fName').addEventListener('change', e => {
     if (!state.doc) return;
-    // 输入框里只写名字，.json 固定显示在框里
-    let name = e.target.value.trim().replace(/\.json$/i, '').replace(/[\\/:*?"<>|]/g, '_');
-    if (!name) name = M.suggestedFileName(state.doc.meta).replace(/\.json$/i, '');
-    state.doc.fileName = name + '.json';
+    // 输入框里只写名字，.json 固定显示在框里；控制字符、路径符号、Windows 保留名照建议名一样处理
+    const name = M.cleanFileName(e.target.value.trim().replace(/\.json$/i, '')) || M.suggestedFileName(state.doc.meta).replace(/\.json$/i, '');
     e.target.value = name;
+    if (state.doc.fileName === name + '.json') return;
+    state.doc.fileName = name + '.json';
+    markMetaDirty(); // 换了名字还没存：游戏里还是原来那个文件。文件名也进草稿，从历史接着改时沿用
   });
   let metaDirty = false;
   function markMetaDirty() { metaDirty = true; renderHeader(); scheduleDraft(); }
@@ -393,9 +456,9 @@
   $('copyFolder').addEventListener('click', e => copy($('fFolder').textContent, e.currentTarget));
 
   function renderShortcuts() {
-    const labels = laneLabels().join(' ');
+    const labels = shownLabels();
     const rows = [
-      ['keys.play', '<kbd>Space</kbd>'], ['keys.lane', labels.split(' ').map(k => '<kbd>' + esc(k) + '</kbd>').join('')],
+      ['keys.play', '<kbd>Space</kbd>'], ['keys.lane', labels.map(k => '<kbd>' + esc(k) + '</kbd>').join('')],
       ['keys.drag', ''], ['keys.shift', '<kbd>←</kbd><kbd>→</kbd>'], ['keys.mirror', '<kbd>M</kbd>'],
       ['keys.undo', '<kbd>Ctrl</kbd><kbd>Z</kbd> / <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>Z</kbd>'], ['keys.save', '<kbd>Ctrl</kbd><kbd>S</kbd>'],
       ['keys.home', '<kbd>Home</kbd>'], ['keys.next', '<kbd>N</kbd>'], ['keys.all', '<kbd>Ctrl</kbd><kbd>A</kbd> / <kbd>Esc</kbd>'],
@@ -425,6 +488,7 @@
   function edited(reset) {
     const doc = state.doc;
     if (!doc) return;
+    M.markReview(doc); // 改过的自动补齐音符不再待检查（撤销回去又算）
     state.jacks = M.jacks(doc, prefs.jackMs / 1000);
     renderHeader();
     renderInspector();
@@ -460,13 +524,16 @@
 
   // ---------- 编辑键位（用户要求能在编辑器里自定义；默认和游戏里的键位一样） ----------
   let capturing = null; // 正在等新键的轨道
+  /** 四条轨道的键（游戏里的键名，可能是 Keypad4、LeftShift 这样的 Unity 键名）。 */
   function laneLabels() {
     const doc = state.doc;
     if (!doc) return ['D', 'F', 'J', 'K'];
     return Array.isArray(prefs.laneKeys) && prefs.laneKeys.length === doc.keys ? prefs.laneKeys : doc.keyLabels;
   }
+  /** 键帽上显示的字（和游戏里一样缩写：Keypad4 → Num4）；没指定键的轨道显示 —。 */
+  const shownLabels = () => laneLabels().map(k => M.keyDisplay(k) || '—');
   function renderKeymap() {
-    const labels = laneLabels();
+    const labels = shownLabels();
     const el = $('keymap');
     el.style.gridTemplateColumns = 'repeat(' + labels.length + ', 1fr)';
     el.innerHTML = labels.map((k, lane) => '<button data-key-lane="' + lane + '" class="' + (capturing === lane ? 'capturing' : '') + '">'
@@ -477,10 +544,26 @@
       renderKeymap();
     }));
     state.labels = labels;
+    const clashes = M.shortcutClashes(laneLabels());
+    $('keysClash').hidden = !clashes.length;
+    $('keysClash').textContent = clashes.length ? state.t('keys.clash', clashes.join(' ')) : '';
   }
-  /** 等新键时按下的键：合法就记下（和别的轨道重复就互换），Esc 取消。 */
+  /**
+   * 轨道键和编辑器的快捷键（M、N、[、]、空格、方向键、Home）重复时，按下按轨道键处理，快捷键用不了：提示一次
+   * （2026-11-19 评审：键位是 Z X N M 时按 N、M 不跳转、不镜像，变成了改键）。同一组键位只在打开时提示一次。
+   */
+  function tellClashes() {
+    const clashes = M.shortcutClashes(laneLabels());
+    const which = laneLabels().join(' ');
+    if (!clashes.length || prefs.clashTold === which) return;
+    prefs.clashTold = which;
+    savePrefs();
+    toast(state.t('keys.clash', clashes.join(' ')), 'warn', null, 10000);
+  }
+  /** 等新键时按下的键：合法就记下（和别的轨道重复就互换），Esc 取消；按着 Ctrl、Alt 的组合键不录、接着等。 */
   function captureKey(e) {
     e.preventDefault();
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
     const key = e.key;
     if (key !== 'Escape' && key.length === 1 && key !== ' ') {
       const labels = laneLabels().slice();
@@ -488,14 +571,16 @@
       if (other >= 0 && other !== capturing) labels[other] = labels[capturing];
       labels[capturing] = k;
       prefs.laneKeys = labels;
+      prefs.clashTold = labels.join(' '); // 在这里提示过了，下次打开不再提示
       savePrefs();
+      if (M.shortcutClashes([k]).length) toast(state.t('keys.clash', M.keyDisplay(k)), 'warn', null, 10000);
     }
     capturing = null;
     renderKeymap();
     renderShortcuts();
     renderInspector();
   }
-  $('keysReset').addEventListener('click', () => { prefs.laneKeys = null; savePrefs(); capturing = null; renderKeymap(); renderShortcuts(); renderInspector(); });
+  $('keysReset').addEventListener('click', () => { prefs.laneKeys = null; savePrefs(); capturing = null; renderKeymap(); renderShortcuts(); renderInspector(); tellClashes(); });
   $('autoNext').checked = prefs.autoNext;
   $('autoNext').addEventListener('change', e => { prefs.autoNext = e.target.checked; savePrefs(); });
 
@@ -521,24 +606,21 @@
     const change = M.ops.toLane(state.doc, notes, lane);
     state.press[lane] = performance.now(); // 底下这条轨道的按键框亮一下，像在游戏里按下
     if (change === null) { applyChange(null); return; }
+    // 本来就在这条轨道上的：玩家看过了、就这么按，自动补齐的不再算待检查
+    const kept = notes.filter(n => n.lanes.length === 1 && n.lanes[0][0] === lane && !change.has(n.id));
     applyChange(change);
+    confirmNotes(kept);
     // 只选中一个音符时，改完自动跳到下一个（用户要求：用 D F J K 一路改下去；本来就在这条轨道也算确认，照样往下走）
     if (prefs.autoNext && notes.length === 1) stepSelection(1);
   }
 
-  /** 需要检查的：自动补齐的音符和连按。 */
-  function checkList() {
-    const doc = state.doc;
-    const ids = [];
-    let lastAuto = false;
-    for (const n of doc.notes) {
-      // 自动补齐的一段只算一处（跳到这一段的开头）
-      if (n.auto && !lastAuto) ids.push(n.id);
-      else if (!n.auto && state.jacks.has(n.id)) ids.push(n.id);
-      lastAuto = n.auto;
-    }
-    return ids;
+  /** 按了音符现在的键、没有改动：自动补齐的记成看过了（2026-11-19 评审：原来改过、看过的待检查标记都不消失）。确认状态进草稿。 */
+  function confirmNotes(notes) {
+    if (M.confirm(notes)) edited(false);
   }
+
+  /** 需要检查的：还要检查的自动补齐音符（一段只算一处，跳到这一段的开头）和连按。 */
+  function checkList() { return M.reviewList(state.doc, state.jacks); }
   function countJackPairs() {
     let count = 0;
     const doc = state.doc;
@@ -547,13 +629,17 @@
     return count;
   }
 
+  /**
+   * 下一处待检查：从选中的音符往后找，到尾了从头再来；没选中时从画面上的位置往后找
+   * （2026-11-19 评审：原来按画面时间找，跳过去时画面停在音符前 0.6 秒，下一次找到的还是它）。
+   */
   function nextCheck() {
     if (!state.doc) return;
     const list = checkList();
     if (!list.length) { toast(state.t('toast.noCheck'), 'ok'); return; }
-    const after = list.find(id => state.doc.notes[id].time > state.time + 0.05);
-    const id = after !== undefined ? after : list[0];
-    focusNote(id);
+    const ids = [...state.selection];
+    const from = ids.length ? Math.max(...ids) : view.firstVisible(state.timeTarget !== null ? state.timeTarget : state.time) - 1;
+    focusNote(M.nextReview(list, from));
   }
 
   function focusNote(id) {
@@ -579,7 +665,7 @@
     if (!doc) { el.hidden = true; return; }
     el.hidden = false;
     const notes = state.doc ? selectedNotes() : [];
-    const labels = laneLabels();
+    const labels = shownLabels();
     if (!notes.length) {
       el.innerHTML = '<h2>' + esc(state.t('insp.none')) + '</h2><p class="hint">' + esc(state.t('insp.noneHint', labels.join(' '))) + '</p>'
         + (checkList().length ? '<div class="tool-row"><button class="btn" data-insp="next"><svg><use href="#i-flag"/></svg>' + esc(state.t('insp.next')) + '</button></div>' : '');
@@ -593,7 +679,7 @@
       const prev = i > 0 ? doc.notes[i - 1] : null, next = i + 1 < doc.notes.length ? doc.notes[i + 1] : null;
       const ms = (a, b) => a && b ? Math.round((b.time - a.time) * 1000) + ' ms' : '—';
       const tags = [];
-      if (one.auto) tags.push('<span class="tag auto">' + esc(state.t('source.auto')) + '</span>');
+      if (one.filled) tags.push('<span class="tag auto">' + esc(state.t('source.auto')) + '</span>');
       else if (state.source === 'game' && doc.usedFile) tags.push('<span class="tag custom">' + esc(state.t('source.custom')) + '</span>');
       if (M.isChanged(one)) tags.push('<span class="tag changed">' + esc(state.t('source.changed')) + '</span>');
       html += '<dl class="kv">'
@@ -603,7 +689,7 @@
         + '<dt>' + esc(state.t('insp.kind')) + '</dt><dd>' + esc(state.t('kind.' + Math.min(4, one.lanes.length))) + '</dd>'
         + (tags.length ? '<dt>' + esc(state.t('insp.source')) + '</dt><dd>' + tags.join(' ') + '</dd>' : '')
         + '</dl>';
-      if (one.auto) html += '<div class="note-callout warn">' + esc(state.t('insp.autoNote')) + '</div>';
+      if (one.auto) html += '<div class="note-callout warn">' + esc(state.t('insp.autoNote')) + '</div>'; // 还要检查时才提醒
       if (state.jacks.has(one.id)) html += '<div class="note-callout danger">' + esc(state.t('insp.jackNote', prefs.jackMs)) + '</div>';
       const cls = one.lanes.length > 2 ? ' c3' : one.lanes.length > 1 ? ' c2' : '';
       html += '<div><div class="hint" style="margin-bottom:6px">' + esc(one.lanes.length > 1 ? state.t('insp.lanesHint', one.lanes.length) : state.t('insp.lanes')) + '</div>'
@@ -631,9 +717,15 @@
   let chordPick = [];
   function bindInspector(el, notes) {
     chordPick = [];
+    // 点的就是它现在的键（没有改动）：算看过了
+    const pick = (note, lanes) => {
+      const change = M.ops.set(state.doc, note, lanes);
+      if (change && change.size === 0) confirmNotes([note]);
+      else applyChange(change);
+    };
     el.querySelectorAll('[data-lane]').forEach(b => b.addEventListener('click', () => {
       const note = notes[0], lane = Number(b.dataset.lane);
-      if (note.lanes.length === 1) { applyChange(M.ops.set(state.doc, note, [lane])); return; }
+      if (note.lanes.length === 1) { pick(note, [lane]); return; }
       if (chordPick.includes(lane)) chordPick = chordPick.filter(x => x !== lane);
       else chordPick.push(lane);
       el.querySelectorAll('[data-lane]').forEach(x => {
@@ -641,7 +733,7 @@
         x.classList.toggle('on', chordPick.includes(l));
         x.classList.toggle(note.lanes.length > 2 ? 'c3' : 'c2', chordPick.includes(l));
       });
-      if (chordPick.length === note.lanes.length) applyChange(M.ops.set(state.doc, note, chordPick));
+      if (chordPick.length === note.lanes.length) pick(note, chordPick);
     }));
     el.querySelectorAll('[data-insp]').forEach(b => b.addEventListener('click', () => {
       const doc = state.doc;
@@ -804,10 +896,38 @@
   });
 
   // ---------- 键盘 ----------
+  // 轨道键优先于编辑器的快捷键（重复时打开关卡、录键时提示过）。游戏里的 Unity 键名（Keypad4、LeftShift……）按 e.code 认。
+  // Shift、Ctrl 这类键当轨道键时，单独按下再松开才算：按着它点音符加选、按组合键都不改键
+  let pendingModifier = null;
+  window.addEventListener('mousedown', () => { pendingModifier = null; }, true);
+  const inTextBox = e => !!(e.target && e.target.closest && e.target.closest('input, textarea, select'));
+  const isSaveKey = e => (e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 's';
+
+  /** 按下的是轨道键就改键（或记下按着的 Shift、Ctrl），返回 true；不是返回 false。 */
+  function laneKeyDown(e) {
+    const labels = laneLabels(), lane = M.laneOfKey(labels, e);
+    if (lane < 0) return false;
+    if (M.isModifier(labels[lane])) {
+      if (!e.repeat) pendingModifier = { code: e.code, lane };
+      return true;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey) return false; // 组合键：交给快捷键
+    e.preventDefault();
+    if (document.activeElement && document.activeElement.tagName === 'BUTTON') document.activeElement.blur(); // 空格当轨道键时别再「按」一次刚点过的按钮
+    laneKeyPressed(lane);
+    return true;
+  }
+
   window.addEventListener('keydown', e => {
-    if (e.target.closest && e.target.closest('input, textarea, select')) return;
-    if (!$('modal').hidden) { if (e.key === 'Escape') closeModal(false); return; }
+    if (pendingModifier && e.code !== pendingModifier.code) pendingModifier = null; // 按着的 Shift、Ctrl 是组合键的一部分
+    if (inTextBox(e)) {
+      // 输入框里按 Ctrl+S 也是保存，不弹出浏览器的另存网页；先让输入框交出焦点（文件名在 change 时才生效）
+      if (isSaveKey(e)) { e.preventDefault(); if ($('modal').hidden) { e.target.blur(); saveToGame(); } }
+      return;
+    }
+    if (!$('modal').hidden) { if (e.key === 'Escape') closeModal(false); else if (isSaveKey(e)) e.preventDefault(); return; }
     if (capturing !== null) { captureKey(e); return; }
+    if (state.doc && laneKeyDown(e)) return;
     const key = e.key, ctrl = e.ctrlKey || e.metaKey;
     if (key === ' ') {
       e.preventDefault();
@@ -823,8 +943,6 @@
     if (ctrl && key.toLowerCase() === 'a') { e.preventDefault(); state.selection = new Set(state.doc.notes.map(n => n.id)); renderInspector(); return; }
     if (ctrl && key.toLowerCase() === 'o') { e.preventDefault(); askOpen(); return; }
     if (ctrl || e.altKey) return;
-    const lane = laneLabels().findIndex(k => k.toUpperCase() === key.toUpperCase());
-    if (lane >= 0) { e.preventDefault(); laneKeyPressed(lane); return; }
     switch (key) {
       case 'ArrowLeft': e.preventDefault(); applyChange(M.ops.shift(state.doc, selectedNotes(), -1)); break;
       case 'ArrowRight': e.preventDefault(); applyChange(M.ops.shift(state.doc, selectedNotes(), 1)); break;
@@ -839,12 +957,18 @@
     }
   });
   window.addEventListener('keyup', e => {
-    if (e.key !== ' ') return;
-    if (e.target.closest && e.target.closest('input, textarea, select')) return;
+    if (pendingModifier && e.code === pendingModifier.code) {
+      const lane = pendingModifier.lane;
+      pendingModifier = null;
+      if (state.doc && !inTextBox(e) && $('modal').hidden && capturing === null) laneKeyPressed(lane);
+      return;
+    }
+    if (e.key !== ' ' || inTextBox(e)) return;
     e.preventDefault();
+    const wasDown = spaceDown; // 空格是轨道键时按下已经改了键，这里不再播放
     spaceDown = false;
     canvas.classList.remove('grab');
-    if (!spacePanned) togglePlay();
+    if (wasDown && !spacePanned) togglePlay();
   });
 
   /** 上下键：选中下一个 / 上一个音符。 */
@@ -868,10 +992,13 @@
     if (player.playing) { player.pause(); state.time = player.time(); }
     else { player.seek(state.time); player.play(); }
     state.playing = player.playing;
-    $('playBtn').innerHTML = '<svg><use href="#i-' + (state.playing ? 'pause' : 'play') + '"/></svg>';
+    renderPlayButton();
     restart($('playBtn'), 'swap');
-    $('playBtn').title = state.t(state.playing ? 'tr.pause' : 'tr.play');
     state.lastTime = state.time;
+  }
+  function renderPlayButton() {
+    $('playBtn').innerHTML = '<svg><use href="#i-' + (state.playing ? 'pause' : 'play') + '"/></svg>';
+    $('playBtn').title = state.t(state.playing ? 'tr.pause' : 'tr.play');
   }
   $('playBtn').addEventListener('click', togglePlay);
   $('toStart').addEventListener('click', () => { if (state.doc) seek(state.loop.on && state.loop.a !== null ? state.loop.a : state.doc.notes[0].time - 1.2, true); });
@@ -1078,8 +1205,10 @@
   }
   // 游戏的手序文件夹和文档里的中转文件夹各记一个：游戏换了位置、换成中转文件夹时不会存到旧的地方
   const folderKey = () => (state.doc && state.doc.saveStartIn ? 'fingerings-inbox' : 'fingerings');
-  const getFolder = () => idb('readonly', s => s.get(folderKey())).catch(() => null);
-  const putFolder = handle => idb('readwrite', s => s.put(handle, folderKey())).catch(() => null);
+  // 读写不了 IndexedDB（隐私模式等）：当作没记住，每次保存问一次
+  const getFolder = () => idb('readonly', s => s.get(folderKey())).catch(e => { console.warn('RhythmHint: cannot read the folder', e); return null; });
+  const putFolder = handle => idb('readwrite', s => s.put(handle, folderKey())).catch(e => console.warn('RhythmHint: cannot remember the folder', e));
+  const forgetFolder = () => idb('readwrite', s => s.delete(folderKey())).catch(e => console.warn('RhythmHint: cannot forget the folder', e));
 
   function modal(title, body, path, okLabel) {
     $('modalTitle').textContent = title;
@@ -1111,26 +1240,65 @@
   function saved() {
     state.history.markSaved();
     metaDirty = false;
+    allowDraft(); // 这一页刚存进游戏，就以这一页为准
     writeDraft(); // 草稿留着、记成已保存：从「历史」打开这一关时还是保存时的样子
     renderHeader();
   }
 
+  const saveFolderText = () => (state.doc && state.doc.saveFolder) || '…/Mods/RhythmHint/Fingerings';
+
+  /**
+   * 记住的手序文件夹，还有读写权限时才用；玩家拒绝了权限、文件夹不在了就忘掉，重新问（2026-11-19 评审：原来永远留着，只能清浏览器数据）。
+   * 别的错误（比如浏览器要玩家再点一下才肯问权限）照旧报出来，记住的不丢，再点一次保存就行。
+   */
+  async function rememberedFolder() {
+    const dir = await getFolder();
+    if (!dir) return null;
+    try {
+      if ((await dir.queryPermission({ mode: 'readwrite' })) === 'granted' || (await dir.requestPermission({ mode: 'readwrite' })) === 'granted') return dir;
+    } catch (e) {
+      if (!e || e.name !== 'NotFoundError') throw e;
+    }
+    await forgetFolder();
+    return null;
+  }
+
   /** 游戏的手序文件夹（读写权限，句柄记在 IndexedDB 里）：没记住或没权限就问玩家、让他选；玩家取消为 null。 */
   async function fingeringsFolder() {
-    let dir = await getFolder();
-    if (dir && (await dir.queryPermission({ mode: 'readwrite' })) !== 'granted' && (await dir.requestPermission({ mode: 'readwrite' })) !== 'granted') dir = null;
+    const dir = await rememberedFolder();
     if (dir) return dir;
-    const folder = (state.doc && state.doc.saveFolder) || '…/Mods/RhythmHint/Fingerings';
     // 2026-11-19 玩家截图：游戏装在 C:\Program Files (x86) 时浏览器不让选游戏里的文件夹，Mod 改让这里存到文档里的中转文件夹
     const inbox = !!(state.doc && state.doc.saveStartIn);
-    if (!(await modal(state.t('save.pickTitle'), state.t(inbox ? 'save.pickBodyInbox' : 'save.pickBody'), folder, state.t('save.pickGo')))) return null;
-    dir = await window.showDirectoryPicker(inbox
-      ? { id: 'rhythmhint-fingerings-inbox', mode: 'readwrite', startIn: state.doc.saveStartIn }
-      : { id: 'rhythmhint-fingerings', mode: 'readwrite' });
-    if (dir.name.toLowerCase() !== 'fingerings' && !(await modal(state.t('save.pickTitle'), state.t('save.wrongFolder', dir.name), '', state.t('save.ok')))) return null;
-    await putFolder(dir);
-    return dir;
+    if (!(await modal(state.t('save.pickTitle'), state.t(inbox ? 'save.pickBodyInbox' : 'save.pickBody'), saveFolderText(), state.t('save.pickGo')))) return null;
+    return pickFolder();
   }
+
+  /**
+   * 让玩家选手序文件夹（要在点击里调用：浏览器只在玩家刚点过时打开选择框）。游戏的手序文件夹和文档里的中转文件夹都叫 Fingerings：
+   * 选的不叫这个就是选错了，提示后重选，不再给「仍然保存」，也不记住（2026-11-19 评审：选错一次就一直存错地方）。玩家取消为 null。
+   */
+  async function pickFolder() {
+    const inbox = !!(state.doc && state.doc.saveStartIn);
+    for (;;) {
+      const dir = await window.showDirectoryPicker(inbox
+        ? { id: 'rhythmhint-fingerings-inbox', mode: 'readwrite', startIn: state.doc.saveStartIn }
+        : { id: 'rhythmhint-fingerings', mode: 'readwrite' });
+      if (dir.name.toLowerCase() === 'fingerings') { await putFolder(dir); return dir; }
+      if (!(await modal(state.t('save.pickTitle'), state.t('save.wrongFolder', dir.name), saveFolderText(), state.t('save.pickAgain')))) return null;
+    }
+  }
+
+  /** 文件面板「更换保存位置」：选好了才换，取消了照旧用原来的。 */
+  $('changeFolder').addEventListener('click', async e => {
+    e.currentTarget.blur();
+    try {
+      const dir = await pickFolder();
+      if (dir) toast(state.t('save.folderSet', dir.name), 'ok');
+    } catch (err) {
+      if (err && err.name === 'AbortError') return; // 玩家在选文件夹时点了取消
+      toast(state.t('save.failed', errorText(err)), 'error');
+    }
+  });
 
   /** 文件夹里这个文件的文字；没有这个文件为 null。同名的是个文件夹时给空串（读不出来，这个名字不能用）。 */
   async function existingText(dir, name) {
@@ -1147,23 +1315,29 @@
     const doc = state.doc;
     if (!doc) return;
     const text = M.toFileText(doc);
-    const folder = doc.saveFolder || '…/Mods/RhythmHint/Fingerings';
     if (!window.showDirectoryPicker) {
+      // 下载不算保存（2026-11-19 评审：玩家没把文件放进去也显示已保存）：照旧提示放到哪里，没保存的标记留着
       download(text, doc.fileName);
-      saved();
-      toast(state.t('save.downloaded', doc.fileName, folder), 'warn', null, 12000);
+      toast(state.t('save.downloaded', doc.fileName, saveFolderText()), 'warn', null, 12000);
       return;
     }
     try {
-      const dir = await fingeringsFolder();
+      let dir = await fingeringsFolder();
       if (!dir) return;
-      // 同名的是另一首谱的手序时另起名字，不覆盖（M.saveName，和 Mod 搬中转文件夹时同一规则）
-      const name = await M.saveName(doc, n => existingText(dir, n));
-      if (!name) { toast(state.t('save.tooMany', doc.fileName), 'error', null, 12000); return; }
+      let name;
+      try {
+        name = await writeInto(dir, doc, text);
+      } catch (e) {
+        if (!e || (e.name !== 'NotFoundError' && e.name !== 'NotAllowedError')) throw e;
+        // 记住的文件夹被删、被挪走或没有权限了：忘掉，问玩家重新选（选择框要玩家再点一下才能打开）
+        await forgetFolder();
+        if (!(await modal(state.t('save.pickTitle'), state.t('save.folderLost'), saveFolderText(), state.t('save.pickGo')))) return;
+        dir = await pickFolder();
+        if (!dir) return;
+        name = await writeInto(dir, doc, text);
+      }
+      if (name === null) { toast(state.t('save.tooMany', doc.fileName), 'error', null, 12000); return; }
       const renamed = name !== doc.fileName;
-      const writable = await (await dir.getFileHandle(name, { create: true })).createWritable();
-      await writable.write(text);
-      await writable.close();
       if (renamed) { doc.fileName = name; renderFilePanel(); }
       saved();
       toast(state.t(renamed ? 'save.renamed' : 'save.done', name), 'ok', null, renamed ? 12000 : 6000);
@@ -1171,6 +1345,17 @@
       if (e && e.name === 'AbortError') return; // 玩家在选文件夹时点了取消
       toast(state.t('save.failed', errorText(e)), 'error');
     }
+  }
+
+  /** 写进文件夹，返回存成的文件名；同名的都是别的谱、没名字可用时为 null。 */
+  async function writeInto(dir, doc, text) {
+    // 同名的是另一首谱的手序时另起名字，不覆盖（M.saveName，和 Mod 搬中转文件夹时同一规则）
+    const name = await M.saveName(doc, n => existingText(dir, n));
+    if (!name) return null;
+    const writable = await (await dir.getFileHandle(name, { create: true })).createWritable();
+    await writable.write(text);
+    await writable.close();
+    return name;
   }
   $('saveBtn').addEventListener('click', saveToGame);
   $('saveAsBtn').addEventListener('click', () => {
@@ -1251,17 +1436,21 @@
   $('historyList').addEventListener('click', async e => {
     const button = e.target.closest('button[data-index]');
     const item = button && recent[Number(button.dataset.index)];
-    if (!item || (state.doc && state.doc.sessionId === item.id)) return;
+    if (!item) return;
+    // 只认最后一次点击（2026-11-19 评审：快速连点两关时后点的先载完，最后显示的却是先点的那关）
+    const seq = ++openSeq;
+    if (state.doc && state.doc.sessionId === item.id) return;
     if (draftTimer) writeDraft(); // 这一关刚改的先存进草稿，换过去再换回来还在
     let s;
     try {
       s = await loadRecent(item);
     } catch (err) {
-      toast(state.t('history.missing'), 'error', null, 8000);
+      if (seq === openSeq) toast(state.t('history.missing'), 'error', null, 8000);
       return;
     }
+    if (seq !== openSeq) return;
     try {
-      loadDoc(M.fromSession(s), 'game');
+      openDoc(() => M.fromSession(s), 'game');
     } catch (err) {
       toast(state.t('toast.openFailed', errorText(err)), 'error');
     }
@@ -1314,21 +1503,88 @@
   // 这一关在编辑器里现在的样子，随时存在这台电脑的浏览器里（按「历史」里的 Id；打开的是手序文件时按谱面签名）。
   // 关掉网页、换到别的关卡都不丢，下次打开这一关自动接着改；保存到游戏后也留着（记成已保存）。
   const DRAFT_PREFIX = 'rhythmhint.editor.draft.';
+  const MAX_DRAFTS = 30; // 浏览器里最多留几关的草稿（2026-11-19 评审：原来从不删，越攒越多，写满了就存不进去）
   const draftKeyOf = doc => DRAFT_PREFIX + (doc.sessionId || doc.signature);
   let draftTimer = 0;
+  let draftBlocked = false; // 另一个标签页改了这一关的草稿：这一页先不写，等玩家选用哪一边
+  let otherTabToast = null, storageFullTold = false;
+
   function writeDraft() {
     clearTimeout(draftTimer);
     draftTimer = 0;
     const doc = state.doc;
     if (!doc) return;
+    if (draftBlocked) { warnOtherTab(); return; }
+    const key = draftKeyOf(doc);
     const draft = M.draftOf(doc, !(state.history.dirty || metaDirty));
-    if (draft.saved && draft.changed === 0) removeKey(draftKeyOf(doc)); // 和打开时一样、也没有要保存的：不用记
-    else writeJson(draftKeyOf(doc), draft);
+    if (draft.saved && M.untouched(doc)) removeKey(key); // 和打开时一样、也没有要保存的：不用记
+    // 存不进去（写满了）：先删掉已保存的那些再试，还不行就告诉玩家一次（原来空 catch 吞掉，界面还说已自动保留）
+    else if (!writeJson(key, draft) && !(pruneDrafts(true) && writeJson(key, draft))) tellStorageFull();
     if (openPanel === 'history') renderHistory();
   }
   function scheduleDraft() {
     clearTimeout(draftTimer);
+    draftTimer = 0;
+    if (draftBlocked) { warnOtherTab(); return; }
     draftTimer = setTimeout(writeDraft, 600); // 有意的延时：连续改动时少写几次
+  }
+
+  function tellStorageFull() {
+    if (storageFullTold) return;
+    storageFullTold = true;
+    toast(state.t('draft.storageFull'), 'error', null, 15000);
+  }
+
+  /** 浏览器里各关的草稿 [{ key, saved, time }]（读不出来的按没保存、很久以前算）。 */
+  function listDrafts() {
+    const list = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key || !key.startsWith(DRAFT_PREFIX)) continue;
+        const d = readJson(key);
+        list.push({ key, saved: !!(d && d.saved === true), time: d && typeof d.time === 'number' ? d.time : 0 });
+      }
+    } catch (e) {
+      console.warn('RhythmHint: cannot list drafts', e); // localStorage 用不了：也就没有草稿可删
+    }
+    return list;
+  }
+
+  /** 草稿只留最近的 MAX_DRAFTS 关（先删已保存的）；onlySaved：存不进去时把已保存的都删掉。正在编辑的不删。返回删了没有。 */
+  function pruneDrafts(onlySaved) {
+    const list = listDrafts(), protect = state.doc ? draftKeyOf(state.doc) : '';
+    const drop = onlySaved ? list.filter(d => d.saved && d.key !== protect).map(d => d.key) : M.draftsToDrop(list, MAX_DRAFTS, protect);
+    drop.forEach(removeKey);
+    return drop.length > 0;
+  }
+
+  // 多个标签页开着同一关时，各自拿着旧的样子写草稿会互相覆盖（2026-11-19 评审）。storage 事件只在别的标签页改了才来：
+  // 来了就先不写，让玩家选载入那边的进度，还是以这一页为准（写一次，那边也会收到同样的提示）
+  window.addEventListener('storage', e => {
+    if (!e.key || !e.key.startsWith(DRAFT_PREFIX)) return;
+    if (openPanel === 'history') renderHistory();
+    if (!state.doc || e.key !== draftKeyOf(state.doc)) return;
+    draftBlocked = true;
+    clearTimeout(draftTimer);
+    draftTimer = 0;
+    warnOtherTab();
+  });
+  function warnOtherTab() {
+    if (otherTabToast) return;
+    otherTabToast = toast(state.t('draft.otherTab'), 'warn', [
+      [state.t('draft.useOther'), reopenDoc, true],
+      [state.t('draft.keepMine'), () => { allowDraft(); writeDraft(); }],
+    ], 60000, () => { otherTabToast = null; });
+  }
+  function allowDraft() {
+    draftBlocked = false;
+    if (otherTabToast) otherTabToast();
+  }
+  /** 重新打开这一关：套上另一页存的草稿。 */
+  function reopenDoc() {
+    if (!state.make) return;
+    try { openDoc(state.make, state.source); } catch (e) { toast(state.t('toast.openFailed', errorText(e)), 'error'); }
   }
 
   /** 打开一关时套上上次的进度（可撤销）；「不用了」回到游戏这次给的样子。 */
@@ -1339,35 +1595,43 @@
     const draft = readJson(draftKeyOf(doc));
     const change = draft && M.draftChange(doc, draft);
     if (!change) return;
-    const author = typeof draft.author === 'string' ? draft.author : doc.meta.author;
-    const comment = typeof draft.comment === 'string' ? draft.comment : doc.meta.comment;
-    const metaChanged = author !== doc.meta.author || comment !== doc.meta.comment;
+    const opened = Object.assign({}, doc.opened), meta = M.draftMeta(doc, draft);
+    const metaChanged = meta.author !== opened.author || meta.comment !== opened.comment || meta.fileName !== opened.fileName;
+    const confirmed = M.draftConfirmed(doc, draft);
+    confirmed.forEach(id => { doc.notes[id].confirmed = true; }); // 看过的待检查照样算看过
     if (change.missed) toast(state.t('draft.missed', change.missed), 'error', null, 15000);
-    if (!change.size && !metaChanged) return;
+    if (!change.size && !metaChanged) { if (confirmed.length) edited(true); return; }
     const before = new Map([...change.keys()].map(id => [id, doc.notes[id].lanes]));
-    const meta = { author: doc.meta.author, comment: doc.meta.comment };
     if (change.size) state.history.apply(change);
-    doc.meta.author = author;
-    doc.meta.comment = comment;
+    setMeta(doc, meta); // 文件名也沿用（2026-11-19 评审：从历史接着改时存成默认名，同一关两份文件，游戏认不出用哪份）
     const saved = draft.saved && !change.missed; // 有没接上的改动时，和保存过的文件已经不一样
     if (saved) state.history.markSaved(); // 和保存到游戏的文件一样：不算没保存
     metaDirty = !saved && metaChanged;
     edited(true); // 不重写草稿：草稿里记的是上次改动的时间
     renderFilePanel();
     toast(state.t(saved ? 'draft.restoredSaved' : 'draft.restored', change.size), 'ok', [
-      [state.t('draft.discard'), () => {
-        if (state.doc !== doc) return;
-        if (before.size) state.history.apply(before);
-        doc.meta.author = meta.author;
-        doc.meta.comment = meta.comment;
-        state.history.markSaved();
-        metaDirty = false;
-        removeKey(draftKeyOf(doc));
-        edited(true);
-        renderFilePanel();
-        if (openPanel === 'history') renderHistory();
-      }],
+      [state.t('draft.discard'), () => discardDraft(doc, before, opened, confirmed)],
     ], 12000);
+  }
+
+  function setMeta(doc, meta) {
+    doc.meta.author = meta.author;
+    doc.meta.comment = meta.comment;
+    doc.fileName = meta.fileName;
+  }
+
+  /** 「放弃」：回到游戏这次给的样子，删掉草稿。 */
+  function discardDraft(doc, before, opened, confirmed) {
+    if (state.doc !== doc) return;
+    if (before.size) state.history.apply(before);
+    setMeta(doc, opened);
+    confirmed.forEach(id => { doc.notes[id].confirmed = false; });
+    state.history.markSaved();
+    metaDirty = false;
+    removeKey(draftKeyOf(doc));
+    edited(true);
+    renderFilePanel();
+    if (openPanel === 'history') renderHistory();
   }
 
   // ---------- 尺寸 ----------
@@ -1400,12 +1664,13 @@
   zoomSlider.value = String(sliderOf(state.pxPerSec));
   document.querySelectorAll('[data-panel-body]').forEach(el => { el.hidden = true; });
   if (session) {
-    try { loadDoc(M.fromSession(session), 'game'); } catch (e) { toast(state.t('toast.openFailed', errorText(e)), 'error'); $('empty').hidden = false; }
+    try { openDoc(() => M.fromSession(session), 'game'); } catch (e) { toast(state.t('toast.openFailed', errorText(e)), 'error'); $('empty').hidden = false; }
   } else {
     $('empty').hidden = false;
     renderHeader();
     if (recent.length) togglePanel('history');
   }
+  pruneDrafts(false); // 只留最近一批草稿（正在编辑的这一关不删）
   if (session && !prefs.wayBackTold) {
     prefs.wayBackTold = true;
     savePrefs();

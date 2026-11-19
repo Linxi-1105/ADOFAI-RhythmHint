@@ -307,3 +307,200 @@ test('a game in a protected folder makes the editor save to the documents inbox'
   input.saveStartIn = 'C:\\Windows'; // 只认浏览器的固定名字
   assert.equal(M.fromSession(input).saveStartIn, '');
 });
+
+// ---------- 2026-11-19 评审后的修复 ----------
+
+const FORMAT = 'rhythmhint-fingering';
+/** 一个带长按的双押（D 长按、J 短按）加一个单押。 */
+const chordFile = (extra = {}) => ({
+  format: FORMAT, schemaVersion: 1, keys: 4,
+  hits: [[1, 1, 0.5, 90], [2, 1, 0, 0], [3, 2, 0, 90]],
+  notes: [[1, 2, [[0, 0.5], [2, 0]]], [3, 3, [[1, 0]]]],
+  ...extra,
+});
+const chordDoc = extra => M.fromFileText(JSON.stringify(chordFile(extra)));
+/** 第 3 个和最后一个音符是自动补齐的会话。 */
+function autoSession() {
+  const s = session();
+  s.fromAuto = s.fromAuto.map((_, i) => (i === 3 || i === s.fromAuto.length - 1 ? 1 : 0));
+  return s;
+}
+
+test('next to review goes on from the selected note and wraps around', () => {
+  // 复现：原来从画面时间往后找，跳过去时画面停在音符前 0.6 秒，下一次找到的还是它，按 N 永远停在第一处
+  const doc = M.fromSession(autoSession());
+  const last = doc.notes.length - 1;
+  const list = M.reviewList(doc, new Set());
+  assert.deepEqual(list, [3, last]);
+  assert.equal(M.nextReview(list, -1), 3);
+  assert.equal(M.nextReview(list, 3), last);
+  assert.equal(M.nextReview(list, last), 3, 'wraps around');
+  assert.equal(M.nextReview([], 0), -1);
+});
+
+test('auto-filled notes no longer need review once changed or confirmed', () => {
+  const s = autoSession();
+  const doc = M.fromSession(s);
+  const a = doc.notes[3], b = doc.notes.at(-1);
+  assert.ok(a.auto && a.filled && b.auto);
+  new M.History(doc).apply(M.ops.toLane(doc, [a], (lanesOf(a)[0] + 1) % doc.keys));
+  M.markReview(doc);
+  assert.equal(a.auto, false, 'changed');
+  assert.equal(a.filled, true, 'still shows where it came from');
+  assert.equal(M.confirm([b]), 1);
+  assert.equal(M.confirm([b, doc.notes[0]]), 0, 'already confirmed; a note from the file needs no confirming');
+  M.markReview(doc);
+  assert.equal(b.auto, false, 'confirmed');
+  assert.deepEqual(M.reviewList(doc, new Set()), []);
+  assert.equal(M.stats(doc).auto, 2, 'the auto-filled count stays');
+
+  // 确认过的进草稿（旧版编辑器不认这一项，照样能用）
+  const draft = JSON.parse(JSON.stringify(M.draftOf(doc, false)));
+  const fresh = M.fromSession(s);
+  assert.deepEqual(M.draftConfirmed(fresh, draft), [b.id]);
+  assert.deepEqual(M.draftConfirmed(fresh, { ...draft, confirmed: undefined }), [], 'drafts from 1.3.x');
+});
+
+test('the file name chosen in the editor comes back with the draft', () => {
+  const doc = M.fromSession(session());
+  assert.ok(M.untouched(doc));
+  doc.fileName = 'My take.json';
+  assert.ok(!M.untouched(doc), 'a renamed file still needs its draft');
+  const draft = JSON.parse(JSON.stringify(M.draftOf(doc, true)));
+  const fresh = M.fromSession(session());
+  assert.equal(M.draftMeta(fresh, draft).fileName, 'My take.json');
+  assert.equal(M.draftMeta(fresh, { ...draft, fileName: '../evil.json' }).fileName, fresh.fileName);
+  assert.equal(M.draftMeta(fresh, { ...draft, fileName: 'x.txt' }).fileName, fresh.fileName);
+  assert.equal(M.draftMeta(fresh, { ...draft, fileName: undefined }).fileName, fresh.fileName, 'drafts from 1.3.x have no file name');
+  assert.equal(M.draftMeta(fresh, { ...draft, author: 5 }).author, fresh.meta.author);
+});
+
+test('holds follow their key', () => {
+  // 复现：多押按轨道排好后重新分长按，镜像 [[0,.5],[2,0]] 得 [[1,.5],[3,0]]，应是 K 长按（同 Mod 的镜像）
+  const holdsOf = n => n.lanes.map(l => l.slice());
+  let doc = chordDoc();
+  const chord = doc.notes[0];
+  new M.History(doc).apply(M.ops.mirror(doc, [chord]));
+  assert.deepEqual(holdsOf(chord), [[1, 0], [3, 0.5]], 'mirror');
+
+  doc = chordDoc();
+  new M.History(doc).apply(M.ops.moveKey(doc, doc.notes[0], 0, 3));
+  assert.deepEqual(holdsOf(doc.notes[0]), [[2, 0], [3, 0.5]], 'move one key');
+
+  doc = chordDoc();
+  new M.History(doc).apply(M.ops.set(doc, doc.notes[0], [2, 3]));
+  assert.deepEqual(holdsOf(doc.notes[0]), [[2, 0], [3, 0.5]], 'the kept key keeps its hold');
+
+  doc = chordDoc({ notes: [[1, 2, [[0, 0.5], [3, 0]]], [3, 3, [[1, 0]]]] });
+  const change = M.ops.mirror(doc, [doc.notes[0]]);
+  assert.equal(change.size, 1, 'D+K mirrored moves the hold from D to K');
+  new M.History(doc).apply(change);
+  assert.deepEqual(holdsOf(doc.notes[0]), [[0, 0], [3, 0.5]]);
+  assert.ok(M.isChanged(doc.notes[0]));
+
+  doc = chordDoc();
+  doc.refs.standard = new Map([[1, { lastTile: 2, lanes: [[1, 0], [3, 0.5]] }]]);
+  new M.History(doc).apply(M.ops.reference(doc, doc.notes, 'standard'));
+  assert.deepEqual(holdsOf(doc.notes[0]), [[1, 0], [3, 0.5]], 'a reference keeps its own hold on its own key');
+});
+
+test('a draft brings holds back on the same key', () => {
+  const doc = chordDoc();
+  new M.History(doc).apply(M.ops.mirror(doc, [doc.notes[0]])); // F + K 长按
+  const draft = JSON.parse(JSON.stringify(M.draftOf(doc, false)));
+  const fresh = chordDoc();
+  new M.History(fresh).apply(M.draftChange(fresh, draft));
+  assert.deepEqual(fresh.notes[0].lanes, [[1, 0], [3, 0.5]]);
+
+  // 换成左撇子：Mod 镜像时长按跟着键（D 长按变 K 长按），草稿也镜像过去：F + K 长按 → D 长按 + J
+  const left = chordDoc({ leftHanded: true, notes: [[1, 2, [[1, 0], [3, 0.5]]], [3, 3, [[2, 0]]]] });
+  new M.History(left).apply(M.draftChange(left, draft));
+  assert.deepEqual(left.notes[0].lanes, [[0, 0.5], [2, 0]]);
+});
+
+test('reading a file rejects what the mod rejects and accepts what it accepts', () => {
+  const bad = (obj, detail) => assert.throws(() => M.parseFingering(obj), e => e.code === 'badFile' && e.detail === detail, detail);
+  bad(chordFile({ hits: [[3000000000, 1, 0, null]], notes: [[3000000000, 3000000000, [[0, 0]]]] }), 'hit');
+  bad(chordFile({ song: 5 }), 'song');
+  bad(chordFile({ author: { name: 'x' } }), 'author');
+  bad(chordFile({ comment: ['a'] }), 'comment');
+  const many = Array.from({ length: 200001 }, (_, i) => [i, i, 0, null]);
+  bad(chordFile({ hits: many, notes: many.map(h => [h[0], h[0], [[0, 0]]]) }), 'hits');
+
+  assert.equal(M.parseFingering(chordFile({ song: null, charter: undefined })).meta.song, '');
+  assert.equal(M.parseFingering(chordFile({ author: '2026-11-19T08:00:00Z' })).meta.author, '2026-11-19T08:00:00Z');
+  assert.equal(M.parseFingering(chordFile({ artist: 'x'.repeat(500) })).meta.artist.length, 300, 'names are cut like the mod does');
+  // 整数写成 1.0 照样当整数
+  const doc = M.fromFileText('{"format":"rhythmhint-fingering","schemaVersion":1.0,"keys":4.0,"hits":[[1.0,1,0,null],[2,2,0,null]],"notes":[[1.0,1.0,[[2.0,0]]],[2,2,[[1,0.0]]]]}');
+  assert.deepEqual(doc.notes.map(lanesOf), [[2], [1]]);
+});
+
+test('fields this editor does not know survive opening and saving', () => {
+  // Mod 把原文件里不认识的顶层字段原样放进会话的 fingering；编辑器原样读、原样写回（以后的版本加的字段不丢）
+  const text = JSON.stringify(chordFile({ 'x-future': { a: [1, 2], b: null }, license: 'CC BY 4.0' }))
+    .replace('"hits"', '"__proto__":{"p":1},"hits"');
+  const back = JSON.parse(M.toFileText(M.fromFileText(text)));
+  assert.deepEqual(back['x-future'], { a: [1, 2], b: null });
+  assert.equal(back.license, 'CC BY 4.0');
+  assert.deepEqual(Object.getOwnPropertyDescriptor(back, '__proto__').value, { p: 1 });
+  // 原文件里的顺序是 __proto__、x-future、license
+  assert.deepEqual(Object.keys(back).slice(-5), ['__proto__', 'x-future', 'license', 'hits', 'notes'], 'known fields first, unknown ones in their order before hits and notes');
+  assert.deepEqual(Object.keys(back).slice(0, 3), ['format', 'schemaVersion', 'keys']);
+
+  const s = session();
+  s.fingering.license = 'CC0';
+  assert.equal(JSON.parse(M.toFileText(M.fromSession(s))).license, 'CC0');
+  assert.ok(!M.toFileText(M.fromSession(session())).includes('license'), 'nothing added when there is nothing to keep');
+});
+
+test('file names avoid control characters, reserved names and half emoji', () => {
+  assert.equal(M.suggestedFileName({ song: 'a\u0007b\u007f', artist: '' }), 'ab.json');
+  assert.equal(M.suggestedFileName({ song: 'CON', artist: '' }), 'CON_.json');
+  assert.equal(M.cleanFileName('lpt9'), 'lpt9_');
+  assert.equal(M.cleanFileName('com1.backup'), 'com1_.backup');
+  assert.equal(M.cleanFileName('CONSOLE'), 'CONSOLE');
+  assert.equal(M.cleanFileName(' song. . '), 'song');
+  assert.equal(M.cleanFileName('\u0001'), '');
+  const name = M.suggestedFileName({ song: 'a'.repeat(79) + '\u{1F600}\u{1F600}', artist: '' });
+  assert.equal(name, 'a'.repeat(79) + '\u{1F600}.json');
+  assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(name), 'no half emoji');
+});
+
+test('old drafts are dropped saved ones first, oldest first', () => {
+  const list = [
+    { key: 'a', saved: false, time: 1 }, { key: 'b', saved: true, time: 5 }, { key: 'c', saved: true, time: 2 },
+    { key: 'd', saved: false, time: 9 }, { key: 'cur', saved: true, time: 0 },
+  ];
+  assert.deepEqual(M.draftsToDrop(list, 5, 'cur'), []);
+  assert.deepEqual(M.draftsToDrop(list, 3, 'cur'), ['c', 'b']);
+  assert.deepEqual(M.draftsToDrop(list, 2, 'cur'), ['c', 'b', 'a']);
+  assert.deepEqual(M.draftsToDrop(list, 0, 'cur'), ['c', 'b', 'a', 'd'], 'never the one being edited');
+});
+
+test('key names from the game work in the editor', () => {
+  // Mod 的键位是 Unity 的 KeyCode 名字（KeyBindings）：按浏览器的 KeyboardEvent.code 认
+  assert.equal(M.keyCodeOf('Keypad4'), 'Numpad4');
+  assert.equal(M.keyCodeOf('LeftShift'), 'ShiftLeft');
+  assert.equal(M.keyCodeOf('Alpha1'), 'Digit1');
+  assert.equal(M.keyCodeOf('KeypadPlus'), 'NumpadAdd');
+  assert.equal(M.keyCodeOf('D'), '');
+  const labels = ['Keypad4', 'LeftShift', 'J', 'Alpha1'];
+  assert.equal(M.laneOfKey(labels, { key: '4', code: 'Numpad4' }), 0);
+  assert.equal(M.laneOfKey(labels, { key: '4', code: 'Digit4' }), -1, 'the number row 4 is not Keypad4');
+  assert.equal(M.laneOfKey(labels, { key: 'Shift', code: 'ShiftLeft' }), 1);
+  assert.equal(M.laneOfKey(labels, { key: 'j', code: 'KeyJ' }), 2);
+  assert.equal(M.laneOfKey(labels, { key: '1', code: 'Digit1' }), 3);
+  assert.equal(M.laneOfKey(['D', 'F', 'J', 'K'], { key: 'k', code: 'KeyK' }), 3);
+  assert.ok(M.isModifier('RightControl') && !M.isModifier('Keypad4') && !M.isModifier('K'));
+  assert.equal(M.keyDisplay('Keypad4'), 'Num4');
+  assert.equal(M.keyDisplay('LeftShift'), 'LShift');
+  assert.equal(M.keyDisplay('UpArrow'), '\u2191');
+  assert.equal(M.keyDisplay('None'), '');
+  assert.equal(M.keyDisplay('d'), 'D');
+});
+
+test('lane keys that are also editor shortcuts are reported', () => {
+  assert.deepEqual(M.shortcutClashes(['D', 'F', 'J', 'K']), []);
+  assert.deepEqual(M.shortcutClashes(['Z', 'X', 'n', 'M']), ['N', 'M']);
+  assert.deepEqual(M.shortcutClashes(['[', 'Space', 'LeftArrow', 'Home']), ['[', 'Space', '\u2190', 'Home']);
+});

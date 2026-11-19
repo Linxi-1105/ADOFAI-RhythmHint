@@ -14,6 +14,10 @@ What changed in each version, newest first.
 - Fixed: when the game exported a level with its notes grouped differently (for example after a mod update changed the chord rules), unsaved progress in the editor was not restored and was lost on the next edit. Progress is now restored by tile, the editor tells you how many edits could not be restored, and switching to left-handed restores correctly too
 - Fixed: the fingering editor's track preview froze for seconds and used several GB of memory on levels with many Move Track events
 - Fixed: the first few hit sounds played ahead of the music after starting playback, seeking, changing the practice speed, looping back, or starting before the song begins
+- Fingering editor: pressing N moves through every spot to review in turn and wraps around at the end; auto-filled notes stop being marked for review once you change or confirm them; holds stay on their own key when mirroring, moving one key or applying an auto fingering
+- Fingering editor: the File panel can change the save location, choosing a wrong folder asks you to choose again, and a remembered folder that can no longer be used is asked for again; downloading the file no longer counts as saved; a changed file name is kept with your progress
+- Fingering editor: it warns when lane keys clash with shortcuts, game keys such as the numpad and Shift work in it, and Ctrl+S in a text box saves the fingering instead of opening the browser's save page dialog
+- Fingering editor: clicking levels quickly in History opens the last one clicked, tabs editing the same level no longer overwrite each other's progress, and it tells you when browser storage is full and keeps progress for the latest 30 levels
 
 ## 1.3.1 · 2026-11-19
 
