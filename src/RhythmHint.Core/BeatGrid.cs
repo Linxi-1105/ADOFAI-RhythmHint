@@ -5,10 +5,14 @@ namespace RhythmHint.Core;
 
 /// <summary>一条节拍线。</summary>
 /// <param name="Time">秒。</param>
-/// <param name="IsMeasure">小节线（每 4 拍一条），画得更亮。</param>
+/// <param name="IsMeasure">小节线（每小节第一拍），画得更亮。</param>
 public readonly record struct BeatLine(double Time, bool IsMeasure);
 
-/// <summary>按关卡里的变速点生成歌曲的节拍线：画在轨道和太鼓条上做参照，也用来判断砖块是否落在拍点上。</summary>
+/// <summary>
+/// 歌曲的节拍线：画在轨道和太鼓条上、交给手序编辑器做参照。游戏里和编辑器用 Infer（从关卡变速和砖块推拍子和小节）；
+/// MusicalTempo + Build 是原来的做法（每次真换 BPM 都重新起小节），留给设置页演示谱、排键试验台的导出（试验台网页有同样的 JS 版）。
+/// 排键和难度估算都不看节拍线。
+/// </summary>
 public static class BeatGrid
 {
     /// <summary>节拍线数量上限，防止异常数据（每拍时长接近 0）卡死。</summary>
@@ -95,6 +99,18 @@ public static class BeatGrid
 
         return lines;
     }
+
+    /// <summary>
+    /// 画节拍线用：从关卡变速和砖块推音乐的拍子和小节（见 BeatInference）。拍子跨变速连续数，变速点不落在拍上才重新起小节；
+    /// 关卡 BPM 不合理时从砖块推。只用来画，排键和难度估算不看节拍线。
+    /// </summary>
+    /// <param name="hits">要按的砖。</param>
+    /// <param name="speeds">变速点：从 Time 开始砖块速度倍率为 Speed（相对关卡起始 BPM），按时间排好。</param>
+    /// <param name="crotchetAtStart">关卡起始 BPM 下一拍的秒数。</param>
+    /// <param name="start">从哪里开始画（第 0 块砖的时间）。</param>
+    /// <param name="end">画到哪里。</param>
+    public static BeatMap Infer(IReadOnlyList<TileHit> hits, IReadOnlyList<(double Time, double Speed)> speeds, double crotchetAtStart, double start, double end) =>
+        BeatInference.Infer(hits, speeds, crotchetAtStart, start, end);
 
     /// <summary>时间 t 是否落在某条节拍线上（误差不超过一拍的 tolerance 倍）。</summary>
     public static bool IsOnBeat(IReadOnlyList<BeatLine> lines, double t, double tolerance = 0.03)

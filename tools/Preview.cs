@@ -81,7 +81,10 @@ if (tiles.Count == 0)
 }
 
 Console.WriteLine($"关卡：{Path.GetFileName(files[0])}，需要按键 {tiles.Count} 次，{tiles[0].Time:F2}s – {tiles[^1].Time:F2}s");
-var beats = BeatGrid.Build(BeatGrid.MusicalTempo(speeds, crotchet), 0, tiles[^1].Time + 2);
+// 节拍线：编辑器用推出来的拍子和小节（和游戏里一样，BeatGrid.Infer）；试验台网页有自己的 JS 版旧节拍线（preview-timing.test.cjs 核对两边一致），导出仍给旧的
+var grid = BeatGrid.Infer(tiles, speeds, crotchet, 0, tiles[^1].Time + 2);
+var labBeats = BeatGrid.Build(BeatGrid.MusicalTempo(speeds, crotchet), 0, tiles[^1].Time + 2);
+Console.WriteLine($"节拍线：{grid.Summary()}");
 var levelSettings = levelDocument["settings"]!;
 if (labOutput != null)
 {
@@ -97,10 +100,10 @@ if (labOutput != null)
         // 每块：序号、时间（毫秒）、长按（毫秒）、和上一块之间的转角（度，算不出来是 null）
         tiles = tiles.Select(t => new object?[] { t.TileIndex, Math.Round(t.Time * 1000, 1), Math.Round(t.HoldSeconds * 1000, 1),
             double.IsNaN(t.Angle) ? null : Math.Round(t.Angle, 3) }),
-        beats = beats.Select(b => new[] { Math.Round(b.Time * 1000, 1), b.IsMeasure ? 1 : 0 }),
+        beats = labBeats.Select(b => new[] { Math.Round(b.Time * 1000, 1), b.IsMeasure ? 1 : 0 }),
     };
     File.WriteAllText(labOutput, Newtonsoft.Json.JsonConvert.SerializeObject(export));
-    Console.WriteLine($"已导出 {tiles.Count} 块砖、{beats.Count} 条节拍线到 {labOutput}");
+    Console.WriteLine($"已导出 {tiles.Count} 块砖、{labBeats.Count} 条节拍线到 {labOutput}");
 }
 var notes = NotePlanner.Plan(tiles, options);
 if (sessionFolder != null)
@@ -140,7 +143,7 @@ if (sessionFolder != null)
         Language = "zh-Hans",
         Standard = NotePlanner.Plan(tiles, standard),
         Alternate = NotePlanner.Plan(tiles, alternate),
-        Beats = beats,
+        Beats = grid.Lines,
         Tempo = BeatGrid.MusicalTempo(speeds, crotchet).ConvertAll(t => (t.Time, 60 / t.SecondsPerBeat)),
         Audio = audio,
         Effects = effects,

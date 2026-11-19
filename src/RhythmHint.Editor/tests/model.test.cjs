@@ -134,6 +134,19 @@ test('jacks and note values', () => {
   assert.equal(M.noteValue(doc, 1.5, 0.31), '');
 });
 
+test('note values follow the beat lines, not the level BPM', () => {
+  // 2026-11-19：很多谱的关卡 BPM 是谱师为转角设的数（工坊 2802147583 是 1011、32352），按它标几分音符没有意义；
+  // Mod 推算的节拍线是音乐的拍子，有节拍线就按相邻两条线之间的拍长算
+  const doc = M.fromFileText(JSON.stringify({
+    format: 'rhythmhint-fingering', schemaVersion: 1, hits: [[1, 1.0, 0, 90]], notes: [[1, 1, [[2, 0]]]],
+  }));
+  doc.tempo = [{ time: 0, bpm: 1011 }];
+  doc.beats = [0, 0.5, 1, 1.5, 2, 2.5].map((time, i) => ({ time, measure: i % 4 === 0 }));
+  assert.equal(M.noteValue(doc, 1.5, 0.25), '1/8');
+  assert.equal(M.noteValue(doc, 1.2, 0.125), '1/16');
+  assert.equal(M.noteValue(doc, 9, 0.5), '1/4', 'after the last line: the last beat length');
+});
+
 test('drafts restore only onto the same level', () => {
   const doc = M.fromSession(session());
   const h = new M.History(doc);

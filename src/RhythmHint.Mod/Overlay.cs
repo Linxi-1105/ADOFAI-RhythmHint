@@ -393,9 +393,14 @@ internal sealed class Overlay : MonoBehaviour
         var hits = GameReader.ReadHits(level);
         var end = hits.Count > 0 ? hits[hits.Count - 1].Time : 0;
 
-        // 节拍线从起点砖（第 0 块）开始算，只用来画；排键只看砖块之间的间隔
-        var tempo = BeatGrid.MusicalTempo(GameReader.ReadSpeeds(level), GameReader.Crotchet(level));
-        var beats = BeatGrid.Build(tempo, level.Floors[0].entryTime, end + 2);
+        // 节拍线从起点砖（第 0 块）开始算，只用来画；排键只看砖块之间的间隔。
+        // 拍子和小节从关卡变速和砖块推（BeatGrid.Infer）；交给编辑器的 tempo 仍是关卡的速度（编辑器按它算轨道预览的星球转向）
+        var speeds = GameReader.ReadSpeeds(level);
+        var crotchet = GameReader.Crotchet(level);
+        var tempo = BeatGrid.MusicalTempo(speeds, crotchet);
+        var grid = BeatGrid.Infer(hits, speeds, crotchet, level.Floors[0].entryTime, end + 2);
+        var beats = grid.Lines;
+        Main.Mod.Logger.Log($"节拍线：{grid.Summary()}");
         var settings = Main.Settings;
         var auto = NotePlanner.Plan(hits, settings.ToFingering());
         var info = GameReader.ReadInfo(level);

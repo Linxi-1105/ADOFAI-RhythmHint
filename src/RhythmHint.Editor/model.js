@@ -428,9 +428,22 @@
     return bpm > 0 ? 60 / bpm : 0;
   }
 
+  /**
+   * 音乐在某个时间的一拍多少秒：有节拍线（Mod 按变速和砖块推算的音乐拍子）就取所在那一拍的长度，过了最后一条取最后一拍；
+   * 没有节拍线时退回关卡 BPM。关卡 BPM 常是谱师为转角设的数（工坊 2802147583 是 1011、32352），不能直接当音乐的拍子。
+   */
+  function musicBeat(doc, time) {
+    const lines = doc.beats || [];
+    if (lines.length < 2) return secondsPerBeat(doc, time);
+    let lo = 0, hi = lines.length - 2;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (lines[mid].time <= time + 1e-6) lo = mid; else hi = mid - 1; }
+    const spb = lines[lo + 1].time - lines[lo].time;
+    return spb > 0 ? spb : secondsPerBeat(doc, time);
+  }
+
   /** 两下之间的间隔是几分音符（按一拍是四分音符算）：1/4 拍 = 1/16。认不出返回空串。 */
   function noteValue(doc, time, gap) {
-    const spb = secondsPerBeat(doc, time);
+    const spb = musicBeat(doc, time);
     if (!(spb > 0) || !(gap > 0)) return '';
     const beats = gap / spb;
     for (const [a, b] of FRACTIONS) {
