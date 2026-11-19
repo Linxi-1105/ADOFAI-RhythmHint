@@ -99,7 +99,8 @@ internal static class EditorLauncher
             FromAuto = snapshot.Fingering.FromAuto,
             UsedFile = snapshot.Fingering.UsedFile,
             FileName = snapshot.Fingering.UsedFile.Length > 0 ? snapshot.Fingering.UsedFile : fingering.SuggestedFileName(),
-            SaveFolder = FingeringSource.Folder,
+            SaveFolder = FingeringSource.Inbox ?? FingeringSource.Folder,
+            SaveStartIn = FingeringSource.Inbox != null ? "documents" : string.Empty,
             Language = Lang.Current,
             ModVersion = Main.Mod.Info.Version,
             RoundNotes = settings.RoundNotes,
@@ -115,6 +116,11 @@ internal static class EditorLauncher
         };
 
         Directory.CreateDirectory(FingeringSource.Folder);
+        if (FingeringSource.Inbox != null)
+        {
+            Directory.CreateDirectory(FingeringSource.Inbox); // 先建好，玩家在浏览器里选得到
+        }
+
         SessionLibrary.Save(Folder, session, DateTimeOffset.Now); // session.js + 编辑器的历史（recent/）
         var audioFile = session.Audio.File;
         Main.Mod.Logger.Log($"手序编辑器数据已写好（{watch.ElapsedMilliseconds} ms，音乐：{(audioFile.Length == 0 ? "无" : audioFile)}）");

@@ -67,8 +67,14 @@ public sealed class EditorSession
     /// <summary>保存用的文件名（UsedFile 或按曲名起的名字）。</summary>
     public string FileName { get; set; } = string.Empty;
 
-    /// <summary>专属手序文件夹的完整路径（编辑器提示玩家保存到哪里）。</summary>
+    /// <summary>
+    /// 编辑器保存到哪里（完整路径，编辑器提示玩家选这个文件夹）：通常是游戏的专属手序文件夹；
+    /// 游戏装在浏览器不让写的地方时是文档里的中转文件夹（<see cref="FingeringInbox"/>）。
+    /// </summary>
     public string SaveFolder { get; set; } = string.Empty;
+
+    /// <summary>选文件夹时从哪打开（浏览器认的名字，比如 documents）；空为浏览器默认。</summary>
+    public string SaveStartIn { get; set; } = string.Empty;
 
     /// <summary>编辑器的界面语言（和 Mod 一样的代码）。</summary>
     public string Language { get; set; } = Languages.Source;
@@ -117,6 +123,7 @@ public sealed class EditorSession
             Prop(w, "usedFile", UsedFile);
             Prop(w, "fileName", FileName);
             Prop(w, "saveFolder", SaveFolder);
+            Prop(w, "saveStartIn", SaveStartIn);
             w.WritePropertyName("keyLabels");
             w.WriteStartArray();
             foreach (var label in KeyLabels)

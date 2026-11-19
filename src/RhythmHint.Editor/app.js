@@ -1076,8 +1076,10 @@
       };
     });
   }
-  const getFolder = () => idb('readonly', s => s.get('fingerings')).catch(() => null);
-  const putFolder = handle => idb('readwrite', s => s.put(handle, 'fingerings')).catch(() => null);
+  // 游戏的手序文件夹和文档里的中转文件夹各记一个：游戏换了位置、换成中转文件夹时不会存到旧的地方
+  const folderKey = () => (state.doc && state.doc.saveStartIn ? 'fingerings-inbox' : 'fingerings');
+  const getFolder = () => idb('readonly', s => s.get(folderKey())).catch(() => null);
+  const putFolder = handle => idb('readwrite', s => s.put(handle, folderKey())).catch(() => null);
 
   function modal(title, body, path, okLabel) {
     $('modalTitle').textContent = title;
@@ -1119,8 +1121,12 @@
     if (dir && (await dir.queryPermission({ mode: 'readwrite' })) !== 'granted' && (await dir.requestPermission({ mode: 'readwrite' })) !== 'granted') dir = null;
     if (dir) return dir;
     const folder = (state.doc && state.doc.saveFolder) || '…/Mods/RhythmHint/Fingerings';
-    if (!(await modal(state.t('save.pickTitle'), state.t('save.pickBody'), folder, state.t('save.pickGo')))) return null;
-    dir = await window.showDirectoryPicker({ id: 'rhythmhint-fingerings', mode: 'readwrite' });
+    // 2026-11-19 玩家截图：游戏装在 C:\Program Files (x86) 时浏览器不让选游戏里的文件夹，Mod 改让这里存到文档里的中转文件夹
+    const inbox = !!(state.doc && state.doc.saveStartIn);
+    if (!(await modal(state.t('save.pickTitle'), state.t(inbox ? 'save.pickBodyInbox' : 'save.pickBody'), folder, state.t('save.pickGo')))) return null;
+    dir = await window.showDirectoryPicker(inbox
+      ? { id: 'rhythmhint-fingerings-inbox', mode: 'readwrite', startIn: state.doc.saveStartIn }
+      : { id: 'rhythmhint-fingerings', mode: 'readwrite' });
     if (dir.name.toLowerCase() !== 'fingerings' && !(await modal(state.t('save.pickTitle'), state.t('save.wrongFolder', dir.name), '', state.t('save.ok')))) return null;
     await putFolder(dir);
     return dir;

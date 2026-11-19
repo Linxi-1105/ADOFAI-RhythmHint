@@ -7,6 +7,7 @@ What changed in each version, newest first.
 ## Unreleased
 
 - Fixed: in the fingering editor, music and notes fell out of sync after pausing and resuming or scrolling during playback (OGG and MP3 songs of custom levels). The song is now decoded in full before it plays, so every jump lands exactly, and custom levels get a waveform too. For levels opened before, click Edit this level's fingering in the game once more
+- Fixed: with the game installed under Program Files on drive C (Steam's default location), Save to game in the fingering editor was blocked by the browser (it said the folder contains system files). The editor now saves to Documents\RhythmHint\Fingerings and the game moves the file into its fingering folder automatically
 
 ## 1.3.0 · 2026-11-19
 

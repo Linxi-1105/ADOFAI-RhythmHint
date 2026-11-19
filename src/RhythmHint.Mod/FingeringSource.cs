@@ -69,6 +69,31 @@ internal sealed class FingeringSource
 
     public static string Folder => Path.Combine(Main.Mod.Path, "Fingerings");
 
+    /// <summary>
+    /// 游戏装在浏览器不让网页写的文件夹里时（Steam 默认的 C:\Program Files (x86)），编辑器存到这里，每秒搬进 <see cref="Folder"/>；
+    /// 否则为 null（编辑器直接存进 <see cref="Folder"/>）。见 <see cref="FingeringInbox"/>。
+    /// </summary>
+    public static string? Inbox => _inbox.Value;
+
+    private static readonly Lazy<string?> _inbox = new(() =>
+    {
+        if (!FingeringInbox.BrowserBlocks(Folder, FingeringInbox.WindowsBlockedRoots()))
+        {
+            return null;
+        }
+
+        var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        if (string.IsNullOrEmpty(documents))
+        {
+            Main.Mod.Logger.Warning("编辑器：游戏在浏览器不让网页写的文件夹里，但找不到文档文件夹，编辑器只能另存为文件");
+            return null;
+        }
+
+        var inbox = Path.Combine(documents, "RhythmHint", "Fingerings");
+        Main.Mod.Logger.Log($"编辑器：游戏在浏览器不让网页写的文件夹里，编辑器改存到 {inbox}，Mod 自动搬进手序文件夹");
+        return inbox;
+    });
+
     /// <summary>每秒最多看一次；文件加了、删了、改了就返回 true。</summary>
     public bool Poll()
     {
@@ -78,6 +103,13 @@ internal sealed class FingeringSource
         }
 
         _nextPoll = Time.unscaledTime + 1;
+        if (Inbox != null)
+        {
+            foreach (var name in FingeringInbox.MoveInto(Inbox, Folder))
+            {
+                Main.Mod.Logger.Log($"专属手序：把编辑器保存的 {name} 搬进手序文件夹");
+            }
+        }
         var signature = Signature();
         if (signature == _signature)
         {

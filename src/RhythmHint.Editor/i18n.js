@@ -182,6 +182,7 @@
 
     'save.pickTitle': ['选择手序文件夹', '選擇手序資料夾', 'Choose the fingering folder', '운지 폴더 선택', '運指フォルダーを選択'],
     'save.pickBody': ['首次保存需选择游戏的手序文件夹，之后将直接保存至：', '首次儲存需選擇遊戲的手序資料夾，之後將直接儲存至：', "Choose the game's fingering folder once; later saves go straight to:", '처음 한 번 게임의 운지 폴더를 선택하면 이후에는 바로 저장됩니다:', '初回のみゲームの運指フォルダーを選択してください。以後は直接保存されます：'],
+    'save.pickBodyInbox': ['游戏位于系统文件夹，浏览器无法直接写入。首次保存请选择下方文件夹，游戏会自动将手序移入手序文件夹：', '遊戲位於系統資料夾，瀏覽器無法直接寫入。首次儲存請選擇下方資料夾，遊戲會自動將手序移入手序資料夾：', 'The game is in a system folder the browser cannot write to. Choose the folder below once; the game moves your fingerings into its fingering folder automatically:', '게임이 브라우저가 쓸 수 없는 시스템 폴더에 있습니다. 처음 한 번 아래 폴더를 선택하면 게임이 운지를 자동으로 운지 폴더로 옮깁니다:', 'ゲームはブラウザーが書き込めないシステムフォルダーにあります。初回のみ下のフォルダーを選択してください。運指はゲームが自動的に運指フォルダーへ移します：'],
     'save.pickGo': ['选择文件夹', '選擇資料夾', 'Choose folder', '폴더 선택', 'フォルダーを選択'],
     'save.cancel': ['取消', '取消', 'Cancel', '취소', 'キャンセル'],
     'save.ok': ['确定', '確定', 'OK', '확인', 'OK'],

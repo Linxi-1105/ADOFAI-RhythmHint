@@ -196,3 +196,14 @@ test('the song script is only taken from the history folder', () => {
   assert.equal(scriptOf('recent/a.ogg'), '');
 });
 
+test('a game in a protected folder makes the editor save to the documents inbox', () => {
+  const input = session();
+  assert.equal(M.fromSession(input).saveStartIn, ''); // 游戏不在系统文件夹：直接存进游戏的手序文件夹
+  input.saveStartIn = 'documents';
+  input.saveFolder = 'C:\\Users\\A\\Documents\\RhythmHint\\Fingerings';
+  const doc = M.fromSession(input);
+  assert.equal(doc.saveStartIn, 'documents');
+  assert.equal(doc.saveFolder, input.saveFolder);
+  input.saveStartIn = 'C:\\Windows'; // 只认浏览器的固定名字
+  assert.equal(M.fromSession(input).saveStartIn, '');
+});

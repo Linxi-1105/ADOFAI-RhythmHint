@@ -88,7 +88,7 @@
 
   function emptyExtras() {
     return { keyLabels: ['D', 'F', 'J', 'K'], refs: { standard: new Map(), alternate: new Map() }, beats: [], tempo: [], path: [], fx: null,
-      audio: null, fileName: '', saveFolder: '', usedFile: '', language: '', roundNotes: false, sessionId: '', hitSound: '', fromGame: false };
+      audio: null, fileName: '', saveFolder: '', saveStartIn: '', usedFile: '', language: '', roundNotes: false, sessionId: '', hitSound: '', fromGame: false };
   }
 
   function finish(fingering, extras) {
@@ -124,6 +124,8 @@
       } : null,
       fileName: typeof s.fileName === 'string' ? s.fileName : '',
       saveFolder: typeof s.saveFolder === 'string' ? s.saveFolder : '',
+      // 选文件夹时从哪打开：游戏装在浏览器不让写的地方时，Mod 让编辑器存到文档里的中转文件夹
+      saveStartIn: s.saveStartIn === 'documents' ? 'documents' : '',
       usedFile: typeof s.usedFile === 'string' ? s.usedFile : '',
       language: typeof s.language === 'string' ? s.language : '',
       modVersion: typeof s.modVersion === 'string' ? s.modVersion : '', // 导出这份会话的 Mod 版本（关于里显示）
