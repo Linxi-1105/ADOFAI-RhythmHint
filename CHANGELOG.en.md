@@ -12,6 +12,7 @@ What changed in each version, newest first.
 - When saving a fingering, a file with the same name that belongs to another chart (another charter's chart of the same song, or one shared by someone else) is no longer overwritten; the new one is saved as name (2).json
 - Fixed: in the fingering editor, saving, undoing and then editing something else still showed the level as saved, while the game still had the saved version
 - Fixed: when the game exported a level with its notes grouped differently (for example after a mod update changed the chord rules), unsaved progress in the editor was not restored and was lost on the next edit. Progress is now restored by tile, the editor tells you how many edits could not be restored, and switching to left-handed restores correctly too
+- Fixed: the fingering editor's track preview froze for seconds and used several GB of memory on levels with many Move Track events
 
 ## 1.3.1 · 2026-11-19
 

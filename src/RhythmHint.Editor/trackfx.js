@@ -72,6 +72,18 @@
   }
 
   const PROPS = ['dx', 'dy', 'rot', 'sx', 'sy', 'alpha'];
+  const DEFAULT_BASE = Object.freeze({ dx: 0, dy: 0, rot: 0, sx: 1, sy: 1, alpha: 1 }); // 没有 PositionTrack 的砖合用这一份，不能改
+
+  /** 一组砖某个属性在 t 时刻的值：二分找最后一段已开始的缓动，还没开始就是底值。 */
+  function sample(group, t) {
+    const list = group.list;
+    if (!list.length || list[0].t0 > t) return group.base;
+    let lo = 0, hi = list.length - 1;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (list[mid].t0 <= t) lo = mid; else hi = mid - 1; }
+    const w = list[lo];
+    if (t >= w.t1) return w.to;
+    return w.from + (w.to - w.from) * ease(w.ease, (t - w.t0) / (w.t1 - w.t0));
+  }
 
   class TrackFx {
     /**
@@ -99,7 +111,9 @@
           const index = indexOf.get(a.floor), spb = spbAt(path[index].time);
           return { a, index, spb, t0: path[index].time + (num(a.angleOffset) || 0) / 180 * spb };
         });
-      this.tweens = new Map(); // 砖下标 → { 属性名: [ { t0, t1, from, to, ease } … ] }，按开始时间排好
+      // 缓动按属性分开存，受同一串事件影响、底值也相同的砖合成一组、共用一份缓动列表（整轨事件多的谱不用每块砖各存一份）：
+      // 属性名 → { of: 砖下标 → 组号, groups: [ { base, size, list: [ { t0, t1, from, to, ease } … ] } ] }，list 按开始时间排好
+      this.channels = {};
       this.base = new Map(); // 砖下标 → PositionTrack 定下的旋转、缩放、透明度
       this.buildBase(actions.filter(e => e.a.eventType === 'PositionTrack'));
       this.buildMoves(actions.filter(e => e.a.eventType === 'MoveTrack').sort((x, y) => x.t0 - y.t0));
@@ -109,7 +123,7 @@
     /** PositionTrack：这块砖固定的旋转、缩放、透明度（位置游戏里已经挪好了）。 */
     buildBase(events) {
       for (const { a, index } of events) {
-        const b = Object.assign(this.baseOf(index), {});
+        const b = { ...this.baseOf(index) }; // 复制一份再改：默认值是共享的
         if (num(a.rotation) !== null) b.rot = a.rotation;
         const scale = a.scale;
         if (num(scale) !== null) b.sx = b.sy = scale / 100;
@@ -119,12 +133,28 @@
       }
     }
 
+    /** 这块砖的底值（PositionTrack 定的，没有就是共享的默认值）：只读，别改返回的对象。 */
     baseOf(i) {
-      return this.base.get(i) || { dx: 0, dy: 0, rot: 0, sx: 1, sy: 1, alpha: 1 };
+      return this.base.get(i) || DEFAULT_BASE;
+    }
+
+    /** 一个属性的初始分组：按底值分，没有 PositionTrack（或底值和默认一样）的砖都在第 0 组。 */
+    channel(key) {
+      const of = new Int32Array(this.path.length);
+      const groups = [{ base: DEFAULT_BASE[key], size: this.path.length, list: [] }];
+      const byBase = new Map([[DEFAULT_BASE[key], 0]]);
+      for (const [i, b] of this.base) {
+        let g = byBase.get(b[key]);
+        if (g === undefined) { byBase.set(b[key], g = groups.length); groups.push({ base: b[key], size: 0, list: [] }); }
+        if (g) { of[i] = g; groups[g].size++; groups[0].size--; }
+      }
+      return { of, groups };
     }
 
     /** MoveTrack：每块受影响的砖、每个写了的属性，从触发那一刻的当前值缓到目标值。 */
     buildMoves(events) {
+      for (const key of PROPS) this.channels[key] = this.channel(key);
+      const hits = new Int32Array(this.path.length + 1); // cover 用的计数，用完清零；组数不会超过砖数 + 1
       for (const { a, index, spb, t0 } of events) {
         let s = resolveTile(a.startTile, index, this.last), e = resolveTile(a.endTile, index, this.last);
         if (s === null) s = index;
@@ -144,29 +174,40 @@
           if (num(a.scale[1]) !== null) targets.push(['sy', a.scale[1] / 100]);
         }
         if (num(a.opacity) !== null) targets.push(['alpha', a.opacity / 100]);
-        for (let i = s; i <= e; i += step) {
-          for (const [key, to] of targets) this.push(i, key, t0, t1, to, a.ease);
-          if (rotation !== null) this.push(i, 'rot', t0, t1, this.baseOf(i).rot + rotation, a.ease); // 旋转相对砖块原来的角度
-        }
+        // 每组从这一刻组里的当前值缓到目标值（同组的砖这一刻的值一样）
+        const add = (key, toOf) => this.cover(this.channels[key], s, e, step, hits,
+          g => g.list.push({ t0, t1, from: sample(g, t0), to: toOf(g), ease: a.ease }));
+        for (const [key, to] of targets) add(key, () => to);
+        if (rotation !== null) add('rot', g => g.base + rotation); // 旋转相对砖块原来的角度
       }
     }
 
-    push(i, key, t0, t1, to, easeName) {
-      let byKey = this.tweens.get(i);
-      if (!byKey) this.tweens.set(i, byKey = {});
-      const list = byKey[key] || (byKey[key] = []);
-      list.push({ t0, t1, from: this.value(i, key, t0), to, ease: easeName });
+    /**
+     * s..e（隔 step 块）这些砖在一个属性上加一段缓动，add 对涉及的每组调一次。
+     * 整组都被盖住的直接加；只盖住一部分的，把盖住的砖拆成新组（复制已有的缓动列表）再加，所以同组的砖缓动始终一样。
+     */
+    cover(ch, s, e, step, hits, add) {
+      const { of, groups } = ch, touched = [];
+      for (let i = s; i <= e; i += step) if (hits[of[i]]++ === 0) touched.push(of[i]);
+      let split = false;
+      for (const g of touched) {
+        const whole = groups[g];
+        if (hits[g] === whole.size) { add(whole); hits[g] = 0; continue; }
+        const part = { base: whole.base, size: hits[g], list: whole.list.slice() };
+        whole.size -= part.size;
+        hits[g] = groups.push(part); // 记下新组号 + 1，下面把盖住的砖挪过去
+        add(part);
+        split = true;
+      }
+      if (!split) return;
+      for (let i = s; i <= e; i += step) { const moved = hits[of[i]]; if (moved) of[i] = moved - 1; }
+      for (const g of touched) hits[g] = 0;
     }
 
     /** 某块砖某个属性在 t 时刻的值。 */
     value(i, key, t) {
-      const list = this.tweens.get(i) && this.tweens.get(i)[key];
-      if (!list || !list.length || list[0].t0 > t) return this.baseOf(i)[key];
-      let lo = 0, hi = list.length - 1;
-      while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (list[mid].t0 <= t) lo = mid; else hi = mid - 1; }
-      const w = list[lo];
-      if (t >= w.t1) return w.to;
-      return w.from + (w.to - w.from) * ease(w.ease, (t - w.t0) / (w.t1 - w.t0));
+      const ch = this.channels[key], g = ch && ch.groups[ch.of[i]];
+      return g ? sample(g, t) : this.baseOf(i)[key];
     }
 
     /** 某块砖在 t 时刻的移动状态：位移（世界坐标）、旋转（度，逆时针）、缩放、透明度。 */
