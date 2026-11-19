@@ -13,7 +13,7 @@ public class TrackEffectsTests
           "actions": [
             { "floor": 1, "eventType": "SetSpeed", "beatsPerMinute": 200 },
             { "floor": 2, "eventType": "MoveTrack", "startTile": [0, "ThisTile"], "endTile": [3, "ThisTile"], "duration": 1,
-              "positionOffset": [1, null], "scale": [200, 50], "opacity": 0, "angleOffset": 90, "ease": "OutQuad", "eventTag": "a" },
+              "positionOffset": [1, null], "scale": [200, 50], "opacity": 0, "angleOffset": 90, "ease": "OutQuad", "eventTag": "a", "comment": "x" },
             { "floor": 3, "eventType": "MoveTrack", "active": false, "startTile": [0, "ThisTile"], "endTile": [0, "ThisTile"], "duration": 1 },
             { "floor": 4, "eventType": "AnimateTrack", "trackAnimation": "Grow", "beatsAhead": 2 },
             { "floor": 5, "eventType": "MoveCamera", "duration": 2, "relativeTo": "Tile", "position": [1, 2], "zoom": 150 },
@@ -31,8 +31,43 @@ public class TrackEffectsTests
         var actions = (JArray)fx["actions"]!;
         Assert.Equal(new[] { "MoveTrack", "AnimateTrack", "PositionTrack" }, actions.Select(a => (string?)a["eventType"])); // 镜头事件不要
         Assert.Equal(2, (int)actions[0]["floor"]!);
-        Assert.Null(actions[0]["eventTag"]); // 只留重放要用的参数
+        Assert.Null(actions[0]["comment"]); // 只留重放要用的参数
+        Assert.Equal("a", (string?)actions[0]["eventTag"]); // 重复事件、条件事件按标签认
         Assert.Equal(JTokenType.Null, actions[0]["positionOffset"]![1]!.Type);
+    }
+
+    [Fact]
+    public void KeepsRepeatAndConditionalEventsOnFloorsWithTaggedTrackEvents()
+    {
+        // 复现（工坊 3386617648）：第 18 块的重复事件让带标签的移动轨道逐块重放，原来没带上，身后的砖只藏了一块
+        const string level = """
+            {
+              "actions": [
+                { "floor": 18, "eventType": "RepeatEvents", "repeatType": "Floor", "repetitions": 1, "floorCount": 20, "interval": 1,
+                  "gapLength": 1, "executeOnCurrentFloor": true, "tag": "1" },
+                { "floor": 18, "eventType": "MoveTrack", "startTile": [-1, "ThisTile"], "endTile": [-1, "ThisTile"], "duration": 1, "opacity": 0,
+                  "eventTag": "1" },
+                { "floor": 18, "eventType": "SetConditionalEvents", "perfectTag": "NONE", "missTag": "1", "lossTag": "miss", "onCheckpointTag": "NONE" },
+                { "floor": 20, "eventType": "RepeatEvents", "repetitions": 4, "interval": 2, "tag": "deco" },
+                { "floor": 20, "eventType": "MoveDecorations", "tag": "x", "eventTag": "deco" },
+                { "floor": 21, "eventType": "RepeatEvents", "active": false, "repetitions": 4, "interval": 2, "tag": "t" },
+                { "floor": 21, "eventType": "MoveTrack", "startTile": [0, "ThisTile"], "endTile": [0, "ThisTile"], "eventTag": "t" }
+              ]
+            }
+            """;
+
+        var actions = (JArray)TrackEffects.Extract(JObject.Parse(level))["actions"]!;
+
+        // 只留和带标签的轨道事件在同一块砖上的（装饰物的重复事件、关掉的不要）
+        Assert.Equal(new[] { "RepeatEvents", "MoveTrack", "SetConditionalEvents", "MoveTrack" }, actions.Select(a => (string?)a["eventType"]));
+        var repeat = (JObject)actions[0];
+        Assert.Equal("Floor", (string?)repeat["repeatType"]);
+        Assert.Equal(20, (int)repeat["floorCount"]!);
+        Assert.Equal(1, (int)repeat["gapLength"]!);
+        Assert.True((bool)repeat["executeOnCurrentFloor"]!);
+        Assert.Equal("1", (string?)repeat["tag"]);
+        Assert.Equal("miss", (string?)actions[2]["lossTag"]);
+        Assert.Equal("1", (string?)actions[2]["missTag"]);
     }
 
     [Fact]

@@ -1,8 +1,10 @@
 /* 轨道预览的动画：按关卡事件算出任一时刻每块砖的位移、旋转、缩放、透明度，以及砖块的出现 / 消失动画。
  * 范围（2026-11-18 用户定）：MoveTrack、PositionTrack、AnimateTrack；不含颜色和轨道样式；
  * 镜头不用谱面自带的（MoveCamera，用户：镜头不要用谱面自带的），只跟着星球（见 playerAt）。
- * 没看游戏的实现（用户选了不用 REA），按事件参数的含义做：缓动用 DOTween 同名缓动的标准公式；位移以砖长（1.5）为单位；
- * 出现 / 消失动画的具体形态和时长是近似。这里只算数，不画（画在 track.js），node 测试直接测。 */
+ * 重复事件（RepeatEvents）照游戏重放带标签的移动轨道，条件事件（SetConditionalEvents）按全程完美处理（见 expand）。
+ * 没看游戏的实现（用户选了不用 REA），按事件参数的含义、编辑器社区文档和开源的重写实现做（依据见 docs/专属手序.md「轨道预览」）：
+ * 缓动用 DOTween 同名缓动的公式和默认参数；位移以砖长（1.5）为单位；出现 / 消失动画的具体形态和时长是近似。
+ * 这里只算数，不画（画在 track.js），node 测试直接测。 */
 (function (root) {
   'use strict';
 
@@ -10,11 +12,21 @@
   const PI = Math.PI;
   const num = v => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
-  // ---------- 缓动（DOTween 的名字，公式同 Robert Penner） ----------
+  // ---------- 缓动（DOTween 的名字和公式：多数同 Robert Penner，Elastic 用 DOTween 自己的写法） ----------
   const inPow = n => u => Math.pow(u, n);
   const outPow = n => u => 1 - Math.pow(1 - u, n);
   const inOutPow = n => u => (u < 0.5 ? Math.pow(2, n - 1) * Math.pow(u, n) : 1 - Math.pow(-2 * u + 2, n) / 2);
   const BACK = 1.70158, BACK2 = BACK * 1.525;
+  // Elastic：DOTween 默认振幅 1.70158（Back 的过冲量同一个数）、周期是时长的 0.3（InOut 0.45），相位按振幅错开
+  // （DOTween 的 EaseManager；Penner 原式振幅 1，回弹小一截）
+  const AMP = 1.70158, TAU = 2 * PI;
+  const shift = period => period / TAU * Math.asin(1 / AMP);
+  const E1 = 0.3, S1 = shift(E1), E2 = 0.45, S2 = shift(E2);
+  function inOutElastic(u) {
+    const v = u * 2 - 1;
+    return v < 0 ? -0.5 * AMP * Math.pow(2, 10 * v) * Math.sin((v - S2) * TAU / E2)
+      : AMP * Math.pow(2, -10 * v) * Math.sin((v - S2) * TAU / E2) * 0.5 + 1;
+  }
   function outBounce(u) {
     const n = 7.5625, d = 2.75;
     if (u < 1 / d) return n * u * u;
@@ -41,11 +53,9 @@
     OutBack: u => 1 + (BACK + 1) * Math.pow(u - 1, 3) + BACK * Math.pow(u - 1, 2),
     InOutBack: u => (u < 0.5 ? (Math.pow(2 * u, 2) * ((BACK2 + 1) * 2 * u - BACK2)) / 2
       : (Math.pow(2 * u - 2, 2) * ((BACK2 + 1) * (u * 2 - 2) + BACK2) + 2) / 2),
-    InElastic: u => (u === 0 ? 0 : u === 1 ? 1 : -Math.pow(2, 10 * u - 10) * Math.sin((u * 10 - 10.75) * (2 * PI / 3))),
-    OutElastic: u => (u === 0 ? 0 : u === 1 ? 1 : Math.pow(2, -10 * u) * Math.sin((u * 10 - 0.75) * (2 * PI / 3)) + 1),
-    InOutElastic: u => (u === 0 ? 0 : u === 1 ? 1 : u < 0.5
-      ? -(Math.pow(2, 20 * u - 10) * Math.sin((20 * u - 11.125) * (2 * PI / 4.5))) / 2
-      : (Math.pow(2, -20 * u + 10) * Math.sin((20 * u - 11.125) * (2 * PI / 4.5))) / 2 + 1),
+    InElastic: u => (u === 0 ? 0 : u === 1 ? 1 : -AMP * Math.pow(2, 10 * (u - 1)) * Math.sin((u - 1 - S1) * TAU / E1)),
+    OutElastic: u => (u === 0 ? 0 : u === 1 ? 1 : AMP * Math.pow(2, -10 * u) * Math.sin((u - S1) * TAU / E1) + 1),
+    InOutElastic: u => (u === 0 ? 0 : u === 1 ? 1 : inOutElastic(u)),
     InBounce: u => 1 - outBounce(1 - u),
     OutBounce: outBounce,
     InOutBounce: u => (u < 0.5 ? (1 - outBounce(1 - 2 * u)) / 2 : (1 + outBounce(2 * u - 1)) / 2),
@@ -73,6 +83,42 @@
 
   const PROPS = ['dx', 'dy', 'rot', 'sx', 'sy', 'alpha'];
   const DEFAULT_BASE = Object.freeze({ dx: 0, dy: 0, rot: 0, sx: 1, sy: 1, alpha: 1 }); // 没有 PositionTrack 的砖合用这一份，不能改
+  const SHOWN = Object.freeze({ alpha: 1, scale: 1, dx: 0, dy: 0, rot: 0 }); // 不在出现 / 消失动画里的砖：原样
+  const MAX_BEAT_REPEATS = 10000; // 按拍重复最多展开几次：防谱面写了离谱的次数把预览卡住（按砖重复到最后一块为止，本来就有上限）
+
+  /** eventTag、tag：空格分开的几个标签。 */
+  const tagsOf = v => (typeof v === 'string' ? v.split(' ').filter(Boolean) : []);
+
+  /**
+   * 重复事件、条件事件按砖号、标签建表（游戏里两者都只管同一块砖上带这个标签的事件）。
+   * repeat：砖号 → 标签 → { beat, interval, count, gap, here }；同一块砖同一个标签后写的算数。
+   *   按拍（repeatType 不是 Floor，老谱面没写）：在本砖每隔 interval 拍再触发 repetitions 次；
+   *   按砖（Floor）：往后每隔 gapLength 块砖、到那块砖时再触发一次，共 floorCount 次；executeOnCurrentFloor 时 ThisTile 跟着那块砖。
+   *   interval 不大于 0 的按拍重复游戏里也按砖走（开源重写 Re_ADOJAS 照游戏写的判断，这里照搬）。缺的参数用游戏编辑器的默认值。
+   * judged：砖号 → 标签 → 完美时会不会触发（条件事件里写了 perfectTag 的为 true，只写在失误、失败等别的判定里的为 false）。
+   */
+  function modifierTables(actions) {
+    const repeat = new Map(), judged = new Map();
+    const table = (map, floor) => map.get(floor) || map.set(floor, new Map()).get(floor);
+    for (const a of actions) {
+      if (a.eventType === 'RepeatEvents') {
+        const byFloor = a.repeatType === 'Floor', interval = byFloor ? -1 : (num(a.interval) ?? 1);
+        const info = {
+          beat: interval > 0, interval,
+          count: Math.max(0, Math.round((byFloor ? num(a.floorCount) : num(a.repetitions)) ?? 1)),
+          gap: Math.max(1, Math.round(num(a.gapLength) ?? 1)), here: a.executeOnCurrentFloor === true,
+        };
+        for (const tag of tagsOf(a.tag)) table(repeat, a.floor).set(tag, info);
+      } else if (a.eventType === 'SetConditionalEvents') {
+        for (const key of Object.keys(a)) {
+          if (key === 'eventTag' || !key.endsWith('Tag')) continue;
+          const t = table(judged, a.floor);
+          for (const tag of tagsOf(a[key])) if (tag !== 'NONE') t.set(tag, t.get(tag) === true || key === 'perfectTag');
+        }
+      }
+    }
+    return { repeat, judged };
+  }
 
   /** 一组砖某个属性在 t 时刻的值：二分找最后一段已开始的缓动，还没开始就是底值。 */
   function sample(group, t) {
@@ -102,15 +148,10 @@
         while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (beat[mid][0] <= t + 1e-6) lo = mid; else hi = mid - 1; }
         return beat[lo][1];
       } : spbAt;
-      spbAt = this.spbAt;
       const settings = (fx && fx.settings) || {};
-      const indexOf = new Map(path.map((p, i) => [p.tile, i]));
-      const actions = ((fx && Array.isArray(fx.actions)) ? fx.actions : [])
-        .filter(a => a && typeof a === 'object' && indexOf.has(a.floor))
-        .map(a => {
-          const index = indexOf.get(a.floor), spb = spbAt(path[index].time);
-          return { a, index, spb, t0: path[index].time + (num(a.angleOffset) || 0) / 180 * spb };
-        });
+      this.indexOf = new Map(path.map((p, i) => [p.tile, i]));
+      const actions = this.expand(((fx && Array.isArray(fx.actions)) ? fx.actions : [])
+        .filter(a => a && typeof a === 'object' && this.indexOf.has(a.floor)));
       // 缓动按属性分开存，受同一串事件影响、底值也相同的砖合成一组、共用一份缓动列表（整轨事件多的谱不用每块砖各存一份）：
       // 属性名 → { of: 砖下标 → 组号, groups: [ { base, size, list: [ { t0, t1, from, to, ease } … ] } ] }，list 按开始时间排好
       this.channels = {};
@@ -118,6 +159,62 @@
       this.buildBase(actions.filter(e => e.a.eventType === 'PositionTrack'));
       this.buildMoves(actions.filter(e => e.a.eventType === 'MoveTrack').sort((x, y) => x.t0 - y.t0));
       this.buildAnimations(settings, actions.filter(e => e.a.eventType === 'AnimateTrack').sort((x, y) => x.index - y.index));
+      this.buildWindows();
+      this.stamp = 0; // 画一帧加一：同组的值一帧只算一次（见 tilesNear）
+    }
+
+    /**
+     * 关卡事件 → 每一次触发 { a, index（ThisTile 按哪块砖算）, spb（换算拍数用的一拍几秒）, t0 }。
+     * 带标签的移动轨道按同一块砖上的重复事件展开成多次（第 0 次就是它自己）；出现消失动画、PositionTrack 不重复（游戏里也只用一次）。
+     * 条件事件管的事件只在判定时触发：预览不判定、按全程完美算，完美时触发的在本砖照常触发一次（近似：游戏里是落到砖上判完美时），
+     * 只在失误、失败、过早等判定时触发的不触发。
+     */
+    expand(actions) {
+      const { repeat, judged } = modifierTables(actions);
+      const out = [];
+      for (const a of actions) {
+        if (a.eventType === 'RepeatEvents' || a.eventType === 'SetConditionalEvents') continue;
+        const tags = tagsOf(a.eventTag), base = this.indexOf.get(a.floor), cond = judged.get(a.floor);
+        if (cond && tags.some(t => cond.has(t)) && !tags.some(t => cond.get(t))) continue;
+        const reps = a.eventType === 'MoveTrack' && repeat.get(a.floor);
+        const info = reps ? tags.map(t => reps.get(t)).find(Boolean) : null; // 几个标签取第一个对得上的
+        if (info) this.repeatInto(out, a, base, info);
+        else out.push(this.fire(a, base, 0));
+      }
+      return out;
+    }
+
+    /** 事件在第 index 块砖上触发，再晚 beats 拍：拍数按那块砖的速度换算成秒。 */
+    fire(a, index, beats) {
+      const time = this.path[index].time, spb = this.spbAt(time);
+      return { a, index, spb, t0: time + ((num(a.angleOffset) || 0) / 180 + beats) * spb };
+    }
+
+    /**
+     * 一个被重复的移动轨道。按砖重复、ThisTile 不跟着走的，在本砖上推迟到星球到那块砖的拍数：
+     * 每块砖按自己的速度折成拍数（游戏按砖块转过的角度算，和变速无关），再按本砖的速度换算成秒。
+     */
+    repeatInto(out, a, base, r) {
+      const floor = this.path[base].tile;
+      for (let k = 0; k <= r.count; k++) {
+        if (r.beat) {
+          if (k > MAX_BEAT_REPEATS) break;
+          out.push(this.fire(a, base, r.interval * k));
+          continue;
+        }
+        const target = this.indexOf.get(floor + k * r.gap);
+        if (target === undefined) break; // 过了最后一块砖
+        out.push(r.here ? this.fire(a, target, 0) : this.fire(a, base, this.beatsTo(target) - this.beatsTo(base)));
+      }
+    }
+
+    /** 从第 0 块砖到第 i 块砖经过了几拍（每块砖按它自己的速度折算）。 */
+    beatsTo(i) {
+      if (!this.beatSum) {
+        const sum = this.beatSum = new Float64Array(this.path.length), path = this.path;
+        for (let j = 1; j < path.length; j++) sum[j] = sum[j - 1] + (path[j].time - path[j - 1].time) / this.spbAt(path[j - 1].time);
+      }
+      return this.beatSum[i];
     }
 
     /** PositionTrack：这块砖固定的旋转、缩放、透明度（位置游戏里已经挪好了）。 */
@@ -240,25 +337,63 @@
     }
 
     /**
-     * 出现 / 消失动画在 t 时刻对这块砖的影响：{ alpha, scale, dx, dy, rot }。
+     * 每块砖出现、消失的时刻（画一帧时先用它粗筛）：showFrom 之前、showUntil 之后完全看不见，
+     * appearEnd 之前在出现、fadeFrom 之后在消失，中间原样。没有动画的那一头是 ±无穷。
      * 出现：星球到这块砖前 ahead 拍开始，消失：星球到过这块砖 behind 拍后开始；动画时长取半拍（0.12–0.6 秒）。
      */
+    buildWindows() {
+      const n = this.path.length;
+      this.showFrom = new Float64Array(n).fill(-Infinity);
+      this.appearEnd = new Float64Array(n).fill(-Infinity);
+      this.fadeFrom = new Float64Array(n).fill(Infinity);
+      this.showUntil = new Float64Array(n).fill(Infinity);
+      for (let i = 0; i < n; i++) {
+        const a = this.anim[i], time = this.path[i].time, spb = this.spbAt(time), dur = Math.max(0.12, Math.min(0.6, spb / 2));
+        if (a.appear !== 'None') { this.showFrom[i] = time - a.ahead * spb; this.appearEnd[i] = this.showFrom[i] + dur; }
+        if (a.disappear !== 'None') { this.fadeFrom[i] = time + a.behind * spb; this.showUntil[i] = this.fadeFrom[i] + dur; }
+      }
+    }
+
+    /** 出现 / 消失动画在 t 时刻对这块砖的影响：{ alpha, scale, dx, dy, rot }。 */
     reveal(i, t) {
       const out = { alpha: 1, scale: 1, dx: 0, dy: 0, rot: 0 };
-      const a = this.anim[i], p = this.path[i];
-      if (!a) return out;
-      const spb = this.spbAt(p.time), dur = Math.max(0.12, Math.min(0.6, spb / 2));
-      if (a.appear !== 'None') {
-        const u = (t - (p.time - a.ahead * spb)) / dur;
-        if (u <= 0) { out.alpha = 0; return out; }
-        if (u < 1) this.shape(a.appear, ease('OutCubic', u), i, out, true);
-      }
-      if (a.disappear !== 'None') {
-        const u = (t - (p.time + a.behind * spb)) / dur;
-        if (u >= 1) { out.alpha = 0; return out; }
-        if (u > 0) this.shape(a.disappear, ease('InCubic', u), i, out, false);
+      if (!this.anim[i]) return out;
+      if (t <= this.showFrom[i] || t >= this.showUntil[i]) { out.alpha = 0; return out; }
+      const a = this.anim[i], from = this.showFrom[i], fade = this.fadeFrom[i];
+      if (t < this.appearEnd[i]) this.shape(a.appear, ease('OutCubic', (t - from) / (this.appearEnd[i] - from)), i, out, true);
+      if (t > fade) this.shape(a.disappear, ease('InCubic', (t - fade) / (this.showUntil[i] - fade)), i, out, false);
+      return out;
+    }
+
+    /**
+     * t 时刻可能在画面里的砖，按砖号排好：[{ i, st（state）, rv（reveal） }]。
+     * box：画面的世界坐标范围 { x0, x1, y0, y1 }，外加边距 margin（再按砖的缩放放大）；砖的中心（含移动和出现消失的位移）在里面才算。
+     * 先按出现消失的时刻、每组共用的位移和缩放粗筛，只给留下的砖算完整状态（2 万块砖的谱原来每帧逐块算，13 ms）。
+     */
+    tilesNear(t, box) {
+      const out = [], path = this.path, stamp = ++this.stamp;
+      const [dx, dy, sx, sy] = ['dx', 'dy', 'sx', 'sy'].map(key => this.memo(key));
+      const at = (m, i) => {
+        const g = m.of[i];
+        if (m.stamp[g] !== stamp) { m.stamp[g] = stamp; m.value[g] = sample(m.groups[g], t); }
+        return m.value[g];
+      };
+      for (let i = 0; i <= this.last; i++) {
+        if (t <= this.showFrom[i] || t >= this.showUntil[i]) continue;
+        const rv = t < this.appearEnd[i] || t > this.fadeFrom[i] ? this.reveal(i, t) : SHOWN;
+        const x = path[i].x + at(dx, i) + rv.dx, y = path[i].y + at(dy, i) + rv.dy;
+        const m = box.margin * Math.max(1, Math.abs(at(sx, i) * rv.scale), Math.abs(at(sy, i) * rv.scale));
+        if (x < box.x0 - m || x > box.x1 + m || y < box.y0 - m || y > box.y1 + m) continue;
+        out.push({ i, st: this.state(i, t), rv });
       }
       return out;
+    }
+
+    /** 一个属性每组这一帧的值（tilesNear 用）：组在建好以后不再变，按组号存。 */
+    memo(key) {
+      const ch = this.channels[key];
+      if (!ch.memo) ch.memo = { of: ch.of, groups: ch.groups, value: new Float64Array(ch.groups.length), stamp: new Int32Array(ch.groups.length) };
+      return ch.memo;
     }
 
     /** 出现时 k 从 0 到 1（1 是完全出现），消失时 k 从 0 到 1（1 是完全消失）。 */

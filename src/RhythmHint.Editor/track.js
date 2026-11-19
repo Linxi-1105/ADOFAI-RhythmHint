@@ -83,11 +83,13 @@
       return z;
     }
 
+    /** 按画布在页面上的大小和像素比定画布尺寸；没变就不重设（重设会清空画布、重新分配内存）。 */
     resize() {
       const r = this.canvas.getBoundingClientRect();
-      const dpr = Math.max(1, window.devicePixelRatio || 1);
-      this.canvas.width = Math.round(r.width * dpr);
-      this.canvas.height = Math.round(r.height * dpr);
+      this.ratio = window.devicePixelRatio || 1;
+      const dpr = Math.max(1, this.ratio), width = Math.round(r.width * dpr), height = Math.round(r.height * dpr);
+      if (this.canvas.width !== width) this.canvas.width = width;
+      if (this.canvas.height !== height) this.canvas.height = height;
       this.w = r.width;
       this.h = r.height;
       this.dpr = dpr;
@@ -173,18 +175,35 @@
       return { from: t0, sweep: clockwise ? -cw : ccw };
     }
 
+    /**
+     * 绕着第 k 块砖转的那颗星球此刻在哪个方向（数学角）。
+     * 最后一块砖（谱尾）：落上去时在上一块的方向，之后照上一段的转向每拍转半圈（原来停在倒数第二块上，那块被挪走时画面一片空）。
+     */
+    orbit(k, time) {
+      const path = this.doc.path, p = path[k];
+      if (k < path.length - 1) {
+        const next = path[k + 1];
+        const f = next.time > p.time ? Math.max(0, Math.min(1, (time - p.time) / (next.time - p.time))) : 1;
+        const { from, sweep } = this.sweep(k);
+        return from + sweep * f;
+      }
+      const spb = this.fx.spbAt(p.time) || 0.5, turn = this.sweep(k - 1).sweep > 0 ? 1 : -1;
+      return this.dirIn(k) + turn * Math.PI * Math.max(0, time - p.time) / spb;
+    }
+
     /** @param badge 标题后面的小标签（轨道预览还在试验：2026-11-18 用户「所有写上实验」）。 */
     draw(time, title, badge) {
       const g = this.g;
-      if (!this.w) this.resize();
+      // 第一次画、像素比变了（拖到别的显示器）时量一次。卡片藏着（宽高为 0）时不画，也不每帧重量：
+      // 卡片显示出来、大小变了时 app.js 的 ResizeObserver 会调 resize
+      if (this.w === undefined || (window.devicePixelRatio || 1) !== this.ratio) this.resize();
+      if (!this.w || !this.h) return;
       g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
       g.clearRect(0, 0, this.w, this.h);
       const doc = this.doc, fx = this.fx;
       if (!doc || doc.path.length < 2 || !fx) return;
       const path = doc.path, unit = this.unit || 1.5, half = unit / 2;
-      const k = Math.min(this.indexAt(time), path.length - 2);
-      const p = path[k], next = path[k + 1];
-      const f = next.time > p.time ? Math.max(0, Math.min(1, (time - p.time) / (next.time - p.time))) : 1;
+      const k = this.indexAt(time), p = path[k];
 
       // 镜头只跟着星球（不用谱面自带的镜头，2026-11-18 用户）：平滑跟随，播放时对准稍后一点星球会到的位置，抵消平滑带来的落后
       const now = performance.now(), dt = this.lastDraw ? Math.min(0.1, (now - this.lastDraw) / 1000) : 0;
@@ -209,14 +228,15 @@
       g.fillStyle = bg;
       g.fillRect(0, 0, this.w, this.h);
 
-      // 砖块：每块的当前位置、旋转、缩放、透明度 = 移动轨道 × 出现消失动画；画面外的不画
+      // 砖块：每块的当前位置、旋转、缩放、透明度 = 移动轨道 × 出现消失动画；画面外的不画（trackfx 先粗筛，只算画面附近的）
       const margin = unit * s * 2, tiles = [];
-      for (let i = 0; i < path.length; i++) {
-        const st = fx.state(i, time), rv = fx.reveal(i, time);
+      const near = fx.tilesNear(time, { x0: this.camX - cx / s, x1: this.camX + cx / s, y0: this.camY - cy / s, y1: this.camY + cy / s, margin: unit * 2 });
+      for (const { i, st, rv } of near) {
         // 谱面用移动轨道把砖藏起来（透明或缩成 0）的地方画成淡虚影：游戏里那段通常靠装饰物撑画面（不复刻），
         // 预览里至少看得见路线（2026-11-18 用户：有的谱面轨道预览里没有轨道）。出现消失动画照常
         const hidden = st.alpha < 0.12 || (Math.abs(st.sx) < 0.05 && Math.abs(st.sy) < 0.05);
-        const alpha = hidden ? GHOST * rv.alpha : st.alpha * rv.alpha;
+        // 透明度超过 100%（谱面常写 300%，缓动回弹也会冲过去）照 100% 画：globalAlpha 收到 0–1 以外的值，浏览器会忽略、沿用上一块砖的
+        const alpha = Math.max(0, Math.min(1, hidden ? GHOST * rv.alpha : st.alpha * rv.alpha));
         const sx = (hidden ? 1 : st.sx) * rv.scale, sy = (hidden ? 1 : st.sy) * rv.scale;
         if (alpha < 0.01 || (Math.abs(sx) < 1e-3 && Math.abs(sy) < 1e-3)) continue;
         const wx = path[i].x + st.dx + rv.dx, wy = path[i].y + st.dy + rv.dy;
@@ -281,10 +301,9 @@
       }
       g.globalAlpha = 1;
 
-      // 星球：中心那颗在这块砖（跟着砖移动）上，另一颗按固定间距绕它转向下一块
+      // 星球：中心那颗在这块砖（跟着砖移动）上，另一颗按固定间距绕它转向下一块；过了最后一块砖停在最后一块上
       const [ox, oy] = fx.tileAt(k, time);
-      const { from, sweep } = this.sweep(k);
-      const theta = from + sweep * f;
+      const theta = this.orbit(k, time);
       const mx = ox + Math.cos(theta) * unit, my = oy + Math.sin(theta) * unit;
       if (k !== this.lastIndex) { this.lastIndex = k; this.landedAt = performance.now(); }
       const [pivotX, pivotY] = toScreen(ox, oy), [moverX, moverY] = toScreen(mx, my);

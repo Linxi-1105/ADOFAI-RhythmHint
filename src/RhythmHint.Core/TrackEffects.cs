@@ -10,17 +10,24 @@ namespace RhythmHint.Core;
 /// （2026-11-18 用户：轨道预览没有动画，效果更差，要复刻游戏的轨道和动画）。
 /// 用户定的范围：砖块移动（MoveTrack、PositionTrack）、出现消失动画（AnimateTrack）；不含颜色和轨道样式；
 /// 镜头不用谱面自带的（MoveCamera，用户后来说不要），预览里只跟着星球。
+/// 重复事件（RepeatEvents）和条件事件（SetConditionalEvents）按标签决定带标签的轨道事件触发几次、什么时候触发，
+/// 只留和带标签的轨道事件在同一块砖上的那些（游戏里只认同一块砖上的，装饰物、镜头用的不要）；怎么重放在编辑器的 trackfx.js。
 /// 关掉的事件（"active": false）不要；每个事件只留重放要用的参数，免得 session.js 太大。
 /// </summary>
 public static class TrackEffects
 {
     private static readonly string[] EventTypes = { "MoveTrack", "PositionTrack", "AnimateTrack" };
 
+    private static readonly string[] Modifiers = { "RepeatEvents", "SetConditionalEvents" };
+
     private static readonly string[] EventKeys =
     {
         "floor", "eventType", "startTile", "endTile", "gapLength", "duration", "positionOffset", "rotationOffset", "rotation", "scale",
-        "opacity", "angleOffset", "ease", "justThisTile", "editorOnly",
+        "opacity", "angleOffset", "ease", "justThisTile", "editorOnly", "eventTag",
         "trackAnimation", "beatsAhead", "trackDisappearAnimation", "beatsBehind",
+        "tag", "repeatType", "repetitions", "floorCount", "interval", "executeOnCurrentFloor",
+        "perfectTag", "hitTag", "earlyPerfectTag", "latePerfectTag", "barelyTag", "veryEarlyTag", "veryLateTag", "missTag",
+        "tooEarlyTag", "tooLateTag", "lossTag", "onCheckpointTag",
     };
 
     private static readonly string[] SettingKeys = { "trackAnimation", "beatsAhead", "trackDisappearAnimation", "beatsBehind" };
@@ -70,27 +77,36 @@ public static class TrackEffects
         var actions = new JArray();
         if (level["actions"] is JArray all)
         {
-            foreach (var action in all.OfType<JObject>())
+            var events = all.OfType<JObject>().Where(IsActive).ToList();
+            var tagged = new HashSet<int?>(events.Where(a => IsType(a, EventTypes) && a["eventTag"] is JValue { Value: string { Length: > 0 } })
+                .Select(a => (int?)a["floor"]));
+            foreach (var action in events)
             {
-                var type = (string?)action["eventType"];
-                if (type == null || Array.IndexOf(EventTypes, type) < 0 || action["active"] is { Type: JTokenType.Boolean } active && !(bool)active)
+                if (IsType(action, EventTypes) || IsType(action, Modifiers) && tagged.Contains((int?)action["floor"]))
                 {
-                    continue;
+                    actions.Add(Trim(action));
                 }
-
-                var kept = new JObject();
-                foreach (var key in EventKeys)
-                {
-                    if (action[key] is { } value)
-                    {
-                        kept[key] = value.DeepClone();
-                    }
-                }
-
-                actions.Add(kept);
             }
         }
 
         return new JObject { ["settings"] = settings, ["actions"] = actions };
+    }
+
+    private static bool IsActive(JObject action) => action["active"] is not { Type: JTokenType.Boolean } active || (bool)active;
+
+    private static bool IsType(JObject action, string[] types) => (string?)action["eventType"] is { } type && Array.IndexOf(types, type) >= 0;
+
+    private static JObject Trim(JObject action)
+    {
+        var kept = new JObject();
+        foreach (var key in EventKeys)
+        {
+            if (action[key] is { } value)
+            {
+                kept[key] = value.DeepClone();
+            }
+        }
+
+        return kept;
     }
 }

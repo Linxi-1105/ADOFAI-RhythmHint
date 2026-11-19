@@ -19,6 +19,32 @@ test('缓动：两头是 0 和 1，常见几种的中点', () => {
   near(ease('Unknown', 0.3), 0.3, '不认识的按线性');
 });
 
+/** DOTween（EaseManager.Evaluate）的 Elastic 原式，照抄它的 time / duration 写法；默认振幅 1.70158、周期 0（= 时长的 0.3，InOut 0.45）。 */
+function dotweenElastic(name, time, duration, amp = 1.70158, period = 0) {
+  const TWO_PI = 2 * Math.PI;
+  const shift = p => (amp < 1 ? p / 4 : p / TWO_PI * Math.asin(1 / amp));
+  if (time === 0) return 0;
+  if (name === 'InOutElastic') {
+    if ((time /= duration * 0.5) === 2) return 1;
+    const p = period || duration * (0.3 * 1.5), s = shift(p);
+    if (time < 1) return -0.5 * (amp * Math.pow(2, 10 * (time -= 1)) * Math.sin((time * duration - s) * TWO_PI / p));
+    return amp * Math.pow(2, -10 * (time -= 1)) * Math.sin((time * duration - s) * TWO_PI / p) * 0.5 + 1;
+  }
+  if ((time /= duration) === 1) return 1;
+  const p = period || duration * 0.3, s = shift(p);
+  if (name === 'InElastic') return -(amp * Math.pow(2, 10 * (time -= 1)) * Math.sin((time * duration - s) * TWO_PI / p));
+  return amp * Math.pow(2, -10 * time) * Math.sin((time * duration - s) * TWO_PI / p) + 1;
+}
+
+test('Elastic 缓动用 DOTween 的默认振幅和周期（Penner 原式振幅是 1，回弹小很多）', () => {
+  for (const name of ['InElastic', 'OutElastic', 'InOutElastic']) {
+    for (const u of [0.05, 0.1, 0.2, 0.33, 0.5, 0.61, 0.8, 0.95]) {
+      near(ease(name, u), dotweenElastic(name, u * 2.5, 2.5), `${name}(${u})`); // 时长随便取，结果只看进度
+    }
+  }
+  assert.ok(ease('OutElastic', 0.1) > 1.8, 'OutElastic 在 0.1 冲到 1.85 左右（Penner 只有 1.25）');
+});
+
 test('相对砖号：本砖、开头、结尾，限在范围里', () => {
   assert.equal(resolveTile([2, 'ThisTile'], 3, 9), 5);
   assert.equal(resolveTile([4, 'Start'], 3, 9), 4);
@@ -103,6 +129,135 @@ test('星球位置：两块砖之间按时间插值，砖被移动时跟着走',
   near(x, 2.5 * TILE);
   near(y, 1.5);
   assert.equal(fx.camera, undefined, '谱面自带的镜头不用');
+});
+
+// ---------- 重复事件（RepeatEvents）、条件事件（SetConditionalEvents） ----------
+
+const hide = (floor, tile, tag) => ({ floor, eventType: 'MoveTrack', startTile: tile, endTile: tile, duration: 0, opacity: 0, eventTag: tag });
+const show = (floor, tile) => ({ floor, eventType: 'MoveTrack', startTile: tile, endTile: tile, duration: 0, opacity: 100 });
+
+test('重复事件（按砖）：每到下一块砖重放一次，ThisTile 跟着到达的砖（工坊 3386617648 身后的砖逐块藏起）', () => {
+  const fx = new TrackFx(path, { actions: [
+    { floor: 2, eventType: 'RepeatEvents', repeatType: 'Floor', repetitions: 1, floorCount: 3, interval: 1, gapLength: 1, executeOnCurrentFloor: true, tag: '1' },
+    hide(2, [-1, 'ThisTile'], '1'),
+  ] }, spb);
+  // 第 k 块 k × 0.5 秒到：本砖（2）一次 + 往后 3 块（3、4、5）各一次，每次藏起身后那块
+  for (const k of [2, 3, 4, 5]) {
+    near(fx.value(k - 1, 'alpha', k * 0.5 - 0.01), 1, `第 ${k - 1} 块藏起之前`);
+    near(fx.value(k - 1, 'alpha', k * 0.5), 0, `星球到第 ${k} 块时藏起第 ${k - 1} 块`);
+  }
+  near(fx.value(5, 'alpha', 10), 1, '只往后重放 floorCount 块');
+});
+
+test('重复事件（按砖）：不跟着到达的砖时仍按本砖算 ThisTile，只是到那块砖时触发；隔 gapLength 块一次；多个标签', () => {
+  const fx = new TrackFx(path, { actions: [
+    { floor: 1, eventType: 'RepeatEvents', repeatType: 'Floor', floorCount: 2, gapLength: 2, executeOnCurrentFloor: false, tag: 'a b' },
+    hide(1, [0, 'ThisTile'], 'x b'),
+    show(2, [1, 'Start']),
+    show(4, [1, 'Start']),
+  ] }, spb);
+  // 本砖 1（0.5 秒）、隔两块的 3（1.5 秒）、5（2.5 秒）各藏一次第 1 块；中间第 2、4 块（1.0、2.0 秒）又显示出来
+  for (const [t, alpha] of [[0.5, 0], [1.0, 1], [1.5, 0], [2.0, 1], [2.5, 0], [3.5, 0]]) near(fx.value(1, 'alpha', t), alpha, `@${t}`);
+  near(fx.value(3, 'alpha', 2), 1, 'ThisTile 没跟着挪到第 3 块');
+});
+
+test('重复事件（按拍）：本砖每隔 interval 拍再触发 repetitions 次，拍数按本砖的速度换算', () => {
+  const fx = new TrackFx(path, { beat: [[0, 0.5], [2, 0.25]], actions: [
+    { floor: 4, eventType: 'RepeatEvents', repeatType: 'Beat', repetitions: 2, floorCount: 9, interval: 3, executeOnCurrentFloor: true, tag: 'p' },
+    hide(4, [0, 'Start'], 'p'),
+    show(5, [0, 'Start']), // 2.5 秒
+    show(7, [0, 'Start']), // 3.5 秒
+  ] }, () => 99);
+  // 第 4 块在 2 秒，那时一拍 0.25 秒：2、2.75、3.5 秒各藏一次（同一时刻后写的「显示」排在重放后面）
+  for (const [t, alpha] of [[2, 0], [2.5, 1], [2.75, 0], [3.4, 0], [5, 1]]) near(fx.value(0, 'alpha', t), alpha, `@${t}`);
+});
+
+test('重复事件：老谱面没有 repeatType（按拍），也没写 floorCount 和 executeOnCurrentFloor', () => {
+  const fx = new TrackFx(path, { actions: [
+    { floor: 0, eventType: 'RepeatEvents', repetitions: 2, interval: 2, tag: 'old' },
+    hide(0, [6, 'Start'], 'old'),
+    show(1, [6, 'Start']),
+    show(3, [6, 'Start']),
+  ] }, spb);
+  for (const [t, alpha] of [[0, 0], [0.5, 1], [1, 0], [1.5, 1], [2, 0]]) near(fx.value(6, 'alpha', t), alpha, `@${t}`);
+});
+
+test('重复事件：只认同一块砖上、标签对得上的移动轨道；按砖重放到最后一块为止', () => {
+  const fx = new TrackFx(path, { actions: [
+    { floor: 7, eventType: 'RepeatEvents', repeatType: 'Floor', floorCount: 50, executeOnCurrentFloor: true, tag: 't' },
+    hide(7, [0, 'ThisTile'], 't'),
+    hide(6, [0, 'ThisTile'], 't'), // 别的砖上的：不重复
+    hide(7, [-3, 'ThisTile'], 'other'), // 标签不对：不重复
+  ] }, spb);
+  for (const i of [7, 8, 9]) near(fx.value(i, 'alpha', 5), 0, `第 ${i} 块`);
+  near(fx.value(6, 'alpha', 5), 0, '第 6 块上的事件照常触发一次，只藏第 6 块');
+  near(fx.value(5, 'alpha', 5), 1, '-3 的那个不跟着重放（第 5 块不受影响）');
+  near(fx.value(4, 'alpha', 5), 0, '它自己照常触发一次：藏第 4 块');
+});
+
+test('条件事件：只在失误、失败等判定时触发的不触发，完美时触发的按全程完美在本砖触发一次', () => {
+  const fx = new TrackFx(path, { actions: [
+    { floor: 3, eventType: 'SetConditionalEvents', perfectTag: 'good', hitTag: 'NONE', missTag: 'bad', lossTag: 'lose both' },
+    hide(3, [0, 'ThisTile'], 'good'),
+    hide(3, [1, 'ThisTile'], 'bad'),
+    hide(3, [2, 'ThisTile'], 'lose'),
+    hide(3, [3, 'ThisTile'], 'both good'),
+    hide(4, [3, 'ThisTile'], 'bad'), // 条件事件在别的砖上：照常触发
+  ] }, spb);
+  // 第 3 块在 1.5 秒，第 4 块在 2 秒
+  near(fx.value(3, 'alpha', 1.5), 0, '完美');
+  near(fx.value(4, 'alpha', 3), 1, '失误');
+  near(fx.value(5, 'alpha', 3), 1, '失败');
+  near(fx.value(6, 'alpha', 1.4), 1);
+  near(fx.value(6, 'alpha', 1.5), 0, '既有完美又有失败的标签：完美时会触发');
+  near(fx.value(7, 'alpha', 1.9), 1);
+  near(fx.value(7, 'alpha', 2), 0, '别的砖上的照常触发');
+});
+
+test('画面附近的砖：和逐块算完状态再筛的结果一样（出现消失窗口、移动、缩放都算进去）', () => {
+  const rand = seeded(7);
+  for (let round = 0; round < 30; round++) {
+    const { path: tiles, fx: level, end } = randomLevel(rand);
+    level.settings = { trackAnimation: ['None', 'Fade', 'Assemble_Far', 'Grow'][round % 4], beatsAhead: 2,
+      trackDisappearAnimation: ['None', 'Scatter_Far', 'Fade'][round % 3], beatsBehind: 1 };
+    const fx = new TrackFx(tiles, level, t => (t > 3 ? 0.5 : 0.4));
+    for (let t = -1; t <= end + 3; t += 0.37) {
+      const cx = tiles[Math.floor(rand() * tiles.length)].x, cy = rand() * 6 - 3;
+      const box = { x0: cx - 4, x1: cx + 4, y0: cy - 2.5, y1: cy + 2.5, margin: 3 };
+      const want = [];
+      for (let i = 0; i < tiles.length; i++) {
+        const st = fx.state(i, t), rv = fx.reveal(i, t);
+        if (rv.alpha <= 0) continue;
+        const x = tiles[i].x + st.dx + rv.dx, y = tiles[i].y + st.dy + rv.dy;
+        const m = box.margin * Math.max(1, Math.abs(st.sx * rv.scale), Math.abs(st.sy * rv.scale));
+        if (x >= box.x0 - m && x <= box.x1 + m && y >= box.y0 - m && y <= box.y1 + m) want.push({ i, st, rv });
+      }
+      assert.deepEqual(fx.tilesNear(t, box), want, `第 ${round} 关 @${t}`);
+    }
+  }
+});
+
+test('画面附近的砖：2 万块砖、整条轨道都在动，每帧只给画面附近的砖算状态', () => {
+  const n = 20000;
+  const big = Array.from({ length: n }, (_, i) => ({ x: i * TILE, y: 0, time: i * 0.2, tile: i }));
+  const actions = Array.from({ length: 200 }, (_, k) => ({
+    floor: Math.floor(k * n / 200), eventType: 'MoveTrack', startTile: [0, 'Start'], endTile: [0, 'End'], duration: 2,
+    positionOffset: [0, k % 3], rotationOffset: k % 7, ease: 'OutSine',
+  }));
+  actions.push({ floor: 0, eventType: 'RepeatEvents', repeatType: 'Floor', floorCount: n, executeOnCurrentFloor: true, tag: 'r' },
+    { floor: 0, eventType: 'MoveTrack', startTile: [-2, 'ThisTile'], endTile: [-2, 'ThisTile'], duration: 1, opacity: 0, eventTag: 'r' });
+  const fx = new TrackFx(big, { settings: { trackAnimation: 'Fade', beatsAhead: 4, trackDisappearAnimation: 'None' }, actions, beat: [[0, 0.4]] }, () => 0.4);
+  const at = k => k * 0.2 + 0.05, box = k => ({ x0: k * TILE - 9, x1: k * TILE + 9, y0: -5, y1: 5, margin: 3 });
+  for (let k = 0; k < 50; k++) fx.tilesNear(at(k * 397), box(k * 397)); // 预热
+  const start = performance.now();
+  let drawn = 0;
+  for (let k = 0; k < 200; k++) drawn += fx.tilesNear(at(k * 97), box(k * 97)).length;
+  const ms = (performance.now() - start) / 200;
+  assert.ok(drawn / 200 < 40, `每帧留下 ${drawn / 200} 块`);
+  assert.ok(ms < 4, `每帧筛砖用了 ${ms.toFixed(2)} ms`);
+  // 重复事件展开成 2 万次：身后第 2 块逐块淡出
+  near(fx.value(10000, 'alpha', 10002 * 0.2 + 1), 0);
+  near(fx.value(10000, 'alpha', 10002 * 0.2 - 0.01), 1);
 });
 
 test('PositionTrack：同一块砖的几个事件叠在一起，其他砖合用默认值、不会被改坏', () => {
@@ -250,8 +405,17 @@ function randomLevel(rand) {
       rotationOffset: maybe(0.4, () => pick([-90, -30, 15, 45, 180])), scale: maybe(0.4, scale),
       opacity: maybe(0.4, () => pick([0, 10, 50, 100, 120])),
       ease: pick(['Linear', 'OutSine', 'InOutQuad', 'OutBack', 'InElastic', 'OutBounce', 'Flash', undefined]),
+      eventTag: maybe(0.4, () => pick(['r1', 'r2', 'r1 r2', 'c', 'x'])),
     });
   }
+  // 重复事件、条件事件：两边共用同一套展开，对照的是展开以后的合用缓动
+  for (let k = int(0, 3); k > 0; k--) {
+    actions.push({
+      floor: pick(hot), eventType: 'RepeatEvents', repeatType: pick(['Beat', 'Floor', undefined]), repetitions: int(0, 4), floorCount: int(0, 5),
+      interval: pick([0.5, 1, 2, 0]), gapLength: maybe(0.6, () => int(1, 3)), executeOnCurrentFloor: rand() < 0.5, tag: pick(['r1', 'r2', 'r1 r2']),
+    });
+  }
+  if (rand() < 0.3) actions.push({ floor: pick(hot), eventType: 'SetConditionalEvents', perfectTag: pick(['c', 'NONE']), missTag: pick(['c', 'r1', 'NONE']) });
   actions.push({ floor: floor(), eventType: 'AnimateTrack', trackAnimation: 'Fade' }, { floor: 0, eventType: 'MoveCamera', duration: 1 });
   for (let k = actions.length - 1; k > 0; k--) { const j = int(0, k); [actions[k], actions[j]] = [actions[j], actions[k]]; } // 打乱：同一时刻的事件先后不定
   const fx = { actions };
