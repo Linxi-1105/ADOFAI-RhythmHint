@@ -6,14 +6,14 @@ What changed in each version, newest first.
 
 ## Unreleased
 
-- Fixed: one broken fingering file in the folder (for example a field of the wrong type or a number that is too large) disabled the whole mod, again on every launch. Now only that file is skipped and listed on the Custom Fingering page
+- Fixed: one broken fingering file in the folder (for example a field of the wrong type or a number that is too large) disabled the whole mod, again on every launch. Now only that file is skipped and listed on the Custom fingering page
 - Fixed: the mod could not read a fingering whose author or comment happened to be a date and time (for example 2026-11-18T00:00:00Z)
 - Custom fingerings are backed up to Documents\RhythmHint\FingeringsBackup automatically. Uninstalling or reverting the mod with UMM deletes the whole mod folder; the fingerings are restored from the backup on the next launch
 - When saving a fingering, a file with the same name that belongs to another chart (another charter's chart of the same song, or one shared by someone else) is no longer overwritten; the new one is saved as name (2).json
 - Fixed: in the fingering editor, saving, undoing and then editing something else still showed the level as saved, while the game still had the saved version
 - Fixed: when the game exported a level with its notes grouped differently (for example after a mod update changed the chord rules), unsaved progress in the editor was not restored and was lost on the next edit. Progress is now restored by tile, the editor tells you how many edits could not be restored, and switching to left-handed restores correctly too
 - Fixed: the fingering editor's track preview froze for seconds and used several GB of memory on levels with many Move Track events
-- Fixed: the first few hit sounds played ahead of the music after starting playback, seeking, changing the practice speed, looping back, or starting before the song begins
+- Fixed: in the fingering editor, the first few hit sounds played ahead of the music after starting playback, seeking, changing the practice speed, looping back, or starting before the song begins
 - Beat and measure lines are now inferred from the level's speed changes and tiles: beats are counted continuously across speed changes, levels whose BPM is far above the music no longer show overly dense beat lines, and measures start on accents such as chords and holds; the note values in the fingering editor follow the beat lines too
 - The fingering editor's track preview now replays Repeat Events and Conditional Events, shows tiles with opacity above 100% correctly, keeps the planets on the last tile at the end of a level, and plays more smoothly on levels with many tiles
 - Custom fingerings: duplicate files for the same chart no longer block automatic selection, fingerings with a different key count are now noted as unsupported in the settings, entering a level no longer stalls when many fingerings are installed, and large fingering files load faster with much less memory
@@ -22,7 +22,7 @@ What changed in each version, newest first.
 - Fingering editor: the File panel can change the save location, choosing a wrong folder asks you to choose again, and a remembered folder that can no longer be used is asked for again; downloading the file no longer counts as saved; a changed file name is kept with your progress
 - Fingering editor: it warns when lane keys clash with shortcuts, game keys such as the numpad and Shift work in it, and Ctrl+S in a text box saves the fingering instead of opening the browser's save page dialog
 - Fingering editor: clicking levels quickly in History opens the last one clicked, tabs editing the same level no longer overwrite each other's progress, and it tells you when browser storage is full and keeps progress for the latest 30 levels
-- Fingering editor: a loop whose start and end are too close is no longer turned on (it used to stall in silence), clicks at the end of a loop are no longer dropped with visual calibration set, the play button resets when the song ends, long songs no longer freeze the view briefly after loading, long charts play more smoothly, and the view stays sharp after moving to a display with different scaling
+- Fingering editor: a loop whose start and end are too close is no longer turned on (it used to stall in silence), hit sounds at the end of a loop are no longer dropped with visual calibration set, the play button resets when the song ends, long songs no longer freeze the view briefly after loading, long charts play more smoothly, and the view stays sharp after moving to a display with different scaling
 
 ## 1.3.1 · 2026-11-19
 

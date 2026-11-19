@@ -7,7 +7,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- 读写玩家分享的手序文件（外部输入，要严格校验）。和游戏自带的同一版本：Mod 编译时用游戏目录里那份，这里只为单独编译和测试 -->
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.2" />
+    <!-- 读写玩家分享的手序文件（外部输入，要严格校验）。和游戏自带的同一版本（版本号见 Directory.Build.props）：
+         Mod 编译时用游戏目录里那份，这里只为单独编译和测试 -->
+    <PackageReference Include="Newtonsoft.Json" Version="$(NewtonsoftJsonVersion)" />
   </ItemGroup>
 </Project>

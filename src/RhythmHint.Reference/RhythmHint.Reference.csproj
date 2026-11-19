@@ -6,7 +6,8 @@
     <RootNamespace>RhythmHint.Reference</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <!-- 和 Core 同一版本（Directory.Build.props）：测试项目同时引用两个项目，版本不同时会统一取高的 -->
+    <PackageReference Include="Newtonsoft.Json" Version="$(NewtonsoftJsonVersion)" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\RhythmHint.Core\RhythmHint.Core.csproj" />

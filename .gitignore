@@ -14,6 +14,11 @@ local.props
 *.adofai
 *.mp3
 *.ogg
+# WAV 也有本机生成的：官方关卡的音乐导出（AudioDump）、编辑器的打击声缓存 hitsound-*.wav
+*.wav
+*.flac
+*.m4a
+*.opus
 Charts/
 
 # 测试结果

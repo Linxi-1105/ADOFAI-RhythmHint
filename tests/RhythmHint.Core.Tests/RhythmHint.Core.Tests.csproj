@@ -9,6 +9,9 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit.v3" Version="3.2.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <!-- 测试也在游戏自带的那一版 Newtonsoft 上跑（版本见 Directory.Build.props）：Microsoft.NET.Test.Sdk 间接要 13.0.3，
+         不直接引用的话 NuGet 统一取高的，锁兼容的测试就不是在游戏的解析器上跑的。降级只影响测试运行器，NU1605 有意忽略 -->
+    <PackageReference Include="Newtonsoft.Json" Version="$(NewtonsoftJsonVersion)" NoWarn="NU1605" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\RhythmHint.Core\RhythmHint.Core.csproj" />

@@ -11,6 +11,14 @@ trim_trailing_whitespace = true
 [*.{json,yml,yaml,props,csproj,slnx}]
 indent_size = 2
 
+# 手序编辑器、排键试验台和 tools/planner-js 的网页代码用 2 空格
+[*.{js,cjs,css,html}]
+indent_size = 2
+
+# 例外：离线读谱（adofai-import.js）和它的几份测试是 4 空格
+[tools/planner-js/adofai-*.{js,cjs}]
+indent_size = 4
+
 [*.cs]
 dotnet_sort_system_directives_first = true
 csharp_style_namespace_declarations = file_scoped:warning

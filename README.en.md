@@ -51,8 +51,8 @@ Outside a level, a demo that follows the menu music plays next to the settings w
 | Fingering | Fingering style, dominant hand, chord hand, rolls and thresholds |
 | Custom fingering | Make your own fingering for this song, open the fingering folder |
 | Calibration | Visual offset: adjust here if notes and music don't line up |
-| General | Interface language, the hotkey that opens the settings, status |
-| About | Version, player group, repository |
+| General | Interface language, the hotkey that opens the settings, automatic updates, status |
+| About | Version and update progress (downloading, retry if it fails), author, player group, repository |
 
 A short guide walks you through it the first time; click the question mark in the top right to see it again. The window can be dragged and saves when closed, and clicking around in it never triggers the game.
 

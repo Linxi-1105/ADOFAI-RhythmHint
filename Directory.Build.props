@@ -7,5 +7,9 @@
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Deterministic>true</Deterministic>
+    <!-- Newtonsoft.Json 的版本只写在这里：和游戏 Managed 里自带的同一版（13.0.2），手序文件的读法才和游戏里一样。
+         Core、Reference 都引用它（两个项目版本不同时 NuGet 统一取高的）；测试项目还会经 Microsoft.NET.Test.Sdk 间接要 13.0.3，
+         要让测试也在这一版上跑，测试项目得直接引用它。Mod 不用 NuGet 包，编译时直接引用游戏里那份 -->
+    <NewtonsoftJsonVersion>13.0.2</NewtonsoftJsonVersion>
   </PropertyGroup>
 </Project>

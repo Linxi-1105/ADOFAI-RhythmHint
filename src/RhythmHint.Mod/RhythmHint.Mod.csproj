@@ -36,7 +36,7 @@
   <ItemGroup>
     <!-- 手序编辑器（网页，src/RhythmHint.Editor）随 Mod 装进 Mods/RhythmHint/Editor：游戏里一键打开。
          session.js、session-audio* 是游戏运行时写的，测试样例在 tests 里，都不打包 -->
-    <EditorFile Include="..\RhythmHint.Editor\*.html;..\RhythmHint.Editor\*.css;..\RhythmHint.Editor\*.js;..\RhythmHint.Editor\icon.ico" Exclude="..\RhythmHint.Editor\session.js" />
+    <EditorFile Include="..\RhythmHint.Editor\*.html;..\RhythmHint.Editor\*.css;..\RhythmHint.Editor\*.js;..\RhythmHint.Editor\icon.ico" Exclude="..\RhythmHint.Editor\session.js;..\RhythmHint.Editor\session-audio*" />
   </ItemGroup>
 
   <ItemGroup>
@@ -98,8 +98,8 @@
        游戏里的 UMM 读它提示新版本，UMM 安装器 Mods 页右键可按其中的 DownloadUrl 一键更新。
        还生成 Mod 自动更新用的 artifacts\update.json（版本、地址、压缩包的 SHA-256，见 Core 的 ModUpdate），也一起上传；
        再复制一份 CHANGELOG.md 到 artifacts\（2026-11-19 用户：夸克网盘里也放一份更新记录）。
-       带后缀的测试包（-p:VersionSuffix=dev）只打压缩包、不写这些，免得覆盖发版用的清单 -->
-  <Target Name="PackageForUmm" AfterTargets="WriteInfoJson" Condition="'$(UmmPackage)' == 'true'">
+       带后缀的测试包（-p:VersionSuffix=dev）只打压缩包、不写这些，免得覆盖发版用的清单。正式包先过 CheckReleasePackage -->
+  <Target Name="PackageForUmm" AfterTargets="WriteInfoJson" DependsOnTargets="CheckReleasePackage" Condition="'$(UmmPackage)' == 'true'">
     <Error Condition="'$(ModRepository)' != '$(DefaultModRepository)'"
            Text="打发布包时不能改 ModRepository（现在是 $(ModRepository)），否则玩家收不到更新提示。" />
     <PropertyGroup>
@@ -141,6 +141,55 @@
     <Copy SourceFiles="$(MSBuildProjectDirectory)\..\..\CHANGELOG.md" DestinationFolder="$(ArtifactsDir)" Condition="'$(ReleasePackage)' == 'true'" />
     <Message Importance="high" Condition="'$(ReleasePackage)' == 'true'" Text="已打包 $(PackageZip)；Repository.json、update.json、CHANGELOG.md 在 $(ArtifactsDir)" />
     <Message Importance="high" Condition="'$(ReleasePackage)' != 'true'" Text="已打包测试包 $(PackageZip)（不写更新清单）" />
+  </Target>
+
+  <!-- 正式包（不带后缀、打进 artifacts）打包前检查，免得传错包。2026-11-19 评审：版本号还是已发布的 1.3.1 时打包，
+       静默生成了同版本号、内容不同的 RhythmHint-1.3.1.zip 和新的 update.json；传上去的话装着 1.3.1 的玩家不会更新，SHA-256 也和线上的包对不上。
+       1. 两份更新记录都要有本版本一节（## 版本 · 日期）
+       2. 两份更新记录的「未发布」「Unreleased」下不能还有条目：有就是还没分到版本号的改动
+       3. 本地有这个版本的 git 标签（发过 Release 并拉取过）时，src 和 Directory.Build.props（打进包里的东西）要和标签时一模一样
+          （没提交的改动、没加进 git 的新文件也算），才允许重打；标签要等 GitHub 上建 Release 才有，新版本第一次打包不受影响。
+          没有 .git（源码压缩包）时跳过这一条
+       带后缀的测试包、-p:PackageOutDir 打到别处的包（试自动更新用的假新版）不检查 -->
+  <Target Name="CheckReleasePackage" Condition="'$(VersionSuffix)' == '' and '$(PackageOutDir)' == ''">
+    <PropertyGroup>
+      <ReleaseRepoRoot>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '..', '..'))</ReleaseRepoRoot>
+      <ReleaseNotesZh>$([System.IO.File]::ReadAllText('$(ReleaseRepoRoot)CHANGELOG.md'))</ReleaseNotesZh>
+      <ReleaseNotesEn>$([System.IO.File]::ReadAllText('$(ReleaseRepoRoot)CHANGELOG.en.md'))</ReleaseNotesEn>
+      <ReleaseHeading>(?m)^## $(Version.Replace('.', '\.')) · \d{4}-\d{2}-\d{2}[ \t]*(?:\r?\n|\z)</ReleaseHeading>
+      <!-- 未发布一节里（到下一个 ## 标题为止）有列表项 -->
+      <UnreleasedItems>(?m)^## (?:未发布|Unreleased)[ \t]*\r?\n(?:(?!## ).*\r?\n)*?[ \t]*[-*+][ \t]+\S</UnreleasedItems>
+      <ReleaseNotesOk>$([System.Text.RegularExpressions.Regex]::IsMatch($(ReleaseNotesZh), $(ReleaseHeading)))</ReleaseNotesOk>
+      <ReleaseNotesOk Condition="'$(ReleaseNotesOk)' == 'True'">$([System.Text.RegularExpressions.Regex]::IsMatch($(ReleaseNotesEn), $(ReleaseHeading)))</ReleaseNotesOk>
+      <UnreleasedLeft>$([System.Text.RegularExpressions.Regex]::IsMatch($(ReleaseNotesZh), $(UnreleasedItems)))</UnreleasedLeft>
+      <UnreleasedLeft Condition="'$(UnreleasedLeft)' != 'True'">$([System.Text.RegularExpressions.Regex]::IsMatch($(ReleaseNotesEn), $(UnreleasedItems)))</UnreleasedLeft>
+    </PropertyGroup>
+    <Error Condition="'$(ReleaseNotesOk)' != 'True'"
+           Text="CHANGELOG.md 和 CHANGELOG.en.md 都要有 $(Version) 这一节（标题写成 ## $(Version) · 日期）才能打正式包。发版时把未发布、Unreleased 改成这个标题；只是测试就加 -p:VersionSuffix=dev。" />
+    <Error Condition="'$(UnreleasedLeft)' == 'True'"
+           Text="更新记录的未发布、Unreleased 下还有条目，这些改动还没有版本号，打出来的包会顶着已有的 $(Version)。先改 Directory.Build.props 的 VersionPrefix，把两份更新记录的未发布改成 ## 新版本 · 日期，再打正式包；只是测试就加 -p:VersionSuffix=dev。" />
+
+    <Exec Command="git tag --list v$(Version)" WorkingDirectory="$(ReleaseRepoRoot)" Condition="Exists('$(ReleaseRepoRoot).git')"
+          ConsoleToMSBuild="true" EchoOff="true" IgnoreExitCode="true" StandardOutputImportance="low" StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="ReleaseTag" />
+      <Output TaskParameter="ExitCode" PropertyName="ReleaseTagExit" />
+    </Exec>
+    <PropertyGroup>
+      <ReleaseTagged Condition="'$(ReleaseTagExit)' == '0' and '$(ReleaseTag)' == 'v$(Version)'">true</ReleaseTagged>
+    </PropertyGroup>
+    <!-- 退出码 0 = 和标签时一样，1 = 有不同（已提交的、没提交的都算） -->
+    <Exec Command="git diff --quiet v$(Version) -- src Directory.Build.props" WorkingDirectory="$(ReleaseRepoRoot)" Condition="'$(ReleaseTagged)' == 'true'"
+          EchoOff="true" IgnoreExitCode="true">
+      <Output TaskParameter="ExitCode" PropertyName="ReleaseChanged" />
+    </Exec>
+    <Exec Command="git ls-files --others --exclude-standard -- src" WorkingDirectory="$(ReleaseRepoRoot)" Condition="'$(ReleaseTagged)' == 'true'"
+          ConsoleToMSBuild="true" EchoOff="true" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="ReleaseUntracked" />
+    </Exec>
+    <Error Condition="'$(ReleaseTagged)' == 'true' and ('$(ReleaseChanged)' != '0' or '$(ReleaseUntracked)' != '')"
+           Text="$(Version) 已经发布过（有 git 标签 v$(Version)），现在的 src 或 Directory.Build.props 和标签时不一样：同一个版本号装着不同内容，已装 $(Version) 的玩家收不到更新，update.json 的 SHA-256 也和线上的包对不上。先改 Directory.Build.props 的 VersionPrefix 和两份更新记录；确实要重打已发布的版本，要让 src 和标签 v$(Version) 时完全一样。" />
+    <Message Importance="high" Condition="'$(ReleaseTagged)' == 'true'"
+             Text="注意：$(Version) 已经发布过，这次是在标签 v$(Version) 上重打。压缩包的 SHA-256 通常和已发布的不同，压缩包和 update.json 要么一起重新上传，要么都不传。" />
   </Target>
 
   <!-- dotnet build -p:Deploy=true：编译后复制到游戏的 Mods 目录（不碰已有的 Settings.xml、手序文件夹和编辑器运行时写的 session 文件） -->

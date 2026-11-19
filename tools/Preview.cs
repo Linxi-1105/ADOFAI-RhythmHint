@@ -70,7 +70,7 @@ try
 catch (Exception ex) when (ex is Newtonsoft.Json.JsonReaderException or InvalidDataException or IOException)
 {
     Console.Error.WriteLine($"读不了关卡文件 {files[0]}：{ex.Message}");
-    Console.Error.WriteLine("离线读谱只是近似：要用游戏里的实际砖块，在游戏中按 F8 → 排键 → 编辑本关手序。");
+    Console.Error.WriteLine("离线读谱只是近似：要用游戏里的实际砖块，在游戏中按 F8 → 专属手序 → 编辑本关手序。");
     return 1;
 }
 
