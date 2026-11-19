@@ -17,6 +17,9 @@
          在游戏里试提示时可用 -p:ModRepository=file:///D:/…/Repository.json 指向本地假清单；打发布包时不许改 -->
     <DefaultModRepository>$(RepoUrl)/releases/latest/download/Repository.json</DefaultModRepository>
     <ModRepository Condition="'$(ModRepository)' == ''">$(DefaultModRepository)</ModRepository>
+    <!-- 装进游戏的都是测试版（用户要求）：版本号带 -dev，在 UMM 列表和「关于」里一眼和发布版分开。
+         UMM 解析版本时去掉非数字，1.2.1-dev 当作 1.2.1，检查更新不受影响。要装不带后缀的加 -p:VersionSuffix= -->
+    <VersionSuffix Condition="'$(Deploy)' == 'true' and '$(VersionSuffix)' == ''">dev</VersionSuffix>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
