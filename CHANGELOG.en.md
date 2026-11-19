@@ -23,6 +23,7 @@ What changed in each version, newest first.
 - Fingering editor: it warns when lane keys clash with shortcuts, game keys such as the numpad and Shift work in it, and Ctrl+S in a text box saves the fingering instead of opening the browser's save page dialog
 - Fingering editor: clicking levels quickly in History opens the last one clicked, tabs editing the same level no longer overwrite each other's progress, and it tells you when browser storage is full and keeps progress for the latest 30 levels
 - Fingering editor: a loop whose start and end are too close is no longer turned on (it used to stall in silence), hit sounds at the end of a loop are no longer dropped with visual calibration set, the play button resets when the song ends, long songs no longer freeze the view briefly after loading, long charts play more smoothly, and the view stays sharp after moving to a display with different scaling
+- Custom fingerings follow chart updates more closely: changing, adding or removing a tile inside a stream no longer shifts the run before it by one key, and unchanged charts are recognized faster when entering a level
 
 ## 1.3.1 · 2026-11-19
 

@@ -86,6 +86,25 @@ internal sealed class Rhythm
         return Math.Abs(gap - g) <= Math.Max(GapTolerance, GapRatio * Math.Max(gap, g));
     }
 
+    /// <summary>两串砖一样多，并且第 i 块和第 i 块都算同一块（谱面的节奏没改过）。遇到第一块不一样的就停。</summary>
+    public static bool SameOneByOne(Rhythm a, Rhythm b)
+    {
+        if (a.Count != b.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < a.Count; i++)
+        {
+            if (!Same(a, i, b, i))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     /// <summary>
     /// 本关最多能有多少块砖对上 <paramref name="file"/>（上限，只用来跳过不可能对上的文件，不改结果）。
     /// 对上的砖都在两边连续至少 <paramref name="minRun"/> 块的整段里；这样一段里的每块砖都在段内某个连续 4 块的片段里，

@@ -102,7 +102,7 @@ public sealed record FingeringMerge(string Dropped, string Kept, bool SameConten
 /// <para>
 /// 比的是每块砖「和前一块砖的间隔、转角、有没有长按」，不看绝对时间和砖号：改偏移不影响，
 /// 某块砖改了角度只影响那一块，中间加删的砖只影响那几块。对齐用最长公共子序列（限制在对角线附近的一条带里算，
-/// 四千块砖约几百万次比较）。
+/// 四千块砖约几百万次比较；一样长时选断开最少的，见 Align），节奏逐块一样时直接一一对应。
 /// </para>
 /// </summary>
 public static class FingeringMatcher
@@ -131,6 +131,18 @@ public static class FingeringMatcher
     /// <summary>带里最多算这么多格，再多就把带收窄（极长的关卡）。</summary>
     private const long MaxCells = 30_000_000;
 
+    /// <summary>对齐打分里「走不到」：比任何走得到的分数都小很多，减几次 1 也不会和走得到的混。</summary>
+    private const long Unreachable = long.MinValue / 4;
+
+    /// <summary>对上一块砖加的分：放在高 32 位，段数（最多几十万）在低位，先比砖数再比段数。</summary>
+    private const long Matched = 1L << 32;
+
+    /// <summary>对齐时每格记的一个字节：低 2 位是「这一步对不上」怎么走（斜着走、跳过本关的砖、跳过文件里的砖；0 是走不到）。</summary>
+    private const int StepDiag = 1, StepUp = 2, StepLeft = 3, StepMask = 3;
+
+    /// <summary>这一格的 T（接着对上用）、W（接着对不上用）取的是「最后一步对上」那个状态。</summary>
+    private const int TFromM = 4, WFromM = 8;
+
     /// <summary>当前关卡每块砖对应文件里的第几块砖，对不上为 -1。</summary>
     public static int[] Align(IReadOnlyList<TileHit> current, IReadOnlyList<TileHit> file) => Align(new Rhythm(current), new Rhythm(file));
 
@@ -140,6 +152,21 @@ public static class FingeringMatcher
     /// </summary>
     public static int MatchBound(IReadOnlyList<TileHit> current, IReadOnlyList<TileHit> file) => Rhythm.Bound(new Rhythm(current), new Rhythm(file), MinRun);
 
+    /// <summary>
+    /// 带状最长公共子序列，一样长时选「断开」次数最少的那条（2026-11-19 评审 A 高1）。
+    /// <para>
+    /// 一串一样的砖（均匀的连打）里，最长公共子序列有很多条一样长的答案：改了一块砖的转角，「前面整段对到文件的下一块、
+    /// 在改动处和开头各跳过一块」和「改动的那块原地对不上」一样长。原来平手时先选跳过，整段的键就反了相位。
+    /// 所以每条路线再数一数有几段对不上（连在一起的跳过、对不上算一段，开头、结尾的也算）：先比对上的砖数，一样多时段数少的赢。
+    /// 改一块砖是原地一段，加删砖时错开的地方贴着改动处（离开改动处再错开要多一段）。最长公共子序列的长度和原来完全一样，
+    /// 只是断开少了、连续的整段更长（工坊和 TUF 谱上随机改、加、删一块砖实测，<see cref="KeepLongRuns"/> 之后对上的砖没有一次变少）。
+    /// 加删的砖前后节奏完全接得上时（比如一串一样的砖里删一块、后面整体前移），只看节奏分不出动的是哪一块，错开的位置还是只能定在一串的一头。
+    /// </para>
+    /// <para>
+    /// 每格记两个状态：最后一步是对上（M），还是对不上（X：斜着走但不算对上、跳过本关的砖、跳过文件里的砖）。
+    /// 分数 = 对上的砖数 × 2^32 − 段数，比大小就是先比砖数再比段数。平手时先选留在对角线上（斜着走），再是跳过本关的砖、跳过文件里的砖。
+    /// </para>
+    /// </summary>
     private static int[] Align(Rhythm current, Rhythm file)
     {
         int n = current.Count, m = file.Count;
@@ -161,19 +188,21 @@ public static class FingeringMatcher
         }
 
         var width = (2 * band) + 1;
-        var dir = new byte[(long)(n + 1) * width]; // 1 对上，2 跳过当前关卡的砖，3 跳过文件里的砖
-        var prev = new int[width];
-        var cur = new int[width];
-        const int Unreachable = int.MinValue / 2;
+
+        // 每格两个状态的分数：M = 最后一步对上，X = 最后一步对不上。下一步只用到两个组合，所以每格只留这两个：
+        // T = max(M, X)（下一步对上，从哪个状态来都一样），W = max(M − 1, X)（下一步对不上：从 M 来是新的一段）。同分都取 M
+        var dir = new byte[(long)(n + 1) * width];
+        long[] prevT = new long[width], prevW = new long[width], curT = new long[width], curW = new long[width];
 
         int Start(int i) => (int)Math.Round((double)i * m / n) - band;
 
-        // 第 0 行：还没用当前关卡的砖，最长公共子序列是 0
+        // 第 0 行：还没用本关的砖。起点算「刚对上」，开头跳过文件里的砖是一段
         var s0 = Start(0);
         for (var k = 0; k < width; k++)
         {
             var j = s0 + k;
-            prev[k] = j >= 0 && j <= m ? 0 : Unreachable;
+            prevT[k] = j == 0 ? 0 : j > 0 && j <= m ? -1 : Unreachable;
+            prevW[k] = j >= 0 && j <= m ? -1 : Unreachable;
         }
 
         for (var i = 1; i <= n; i++)
@@ -181,7 +210,7 @@ public static class FingeringMatcher
             // 上一行同一列在 prev 里的位置 = k + shift（每一行的带子起点随对角线挪动）
             int s = Start(i), shift = s - Start(i - 1);
             var row = (long)i * width;
-            var left = Unreachable;
+            var leftW = Unreachable;
             bool hold = current.Hold[i - 1], first = i == 1;
             double angle = current.Angle[i - 1], gap = current.Gap[i - 1];
             for (var k = 0; k < width; k++)
@@ -189,43 +218,55 @@ public static class FingeringMatcher
                 var j = s + k;
                 if (j < 0 || j > m)
                 {
-                    cur[k] = left = Unreachable;
-                    continue;
-                }
-
-                if (j == 0)
-                {
-                    cur[k] = left = 0;
-                    dir[row + k] = 2;
+                    curT[k] = curW[k] = leftW = Unreachable;
                     continue;
                 }
 
                 var u = k + shift;
-                var up = u >= 0 && u < width ? prev[u] : Unreachable;
-                var diag = u >= 1 && u <= width ? prev[u - 1] : Unreachable;
-                var best = up;
-                byte d = 2;
-                if (diag != Unreachable && diag + 1 >= best && Rhythm.Same(hold, angle, gap, first, file, j - 1))
+                var upW = u >= 0 && u < width ? prevW[u] : Unreachable;
+                long diagT = Unreachable, diagW = Unreachable;
+                if (u >= 1 && u <= width)
                 {
-                    best = diag + 1;
-                    d = 1;
+                    diagT = prevT[u - 1];
+                    diagW = prevW[u - 1];
                 }
 
-                if (left > best)
+                // M：这一步对上（斜着走、两块算同一块）
+                var scoreM = j > 0 && diagT > Unreachable && Rhythm.Same(hold, angle, gap, first, file, j - 1) ? diagT + Matched : Unreachable;
+
+                // X：这一步对不上，同分时斜着走、跳过本关的砖、跳过文件里的砖依次优先
+                var scoreX = diagW;
+                var step = StepDiag;
+                if (upW > scoreX)
                 {
-                    best = left;
-                    d = 3;
+                    scoreX = upW;
+                    step = StepUp;
                 }
 
-                cur[k] = left = best;
-                dir[row + k] = best == Unreachable ? (byte)0 : d;
+                if (leftW > scoreX)
+                {
+                    scoreX = leftW;
+                    step = StepLeft;
+                }
+
+                if (scoreX == Unreachable)
+                {
+                    step = 0;
+                }
+
+                bool tFromM = scoreM >= scoreX, wFromM = scoreM - 1 >= scoreX;
+                curT[k] = tFromM ? scoreM : scoreX;
+                curW[k] = leftW = wFromM ? scoreM - 1 : scoreX;
+                dir[row + k] = (byte)(step | (tFromM ? TFromM : 0) | (wFromM ? WFromM : 0));
             }
 
-            (prev, cur) = (cur, prev);
+            (prevT, curT) = (curT, prevT);
+            (prevW, curW) = (curW, prevW);
         }
 
-        // 从右下角往回走，记下对上的砖
+        // 从右下角往回走，记下对上的砖。到每一格时，后一步用的是这一格的 T 还是 W 决定这一格在哪个状态
         int x = n, y = m;
+        var useT = true;
         while (x > 0 && y > 0)
         {
             var k = y - Start(x);
@@ -234,25 +275,62 @@ public static class FingeringMatcher
                 break;
             }
 
-            switch (dir[((long)x * width) + k])
+            var d = dir[((long)x * width) + k];
+            if ((d & (useT ? TFromM : WFromM)) != 0)
             {
-                case 1:
-                    map[x - 1] = y - 1;
+                map[x - 1] = y - 1;
+                x--;
+                y--;
+                useT = true;
+                continue;
+            }
+
+            switch (d & StepMask)
+            {
+                case StepDiag:
                     x--;
                     y--;
                     break;
-                case 2:
+                case StepUp:
                     x--;
                     break;
-                case 3:
+                case StepLeft:
                     y--;
                     break;
                 default:
                     return map;
             }
+
+            useT = false;
         }
 
         return map;
+    }
+
+    /// <summary>
+    /// 本关每块砖用文件里的第几块砖（对不上为 -1），只留两边都连续 <see cref="MinRun"/> 块以上的整段。
+    /// <para>
+    /// 两边一样多、第 i 块和第 i 块都算同一块时直接一一对应，不做带状对齐（2026-11-19 评审 A：3.5 万块的谱指纹一样也要算 140 毫秒，
+    /// 同一首歌好几份手序时进关卡要等好几倍）。结果和对齐完全一样：这时最长公共子序列是全部 n 块，长度 n 的公共子序列只有一一对应这一条，
+    /// 对角线又在带的正中间，<see cref="Align(Rhythm, Rhythm)"/> 算出来一定也是它。谱面指纹一样的都走这里：指纹把间隔取整到毫秒、
+    /// 转角取整到度，取整后一样 ⇒ 间隔差不超过 1 毫秒、转角差不超过 1°、长按一样，都在 <see cref="Rhythm.Same(Rhythm, int, Rhythm, int)"/>
+    /// 的容差里。这里直接逐块比、不看指纹，结果不依赖指纹的取整规则。
+    /// </para>
+    /// </summary>
+    private static int[] Map(Rhythm current, Rhythm file)
+    {
+        if (!Rhythm.SameOneByOne(current, file))
+        {
+            return KeepLongRuns(Align(current, file));
+        }
+
+        var map = new int[current.Count];
+        for (var i = 0; i < map.Length; i++)
+        {
+            map[i] = i;
+        }
+
+        return KeepLongRuns(map);
     }
 
     /// <summary>
@@ -289,7 +367,7 @@ public static class FingeringMatcher
 
         if (file.Keys == Lanes.Count)
         {
-            var map = KeepLongRuns(Align(rhythm, fileRhythm ?? new Rhythm(file.Hits)));
+            var map = Map(rhythm, fileRhythm ?? new Rhythm(file.Hits));
             var toCur = new int[file.Hits.Count];
             for (var j = 0; j < toCur.Length; j++)
             {
@@ -488,6 +566,7 @@ public static class FingeringMatcher
     /// <summary>
     /// 这份文件有没有可能对上本关至少 <see cref="MinCandidate"/>：砖数差太多的、节奏片段对不上的（<see cref="MatchBound"/>）不可能。
     /// 只是跳过注定对不上的，不改结果。有可能时返回文件的节奏（对齐接着用），不可能为 null。
+    /// 节奏逐块一样的（指纹一样的几份手序）不用估：每个片段都对得上，上限就是全部砖（20 万块的谱估一次要 100 毫秒）。
     /// </summary>
     private static Rhythm? CouldMatch(CustomFingering file, Rhythm rhythm)
     {
@@ -498,7 +577,7 @@ public static class FingeringMatcher
         }
 
         var fileRhythm = new Rhythm(file.Hits);
-        return Rhythm.Bound(rhythm, fileRhythm, MinRun) >= MinCandidate * n ? fileRhythm : null;
+        return Rhythm.SameOneByOne(rhythm, fileRhythm) || Rhythm.Bound(rhythm, fileRhythm, MinRun) >= MinCandidate * n ? fileRhythm : null;
     }
 
     /// <summary>键数不同的文件像不像这一关：谱面指纹一样，或者按节奏对齐能对上 <see cref="MinCandidate"/> 以上。</summary>
@@ -510,7 +589,7 @@ public static class FingeringMatcher
         }
 
         var fileRhythm = CouldMatch(file, rhythm);
-        return fileRhythm != null && KeepLongRuns(Align(rhythm, fileRhythm)).Count(i => i >= 0) >= MinCandidate * rhythm.Count;
+        return fileRhythm != null && Map(rhythm, fileRhythm).Count(i => i >= 0) >= MinCandidate * rhythm.Count;
     }
 
     /// <summary>
