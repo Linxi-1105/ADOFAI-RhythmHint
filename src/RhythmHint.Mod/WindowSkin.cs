@@ -523,7 +523,12 @@ internal static class WindowSkin
         }
     }
 
-    /// <summary>转一个角度画图标（折叠箭头展开时翻过来）。</summary>
+    /// <summary>
+    /// 转一个角度画图标（折叠箭头展开时翻过来）。
+    /// 不能直接调 RotateAroundPivot：它在没缩放的坐标里找圆心，却把旋转套在窗口的缩放（GUI.matrix）外面，
+    /// 窗口按屏幕高度放大后圆心就错了，转 180° 时箭头飞到窗口左上角（2026-11-19 用户截图，1600 高的屏幕放大约 1.48 倍）。
+    /// 这里先在单位矩阵下让它算出没缩放坐标里的旋转，再乘到窗口矩阵里面：先转、后缩放，圆心就是图标中心。
+    /// </summary>
     public static void Icon(Vector2 center, float size, string name, Color c, float degrees)
     {
         if (!Repaint)
@@ -532,7 +537,9 @@ internal static class WindowSkin
         }
 
         var saved = GUI.matrix;
+        GUI.matrix = Matrix4x4.identity;
         GUIUtility.RotateAroundPivot(degrees, center);
+        GUI.matrix = saved * GUI.matrix;
         Icon(center, size, name, c);
         GUI.matrix = saved;
     }

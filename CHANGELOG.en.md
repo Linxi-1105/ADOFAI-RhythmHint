@@ -6,6 +6,7 @@ What changed in each version, newest first.
 
 ## Unreleased
 
+- Fixed: on screens above 1080p, expanding Advanced in the settings window moved its arrow to the top-left corner of the window
 - Fixed: one broken fingering file in the folder (for example a field of the wrong type or a number that is too large) disabled the whole mod, again on every launch. Now only that file is skipped and listed on the Custom fingering page
 - Fixed: the mod could not read a fingering whose author or comment happened to be a date and time (for example 2026-11-18T00:00:00Z)
 - Custom fingerings are backed up to Documents\RhythmHint\FingeringsBackup automatically. Uninstalling or reverting the mod with UMM deletes the whole mod folder; the fingerings are restored from the backup on the next launch
