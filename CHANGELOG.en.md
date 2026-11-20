@@ -4,7 +4,7 @@
 
 What changed in each version, newest first.
 
-## Unreleased
+## 1.3.4 · 2026-11-20
 
 - Fixed: when two hold tiles were next to each other (for example the workshop level DoG Nonstop Mix), the hints merged them into one long hold, but the game needs a new press on the second one, so following the hints got you killed. Each hold tile now has its own hint, held until the next tile. On levels with such holds, custom fingerings made earlier fall back to automatic fingering around those holds
 - Back-to-back holds now alternate hands: while one hold is still down, the next one goes to the other hand, and you let go of the first after pressing, instead of releasing and re-pressing the same key on the exact beat
