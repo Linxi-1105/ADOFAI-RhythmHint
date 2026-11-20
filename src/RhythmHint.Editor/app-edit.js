@@ -297,6 +297,9 @@
 
   // ---------- 画布交互 ----------
   let drag = null, pan = null, spaceDown = false, spacePanned = false;
+  // 框选出来的那份选择（同一个 Set）：拖其中的多押时整个挪，不再只挪按住的键（2026-11-20 用户截图）。
+  // 点音符、按 N、换关卡都会换一个新的 Set，自然就不是它了；直接按住没选中的多押拖，仍然只挪那个键
+  let boxPicked = null;
   const pos = e => { const r = canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
 
   canvas.addEventListener('mousedown', e => {
@@ -319,7 +322,7 @@
         return;
       }
       if (!state.selection.has(id)) { state.selection = new Set([id]); renderInspector(); }
-      drag = { note: hit.note, lane: hit.lane, x, moved: false, change: undefined };
+      drag = { note: hit.note, lane: hit.lane, x, moved: false, change: undefined, whole: state.selection === boxPicked };
     } else if (hit.kind === 'ruler' || hit.kind === 'empty' || hit.kind === 'outside') {
       // 拖动就框选。从左边时间尺起手也一样，框伸进中间谱面就选中框住的音符；在时间尺上单击不拖仍跳到那里
       // （2026-11-18 用户：从时间尺往谱面里框选会变成拖着谱面滚动）。起点按谱面时间记，靠边自动滚动时框跟着谱面走
@@ -338,8 +341,8 @@
       const lane = Math.max(0, Math.min(state.doc.keys - 1, view.laneAt(x)));
       const notes = selectedNotes();
       let change;
-      if (notes.length === 1 && notes[0].lanes.length > 1) change = M.ops.moveKey(state.doc, notes[0], drag.lane, lane);
-      else if (notes.length === 1) change = M.ops.toLane(state.doc, notes, lane);
+      if (notes.length === 1 && notes[0].lanes.length > 1 && !drag.whole) change = M.ops.moveKey(state.doc, notes[0], drag.lane, lane);
+      else if (notes.length === 1 && notes[0].lanes.length === 1) change = M.ops.toLane(state.doc, notes, lane);
       else change = M.ops.shift(state.doc, notes, lane - drag.lane);
       drag.change = change;
       state.preview = change;
@@ -369,6 +372,7 @@
       if (!state.box.add) state.selection = new Set();
       ids.forEach(id => state.selection.add(id));
       if (tiny && !state.box.add) state.selection = new Set();
+      boxPicked = state.selection;
       state.box = null;
       renderInspector();
     }

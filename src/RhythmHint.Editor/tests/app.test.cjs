@@ -298,3 +298,35 @@ test('files over 20 MB are not opened, and read errors are shown', async () => {
   await h.wait(10);
   assert.ok(hasToast(h, 'toast.openFailed', 'gone'));
 });
+
+/** 在谱面画布上按下（坐标是画布里的像素），移动、松开在整个窗口上收。 */
+function mouse(h, type, x = 0, y = 0) {
+  const init = { clientX: x, clientY: y, button: 0, shiftKey: false, ctrlKey: false };
+  if (type === 'mousedown') h.el('chart').dispatch('mousedown', init);
+  else h.fire(type, init);
+}
+
+test('a box-selected chord is dragged as a whole, a key of an unselected chord on its own', () => {
+  // 复现（2026-11-20 用户截图）：框选一个双押再拖，只挪了拖住的那个键
+  const h = boot({ session: session() });
+  h.frames(2);
+  const { state, view } = h.ctx.EditorApp;
+  const id = state.doc.notes.find(n => String(lanesOf(n)) === '2,3').id;
+  const lanesNow = () => lanesOf(state.doc.notes[id]);
+  state.time = state.doc.notes[id].time;
+  h.frames(1);
+  const g = view.geom, y = view.yAt(state.time, state), at = lane => g.main.lanesX + (lane + 0.5) * g.lane;
+  const drag = (from, to) => { mouse(h, 'mousedown', at(from), y); mouse(h, 'mousemove', at(to), y); mouse(h, 'mouseup'); };
+
+  // 从谱面右边的空白处往左框到 J 轨道
+  mouse(h, 'mousedown', g.main.x + g.main.w + 4, y - 10);
+  mouse(h, 'mousemove', at(2), y + 10);
+  mouse(h, 'mouseup');
+  assert.deepEqual([...state.selection], [id]);
+  drag(2, 1);
+  assert.deepEqual(lanesNow(), [1, 2], 'the whole chord moves one lane left');
+
+  state.selection = new Set();
+  drag(1, 0);
+  assert.deepEqual(lanesNow(), [0, 2], 'pressing on an unselected chord drags only that key');
+});

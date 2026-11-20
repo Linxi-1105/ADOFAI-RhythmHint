@@ -4,6 +4,10 @@
 
 What changed in each version, newest first.
 
+## Unreleased
+
+- Fixed: in the fingering editor, dragging a chord selected with a box moved only the key under the cursor. Box-selected notes now move together; dragging one key of a chord directly still moves only that key
+
 ## 1.3.3 · 2026-11-20
 
 - When auto-update can't reach GitHub, it downloads through mirror sites in mainland China instead (ghfast.top, gh-proxy.com, ghproxy.net); the download is still checked against its SHA-256. 1.3.2 and earlier only use GitHub, so if GitHub can't be reached, install this version by hand once
