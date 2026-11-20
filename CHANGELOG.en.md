@@ -4,7 +4,7 @@
 
 What changed in each version, newest first.
 
-## Unreleased
+## 1.3.2 · 2026-11-19
 
 - Triples and quads on the taiko bar now show 3 or 4 in the middle, so you can tell them apart with only the taiko bar on; turn it off under F8 → Appearance → Show if you don't need it
 - Fixed: on screens above 1080p, expanding Advanced in the settings window moved its arrow to the top-left corner of the window
