@@ -315,21 +315,43 @@ internal static class WindowSkin
             + $"正文 {_body?.name ?? "默认"}，标题 {_display?.name ?? "默认"}，等宽 {_mono?.name ?? "默认"}）");
     }
 
+    /// <summary>
+    /// 按顺序挑第一个能排字的系统字体，排在它后面的名字一起交给 Unity 当缺字时的备用；都不行返回 null（用默认字体）。
+    /// 建好先试排：Unity 6 的 IMGUI 用 TextCore 排字，要先把字体转成 TextCore 的字体资源，有的系统字体转不出来，
+    /// 这时 Unity 不报错，沿用上一次排字的设置，画出来的是上一段字
+    /// （2026-11-19 玩家截图：等宽字写的版本号、关闭键上的快捷键、快捷键键帽、运行状态全变成了旁边的标题。玩家的 Player.log：等宽字体是 Cascadia Mono，
+    /// 每画一次等宽字 Unity 就打两条找不到字体文件的警告，共 154 万次、日志 312 MB，一次重绘 251 毫秒；开发机的等宽字体是 Consolas，没出过）。
+    /// </summary>
     private static Font? Create(string[] installed, IEnumerable<string> wanted)
     {
         var names = wanted.Where(n => Array.IndexOf(installed, n) >= 0).ToArray();
-        if (names.Length == 0)
+        for (var i = 0; i < names.Length; i++)
         {
-            return null;
+            var font = Font.CreateDynamicFontFromOSFont(names.Skip(i).ToArray(), 16);
+            if (font == null)
+            {
+                Main.Mod.Logger.Warning($"设置窗口：无法创建字体 {names[i]}，换下一个");
+                continue;
+            }
+
+            var (one, ten) = TrialWidths(font);
+            if (one > 0 && ten > one * 3)
+            {
+                return font;
+            }
+
+            Main.Mod.Logger.Warning($"设置窗口：字体 {names[i]} 排不了字（一个字宽 {one:F1}、十个字宽 {ten:F1}，Unity 转不出它的 TextCore 字体资源），换下一个");
+            UnityEngine.Object.Destroy(font);
         }
 
-        var font = Font.CreateDynamicFontFromOSFont(names, 16);
-        if (font == null)
-        {
-            Main.Mod.Logger.Warning($"无法创建字体 {string.Join(", ", names)}，设置窗口使用默认字体");
-        }
+        return null;
+    }
 
-        return font;
+    /// <summary>量一个字和十个字的宽度。能用的字体十个字宽得多；转不出字体资源时两次量到的都是上一次排过的字，一样宽。</summary>
+    private static (float One, float Ten) TrialWidths(Font font)
+    {
+        var style = new GUIStyle { font = font, fontSize = 14, wordWrap = false };
+        return (style.CalcSize(new GUIContent("0")).x, style.CalcSize(new GUIContent("0000000000")).x);
     }
 
     // ---------- 文字 ----------

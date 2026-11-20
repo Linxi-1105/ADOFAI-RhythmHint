@@ -4,6 +4,10 @@
 
 What changed in each version, newest first.
 
+## Unreleased
+
+- Fixed: on computers with fonts such as Cascadia Mono installed, the version number, hotkey keycaps and status in the settings window showed nearby heading text instead, and the window lagged and kept growing the game log (Player.log) while open
+
 ## 1.3.2 · 2026-11-19
 
 - Triples and quads on the taiko bar now show 3 or 4 in the middle, so you can tell them apart with only the taiko bar on; turn it off under F8 → Appearance → Show if you don't need it
