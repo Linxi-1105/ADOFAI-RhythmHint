@@ -4,7 +4,7 @@
 
 What changed in each version, newest first.
 
-## Unreleased
+## 1.3.3 · 2026-11-20
 
 - When auto-update can't reach GitHub, it downloads through mirror sites in mainland China instead (ghfast.top, gh-proxy.com, ghproxy.net); the download is still checked against its SHA-256. 1.3.2 and earlier only use GitHub, so if GitHub can't be reached, install this version by hand once
 - Fixed: on computers with fonts such as Cascadia Mono installed, the version number, hotkey keycaps and status in the settings window showed nearby heading text instead, and the window lagged and kept growing the game log (Player.log) while open
