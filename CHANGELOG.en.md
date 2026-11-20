@@ -8,6 +8,7 @@ What changed in each version, newest first.
 
 - When auto-update can't reach GitHub, it downloads through mirror sites in mainland China instead (ghfast.top, gh-proxy.com, ghproxy.net); the download is still checked against its SHA-256. 1.3.2 and earlier only use GitHub, so if GitHub can't be reached, install this version by hand once
 - Fixed: on computers with fonts such as Cascadia Mono installed, the version number, hotkey keycaps and status in the settings window showed nearby heading text instead, and the window lagged and kept growing the game log (Player.log) while open
+- Fixed: on high-refresh-rate monitors the hints didn't fall smoothly and looked like they weren't running at the monitor's frame rate. The game's song position jumps a little every time it syncs to the audio clock; the hints now advance evenly with real frame time and match the game's song position on average, so judgement is unaffected. The demo on the settings page is smoother too
 
 ## 1.3.2 · 2026-11-19
 

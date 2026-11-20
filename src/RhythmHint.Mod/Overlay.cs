@@ -16,6 +16,7 @@ internal sealed class Overlay : MonoBehaviour
     private const double ExitAfterLastNote = 0.8;
 
     private readonly DisplayClock _clock = new();
+    private readonly SmoothSongClock _smooth = new();
     private readonly PresenceAnimator _presence = new();
     private readonly KeyInput _keys = new();
     private GameViewport _viewport = null!;
@@ -376,8 +377,12 @@ internal sealed class Overlay : MonoBehaviour
         EditorLauncher.RememberHitSound(level); // 存一份这一关的打击声，还没开始时打开编辑器也能用原声
         Frame.Caption = Time.unscaledTime < _captionUntil ? _caption : Message.Empty;
 
+        // 游戏的歌曲进度每次对齐音频时钟都会跳一下，摊平成每帧均匀地走（见 SmoothSongClock）；
         // 失败画面期间定住，不让音符继续流动；重开或回检查点后恢复
-        Frame.Now = _clock.Advance(level.Conductor.songposition_minusi + (settings.VisualOffsetMs / 1000.0), failed);
+        var conductor = level.Conductor;
+        var song = _smooth.Advance(conductor.songposition_minusi, Time.unscaledTimeAsDouble,
+            conductor.song != null ? conductor.song.pitch : 1f, !level.Controller.paused);
+        Frame.Now = _clock.Advance(song + (settings.VisualOffsetMs / 1000.0), failed);
         Frame.Bpm = GameReader.CurrentBpm(level);
         Frame.TrackHits(level.Controller.currentSeqID);
 

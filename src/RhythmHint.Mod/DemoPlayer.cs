@@ -20,6 +20,7 @@ internal sealed class DemoPlayer
     private const double FallbackBpm = 160;
 
     private readonly AudioSource[] _sources;
+    private readonly SmoothSongClock _smooth = new();
     private DemoChart _demo = DemoChart.Build(FallbackBpm);
     private double[] _tileTimes = Array.Empty<double>();
     private int _nextSource;
@@ -58,7 +59,7 @@ internal sealed class DemoPlayer
     /// <param name="sound">是否放嗒声（演示正在滑出时不放）。</param>
     public void Tick(OverlayFrame frame, Settings settings, bool sound)
     {
-        var music = TryMenuMusic(out var songPos, out var bpm);
+        var music = TryMenuMusic(out var songPos, out var bpm, out var pitch);
         if (!_running || music != _followingMusic)
         {
             _running = true;
@@ -71,23 +72,26 @@ internal sealed class DemoPlayer
 
         Rebuild(frame, settings, music ? bpm : FallbackBpm);
 
+        // 菜单音乐的进度和音频时钟都是隔一段才动一下，画面用摊平后的时间（见 SmoothSongClock）
         double songNow;
         if (music)
         {
-            songNow = songPos;
+            songNow = _smooth.Advance(songPos, Time.unscaledTimeAsDouble, pitch, running: true);
         }
         else
         {
-            // 用音频时钟驱动画面，保证画面和嗒声在同一条时间轴上
-            songNow = AudioSettings.dspTime - _startDsp;
+            // 用音频时钟驱动画面，保证画面和嗒声在同一条时间轴上；嗒声按原始的音频时钟排，画面用摊平的
+            var audioNow = AudioSettings.dspTime - _startDsp;
             if (sound && settings.PreviewSound)
             {
-                ScheduleClicks(songNow, settings.PreviewVolume);
+                ScheduleClicks(audioNow, settings.PreviewVolume);
             }
             else
             {
-                SkipClicks(songNow);
+                SkipClicks(audioNow);
             }
+
+            songNow = _smooth.Advance(audioNow, Time.unscaledTimeAsDouble, 1, running: true);
         }
 
         // 永远显示三份演示里的中间一份，前后都有音符，循环无缝；第 0 拍对齐歌曲的第 0 拍
@@ -113,10 +117,11 @@ internal sealed class DemoPlayer
     }
 
     /// <summary>主菜单 / 选关界面正在放音乐时，读游戏的歌曲进度和 BPM。</summary>
-    private static bool TryMenuMusic(out double songPosition, out double bpm)
+    private static bool TryMenuMusic(out double songPosition, out double bpm, out double pitch)
     {
         songPosition = 0;
         bpm = 0;
+        pitch = 1;
         var conductor = ADOBase.conductor;
         // BPM 不是正的有限数（不该发生）时用内置节拍
         if (conductor == null || conductor.song == null || !conductor.song.isPlaying || !(conductor.bpm > 0) || float.IsInfinity(conductor.bpm))
@@ -126,6 +131,7 @@ internal sealed class DemoPlayer
 
         songPosition = conductor.songposition_minusi;
         bpm = conductor.bpm;
+        pitch = conductor.song.pitch;
         return true;
     }
 
