@@ -67,6 +67,63 @@ public class ModUpdateTests : IDisposable
     public void TheManifestSitsNextToUmmsRepositoryFile(string? repository, string? expected) =>
         Assert.Equal(expected, ModUpdate.ManifestUrl(repository));
 
+    // ---------- 国内加速镜像（2026-11-19 玩家日志：连不上 GitHub，自动更新失败；用户选了加速镜像站） ----------
+
+    private static readonly string[] Mirrors = { "https://ghfast.top/", "https://gh-proxy.com/" };
+
+    [Fact]
+    public void AGitHubAddressIsTriedDirectlyFirstThenThroughEachMirror()
+    {
+        const string url = "https://github.com/x/y/releases/latest/download/update.json";
+        Assert.Equal(
+            new[] { url, "https://ghfast.top/" + url, "https://gh-proxy.com/" + url },
+            ModUpdate.Sources(url, Mirrors));
+    }
+
+    [Theory]
+    [InlineData("file:///D:/test/update.json")] // 本地试的假清单
+    [InlineData("https://example.com/update.json")] // 镜像站只转 GitHub 的地址
+    public void OtherAddressesAreOnlyTriedDirectly(string url) =>
+        Assert.Equal(new[] { url }, ModUpdate.Sources(url, Mirrors));
+
+    [Fact]
+    public void ReadsTheMirrorListFromTheBuildSetting() =>
+        Assert.Equal(
+            new[] { "https://ghfast.top/", "https://gh-proxy.com/", "https://ghproxy.net/" },
+            ModUpdate.ParseMirrors(" https://ghfast.top/ ; https://gh-proxy.com;;https://ghproxy.net/;https://ghfast.top/"));
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("http://plain.example/")] // 只认 https
+    [InlineData("ghfast.top")] // 不是完整地址
+    [InlineData("https://ghfast.top/?a=1")] // 带查询串拼不出地址
+    public void IgnoresMirrorsThatCannotBeUsed(string? setting) => Assert.Empty(ModUpdate.ParseMirrors(setting));
+
+    [Fact]
+    public void PicksTheNewestManifestBecauseAMirrorMayServeAnOldCachedOne()
+    {
+        var manifests = new[]
+        {
+            null, // 直连连不上
+            UpdateManifest.Parse(UpdateManifest.Write("1.3.2", "https://github.com/x/y/a.zip", Sha)),
+            UpdateManifest.Parse(UpdateManifest.Write("1.3.3", "https://github.com/x/y/b.zip", Sha)),
+            UpdateManifest.Parse(UpdateManifest.Write("1.3.3", "https://github.com/x/y/c.zip", Sha)),
+        };
+        Assert.Equal(2, ModUpdate.Newest(manifests)); // 一样新时取靠前的来源
+    }
+
+    [Fact]
+    public void NoManifestMeansNoSource() => Assert.Equal(-1, ModUpdate.Newest(new UpdateManifest?[] { null, null }));
+
+    [Fact]
+    public void TheSourceThatGaveTheManifestIsTriedFirstForThePackage() =>
+        Assert.Equal(new[] { "c", "a", "b", "d" }, ModUpdate.FirstThen(new[] { "a", "b", "c", "d" }, 2));
+
+    [Fact]
+    public void AnUnknownFirstSourceKeepsTheOrder() =>
+        Assert.Equal(new[] { "a", "b" }, ModUpdate.FirstThen(new[] { "a", "b" }, 5));
+
     [Fact]
     public void HashesFiles()
     {

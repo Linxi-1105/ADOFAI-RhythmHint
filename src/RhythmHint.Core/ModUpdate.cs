@@ -110,6 +110,96 @@ public static class ModUpdate
         return slash <= 0 ? null : repositoryUrl.Substring(0, slash + 1) + ManifestFile;
     }
 
+    private const string GitHubPrefix = "https://github.com/";
+
+    /// <summary>
+    /// 一个地址的所有来源：GitHub 的地址先直连，再经每个加速镜像（镜像前缀 + 完整地址）；
+    /// 别的地址（本地试的 file://）只直连，镜像站只转 GitHub。
+    /// 国内很多玩家连不上 GitHub（2026-11-19 玩家日志：自动更新失败，连不上更新服务器），用户选了加速镜像站。
+    /// </summary>
+    public static List<string> Sources(string url, IEnumerable<string> mirrors)
+    {
+        var sources = new List<string> { url };
+        if (url.StartsWith(GitHubPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var mirror in mirrors)
+            {
+                sources.Add(mirror + url);
+            }
+        }
+
+        return sources;
+    }
+
+    /// <summary>
+    /// 读编译时写进去的镜像列表（csproj 的 UpdateMirrors，分号隔开）：只留 https、能直接在后面拼地址的前缀，
+    /// 补上结尾的斜杠，去掉重复的。
+    /// </summary>
+    public static List<string> ParseMirrors(string? setting)
+    {
+        var mirrors = new List<string>();
+        foreach (var part in (setting ?? string.Empty).Split(';'))
+        {
+            var mirror = part.Trim();
+            if (mirror.Length == 0)
+            {
+                continue;
+            }
+
+            if (!mirror.EndsWith("/", StringComparison.Ordinal))
+            {
+                mirror += "/";
+            }
+
+            if (Uri.TryCreate(mirror, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps
+                && uri.Query.Length == 0 && uri.Fragment.Length == 0 && !mirrors.Contains(mirror))
+            {
+                mirrors.Add(mirror);
+            }
+        }
+
+        return mirrors;
+    }
+
+    /// <summary>
+    /// 几个来源取到的清单里版本最高的那个的序号（镜像站可能还缓存着旧的清单）；一样高时取靠前的来源，都没取到为 -1。
+    /// </summary>
+    public static int Newest(IReadOnlyList<UpdateManifest?> manifests)
+    {
+        var best = -1;
+        var bestVersion = new Version(0, 0);
+        for (var i = 0; i < manifests.Count; i++)
+        {
+            if (manifests[i] is { } manifest && TryParseVersion(manifest.Version, out var version) && (best < 0 || version > bestVersion))
+            {
+                best = i;
+                bestVersion = version;
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>下载压缩包时先试给出清单的那个来源（对这个玩家已经证明能连上），再按原来的顺序试别的。</summary>
+    public static List<string> FirstThen(IReadOnlyList<string> sources, int first)
+    {
+        var ordered = new List<string>(sources.Count);
+        if (first >= 0 && first < sources.Count)
+        {
+            ordered.Add(sources[first]);
+        }
+
+        for (var i = 0; i < sources.Count; i++)
+        {
+            if (i != first)
+            {
+                ordered.Add(sources[i]);
+            }
+        }
+
+        return ordered;
+    }
+
     /// <summary>带后缀的测试版（1.3.0-dev）：不自动更新，免得把正在试的版本换掉。</summary>
     public static bool IsTestBuild(string? version) => version != null && version.IndexOf('-') >= 0;
 
