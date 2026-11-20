@@ -18,6 +18,8 @@ namespace RhythmHint.Core;
 /// <item>同一只手不出现「食指→外侧手指」（F→D、J→K，用户说的 21 式）：外轮换不了顺序时改按另一只手的食指，
 /// 下一下要让给某根食指时这一下先用同一只手的外侧手指（D→F 或 K→J）</item>
 /// <item>同一条轨道不在 JackWindow 内连续按两下</item>
+/// <item>上一下的长按到这一下还按着（连续的长按砖，游戏里要新按一下才进下一块）：这一下换另一只手接，
+/// 单押用那只手的食指，多押避开按着的键（用户实测同一个键松开再按、同一只手接几乎按不了）</item>
 /// </list>
 /// 规则是确定的：同一张图每次排出来都一样，节奏相同的地方形状也相同。
 /// 以上按右手为主手写；左撇子（LeftHanded）把结果整体左右镜像。
@@ -86,6 +88,14 @@ public static class NotePlanner
                     // 下一下要让给这根食指、又挨得太近：这一下先用同一只手的外侧手指，下一下再按食指（从外向内）。
                     // 双押在右手时是 D→F，在左手时是 K→J；不然下一下只能 F→D 或 J→K（用户：不要有 21 式）
                     (lane, roll) = (yieldOuter, false);
+                }
+
+                var holding = HoldingHand(last, time);
+                if (holding >= 0 && Lanes.HandOf(lane) == holding)
+                {
+                    // 上一下的长按到这一下还按着：换另一只手接（2026-11-20 用户实测：同一个键要掐着最后一点松开再按，
+                    // 同一只手另一根手指接也别扭，几乎按不了）。连着的长按就是 J F J F 左右手接力
+                    (lane, roll) = (FocusLane(1 - holding, time, last, options), false);
                 }
 
                 if (Blocked(lane, time, last, options))
@@ -415,8 +425,11 @@ public static class NotePlanner
             {
                 // 换了会连按（前后夹着让手的单押）：这一下改按另一只手的食指，左右手轮流，
                 // 不留「食指→外侧手指」（用户：不要有 21 式）
+                // 这一下的长按要按到下一下、下一下又在另一只手上接力时不换：换过去就成了同一只手接（TUF 3303 的 3260、3261）
                 var other = Lanes.IndexLane(1 - Lanes.HandOf(outer));
-                if (!Jacks(prev, other, cur.Time, o) && !(i + 1 < notes.Count && Jacks(notes[i + 1], other, cur.Time, o)))
+                var next = i + 1 < notes.Count ? notes[i + 1] : null;
+                if (!Jacks(prev, other, cur.Time, o)
+                    && !(next is not null && (Jacks(next, other, cur.Time, o) || HandsOverTo(cur, next, Lanes.HandOf(other)))))
                 {
                     notes[i] = WithLane(cur, other);
                 }
@@ -429,6 +442,10 @@ public static class NotePlanner
         }
     }
 
+    /// <summary>note 的长按按到下一下（next）还没松开，而 next 有键在 hand 这只手上：note 放到 hand 就成了同一只手接力。</summary>
+    private static bool HandsOverTo(PlannedNote note, PlannedNote next, int hand) =>
+        note.Lanes.Values.Any(hold => StillHeld(note, hold, next.Time)) && next.Lanes.Keys.Any(lane => Lanes.HandOf(lane) == hand);
+
     /// <summary>在 time 改按 lane 会不会和相邻那一下（neighbour）同轨又太近。</summary>
     private static bool Jacks(PlannedNote neighbour, int lane, double time, FingeringOptions o) =>
         neighbour.Lanes.ContainsKey(lane) && Math.Abs(neighbour.Time - time) < o.JackWindow - Epsilon;
@@ -440,9 +457,28 @@ public static class NotePlanner
         return copy;
     }
 
-    /// <summary>这条轨道上一下刚按过（同一条轨道连续两下间隔不到 JackWindow）。</summary>
+    /// <summary>
+    /// 这条轨道用不了：上一下刚按过（同一条轨道连续两下间隔不到 JackWindow），或者上一下在这条轨道上的长按到这一下还没松开。
+    /// 双押选手、三押补键、让手的单押都看它，所以多押会自动避开按着的键。
+    /// </summary>
     private static bool Blocked(int lane, double time, PlannedNote? last, FingeringOptions o) =>
-        last is not null && last.Lanes.ContainsKey(lane) && time - last.Time < o.JackWindow - Epsilon;
+        last is not null && last.Lanes.TryGetValue(lane, out var hold)
+        && (time - last.Time < o.JackWindow - Epsilon || StillHeld(last, hold, time));
+
+    /// <summary>上一下按着的长按到 time 还没松开（连续的长按砖：前一块按满的那一刻正好要按下一块）。</summary>
+    private static bool StillHeld(PlannedNote last, double hold, double time) => hold > 0 && last.Time + hold > time - Epsilon;
+
+    /// <summary>上一下的长按到这一下还没松开时，按着长按的那只手；没有、或两只手都按着时是 -1。</summary>
+    private static int HoldingHand(PlannedNote? last, double time)
+    {
+        if (last is null)
+        {
+            return -1;
+        }
+
+        var hands = last.Lanes.Where(kv => StillHeld(last, kv.Value, time)).Select(kv => Lanes.HandOf(kv.Key)).Distinct().ToList();
+        return hands.Count == 1 ? hands[0] : -1;
+    }
 
     /// <summary>
     /// 单押和上一下同轨又太近（通常紧跟在双押后面）：换到上一下没用的轨道里离上一下最近的那条（一样近时取离原位置近的），

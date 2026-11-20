@@ -100,3 +100,18 @@ test('inputs are immutable and invalid timing is rejected before planning', () =
   assert.throws(() => P.plan([{ tileIndex: 1, time: 0, holdSeconds: -1 }]), /长按/);
   assert.throws(() => P.plan([], { JackWindow: Infinity }), /参数/);
 });
+
+// 连着的长按砖：上一下还按着就换另一只手接（2026-11-20 用户实测同一个键松开再按几乎按不了），期望值同 C# PlannerTests
+test('a hold still pressed at the next press is taken over by the other hand', () => {
+  const hits = [{ tileIndex: 1, time: .5, holdSeconds: 0, angle: 180 }];
+  for (let i = 0; i < 5; i++) hits.push({ tileIndex: 2 + i, time: 1 + i * .158, holdSeconds: .158, angle: 180 });
+  hits.push({ tileIndex: 8, time: 2.3, holdSeconds: 0, angle: 180 }, { tileIndex: 9, time: 2.8, holdSeconds: 0, angle: 180 });
+  assert.deepEqual(lanesOf(P.plan(hits)), [2, 2, 1, 2, 1, 2, 2, 2].map(l => [l]));
+  assert.deepEqual(lanesOf(P.plan(hits, { LeftHanded: true })), [1, 1, 2, 1, 2, 1, 1, 1].map(l => [l]));
+  const chordAfter = (hold, size) => P.plan([{ tileIndex: 1, time: 1, holdSeconds: hold, angle: 180 },
+    ...Array.from({ length: size }, (_, k) => ({ tileIndex: 2 + k, time: 1.6 + k * .02, holdSeconds: 0, angle: k ? 10 : 180 }))])[1].lanes.map(l => l.lane);
+  assert.deepEqual(chordAfter(.6, 2), [0, 1]);
+  assert.deepEqual(chordAfter(.6, 3), [0, 1, 3]);
+  assert.deepEqual(chordAfter(.5, 2), [2, 3]);
+  assert.deepEqual(chordAfter(.5, 3), [1, 2, 3]);
+});

@@ -551,4 +551,87 @@ public class PlannerTests
             }
         }
     }
+
+    /// <summary>
+    /// 一串连着的长按：每块按住到下一块，下一块要新按一下（工坊 DoG Nonstop Mix 的 1488–1492，五块各 0.158 秒）。
+    /// 复现（2026-11-20 用户实测）：原来间隔长于 130 毫秒全排在 J 上，同一个键要掐着最后一点松开再按，单手几乎按不了。
+    /// 现在上一下还按着就换另一只手接：J F J F J，长按留在各自的键上；长按松开以后的单押照常回右手食指。
+    /// </summary>
+    [Theory]
+    [InlineData(false, new[] { 2, 2, 1, 2, 1, 2, 2, 2 })]
+    [InlineData(true, new[] { 1, 1, 2, 1, 2, 1, 1, 1 })]
+    public void HoldChainsHandOverToTheOtherHand(bool leftHanded, int[] expected)
+    {
+        var tiles = new List<TileHit> { new(1, 0.5, 0, 180) };
+        for (var i = 0; i < 5; i++)
+        {
+            tiles.Add(new TileHit(2 + i, 1.0 + (i * 0.158), 0.158, 180));
+        }
+
+        tiles.Add(new TileHit(8, 2.3, 0, 180)); // 1.79 秒松开，隔一会儿再按
+        tiles.Add(new TileHit(9, 2.8, 0, 180));
+
+        var notes = NotePlanner.Plan(tiles, new FingeringOptions { LeftHanded = leftHanded });
+
+        Assert.Equal(expected, LanesOf(notes));
+        Assert.All(notes.Skip(1).Take(5), n => Assert.Equal(0.158, n.Lanes.Values.Single(), 6));
+    }
+
+    /// <summary>
+    /// 长按到这一下还按着时，多押也放到另一只手：双押本来优先右手 J K，右手按着 J 就放左手 D F；
+    /// 三押的另一只手补键避开按着的 J，补外侧 K。长按在这一下之前就松开了的不受影响。
+    /// 双押在 0.6 秒后（超过 ChordFocusWindow），长按那下照常排在 J，不先让给左手。
+    /// </summary>
+    [Fact]
+    public void ChordsAfterAHeldKeyAvoidIt()
+    {
+        List<PlannedNote> After(double hold, int chordSize)
+        {
+            var tiles = new List<TileHit> { new(1, 1.0, hold, 180) };
+            for (var k = 0; k < chordSize; k++)
+            {
+                tiles.Add(new TileHit(2 + k, 1.6 + (k * 0.02), 0, k == 0 ? 180 : 10));
+            }
+
+            return NotePlanner.Plan(tiles, Fingering);
+        }
+
+        int[] ChordLanes(List<PlannedNote> notes) => notes[1].Lanes.Keys.OrderBy(l => l).ToArray();
+
+        Assert.Equal(new[] { 2 }, After(0.6, 2)[0].Lanes.Keys);
+        Assert.Equal(new[] { 0, 1 }, ChordLanes(After(0.6, 2)));
+        Assert.Equal(new[] { 0, 1, 3 }, ChordLanes(After(0.6, 3)));
+        Assert.Equal(new[] { 2, 3 }, ChordLanes(After(0.5, 2)));     // 1.5 秒就松开了：照常右手
+        Assert.Equal(new[] { 1, 2, 3 }, ChordLanes(After(0.5, 3)));
+    }
+
+    /// <summary>
+    /// 外轮（OuterFirst）为了不连按把轮指那一下换到另一只手时，不能换到接它长按的那只手上。
+    /// 复现（TUF 校准谱 3303 的 3253–3263，时间照抄）：快速连打后接一个 2.24 秒的长按，长按先排在左手 D、接力的下一下排在 J；
+    /// 外轮把长按换到 J，变成 J 按着、J 再接，同一个键松开再按。
+    /// </summary>
+    [Fact]
+    public void OuterRollNeverMovesAHoldOntoTheHandTakingItOver()
+    {
+        var tiles = new List<TileHit>
+        {
+            new(3253, 131.0399012125343, 0, 150),
+            new(3254, 131.0719012125343, 0, 180),
+            new(3256, 131.07279010142318, 0, 5),
+            new(3257, 131.0772345458676, 0, 25),
+            new(3259, 131.10390121253428, 0, 150),
+            new(3260, 131.1359012125343, 2.2399993690142708, 180),
+            new(3261, 133.37590058154856, 0.1279999999999859, 12780),
+            new(3263, 133.50390058154855, 0, 360),
+        };
+
+        var notes = NotePlanner.Plan(tiles, Fingering);
+
+        for (var i = 1; i < notes.Count; i++)
+        {
+            var (prev, cur) = (notes[i - 1], notes[i]);
+            var held = prev.Lanes.Where(kv => kv.Value > 0 && prev.Time + kv.Value > cur.Time - 1e-6).Select(kv => Lanes.HandOf(kv.Key));
+            Assert.DoesNotContain(Lanes.HandOf(cur.Lanes.Keys.First()), held);
+        }
+    }
 }

@@ -81,6 +81,29 @@ foreach (var style in Enum.GetValues<FingeringStyle>())
             t += .16;
         }
         Add($"multi-holds-{mask}-{style}", multi, options);
+        // 连着的长按砖：每块按住到下一块，上一下还按着时换手接；最后两段是长按正好在双押、三押按下时结束
+        var chain = new List<TileHit>(); var c = 1.0;
+        foreach (var (length, gap) in new[] { (5, .158), (3, .474), (4, .09), (3, .06) })
+        {
+            for (var j = 0; j < length; j++) chain.Add(new TileHit(chain.Count + 1, c + j * gap, gap, 180));
+            c += length * gap + .5;
+            chain.Add(new TileHit(chain.Count + 1, c, 0, 180));
+            c += .4;
+        }
+        foreach (var size in new[] { 2, 3 })
+        {
+            chain.Add(new TileHit(chain.Count + 1, c, .6, 180));
+            for (var k = 0; k < size; k++) chain.Add(new TileHit(chain.Count + 1, c + .6 + k * .02, 0, k == 0 ? 180 : 10));
+            c += 1.5;
+        }
+        Add($"hold-chains-{mask}-{style}", chain, options);
+        // 外轮换手不能换到接力长按的那只手上（TUF 3303 的 3253–3263）
+        Add($"hold-after-roll-{mask}-{style}", new List<TileHit>
+        {
+            new(3253, 131.0399012125343, 0, 150), new(3254, 131.0719012125343, 0, 180), new(3256, 131.07279010142318, 0, 5),
+            new(3257, 131.0772345458676, 0, 25), new(3259, 131.10390121253428, 0, 150), new(3260, 131.1359012125343, 2.2399993690142708, 180),
+            new(3261, 133.37590058154856, 0.1279999999999859, 12780), new(3263, 133.50390058154855, 0, 360),
+        }, options);
     }
     var custom = new FingeringOptions { Style = style, ChordWindow = .02, ChordAngle = 45, ChordMaxGap = .075,
         ResetWindow = .2, ChordFocusWindow = .31, JackWindow = .11, UseRoll = true, OuterRoll = true,

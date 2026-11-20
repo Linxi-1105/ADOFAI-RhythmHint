@@ -65,6 +65,9 @@
           && moments[i + 1][0].time - time < o.JackWindow - Epsilon && !Blocked(yieldOuter, time, last, o)) {
           [lane, roll] = [yieldOuter, false];
         }
+        // A hold still pressed at this moment (adjacent hold tiles) is taken over by the other hand.
+        const holding = HoldingHand(last, time);
+        if (holding >= 0 && handOf(lane) === holding) [lane, roll] = [FocusLane(1 - holding, time, last, o), false];
         if (Blocked(lane, time, last, o)) [lane, roll] = [NearestFreeLane(lane, time, o, last), false];
         notes.push({ tileIndex: moment[0].tileIndex, lastTileIndex: moment[0].tileIndex, time,
           lanes: [{ lane, holdSeconds: moment[0].holdSeconds }] });
@@ -200,8 +203,9 @@
       if (partner(outer) !== index) continue;
       if ((i >= 2 && Jacks(notes[i - 2], outer, prev.time, o))
         || (i + 1 < notes.length && Jacks(notes[i + 1], index, cur.time, o))) {
-        const other = indexLane(1 - handOf(outer));
-        if (!Jacks(prev, other, cur.time, o) && !(i + 1 < notes.length && Jacks(notes[i + 1], other, cur.time, o))) notes[i] = WithLane(cur, other);
+        const other = indexLane(1 - handOf(outer)), next = i + 1 < notes.length ? notes[i + 1] : null;
+        if (!Jacks(prev, other, cur.time, o)
+          && !(next !== null && (Jacks(next, other, cur.time, o) || HandsOverTo(cur, next, handOf(other))))) notes[i] = WithLane(cur, other);
         continue;
       }
       notes[i - 1] = WithLane(prev, outer);
@@ -209,11 +213,24 @@
     }
   }
 
+  function HandsOverTo(note, next, hand) {
+    return note.lanes.some(item => StillHeld(note, item.holdSeconds, next.time)) && next.lanes.some(item => handOf(item.lane) === hand);
+  }
   function Jacks(neighbour, lane, time, o) { return hasLane(neighbour, lane) && Math.abs(neighbour.time - time) < o.JackWindow - Epsilon; }
   function WithLane(note, lane) {
     return { tileIndex: note.tileIndex, lastTileIndex: note.lastTileIndex, time: note.time, lanes: [{ lane, holdSeconds: note.lanes[0].holdSeconds }] };
   }
-  function Blocked(lane, time, last, o) { return last !== null && hasLane(last, lane) && time - last.time < o.JackWindow - Epsilon; }
+  function Blocked(lane, time, last, o) {
+    if (last === null) return false;
+    const item = last.lanes.find(entry => entry.lane === lane);
+    return item !== undefined && (time - last.time < o.JackWindow - Epsilon || StillHeld(last, item.holdSeconds, time));
+  }
+  function StillHeld(last, hold, time) { return hold > 0 && last.time + hold > time - Epsilon; }
+  function HoldingHand(last, time) {
+    if (last === null) return -1;
+    const hands = [...new Set(last.lanes.filter(item => StillHeld(last, item.holdSeconds, time)).map(item => handOf(item.lane)))];
+    return hands.length === 1 ? hands[0] : -1;
+  }
   function NearestFreeLane(lane, time, o, last) {
     let best = lane, bestScore = 2147483647;
     for (let c = 0; c < 4; c++) {
