@@ -36,9 +36,11 @@ public static class FloorHits
 {
     /// <summary>
     /// 第 0 块（起点）不按；自动砖、中旋砖、假砖不按。
-    /// 长按砖：按下后一直按住，走到长按结束那块砖时是自动落上的（游戏里这时再按会被忽略，严格长按还算太早），
-    /// 所以结束那块不算一次按键，而是长按的尾巴；连续几块长按砖合成一条长按；结束那块读不到时间（已销毁）时长按算到链里最后一块长按砖为止。
-    /// 每块要按的砖记下从上一块要按的砖到它星球转过的角度：中间不用按的砖（中旋、自动、长按）的转角累加进去。
+    /// 长按砖：按下后按住到下一块砖。下一块不是长按砖时，松开就落上它（游戏里这时再按会被忽略，严格长按还算太早），
+    /// 所以它不算一次按键，而是长按的尾巴；下一块也是长按砖时要重新按一下（scrPlayer：下一块是长按时松开不打下一块，
+    /// 按键才打），所以连续的长按砖每块都是一次按键（2026-11-20 用户录屏：原来合成一条，照提示按住会死）。
+    /// 自动的长按砖后面那块自动落上（OttoHoldHit），也不按。下一块读不到时间（已销毁）时长按是 0。
+    /// 每块要按的砖记下从上一块要按的砖到它星球转过的角度：中间不用按的砖（中旋、自动、长按尾巴）的转角累加进去。
     /// 给了 crotchet（起始 BPM 一拍的秒数）时先用 CheckAngles 核对转角记在哪一段；对不上就不信转角，排键退回只看时间。
     /// 不给时按 FloorInfo.Angle 的本意（离开这块砖的转角）用。
     /// </summary>
@@ -56,30 +58,16 @@ public static class FloorHits
                 AngleSource.Arrival => f.Angle,
                 _ => double.NaN,
             };
-            if (f.NoPress || floors[i - 1].IsHold)
+            var prev = floors[i - 1];
+            if (f.NoPress || (prev.IsHold && (prev.NoPress || !f.IsHold)))
             {
                 continue;
             }
 
-            var hold = 0.0;
-            if (f.IsHold)
-            {
-                var end = i;
-                while (end + 1 < floors.Count && floors[end].IsHold)
-                {
-                    end++;
-                }
-
-                hold = floors[end].Time - f.Time;
-                if (hold < 0)
-                {
-                    // 长按的结束早于开始：链后面紧跟一块已销毁的砖（GameReader 把它的时间记成 0），或者时间倒退。
-                    // 读不到真正的结束，长按链就停在最后一块读得到的长按砖：玩家至少要按住到那里；只有一块长按砖时是 0，当普通砖。
-                    // 原来得出负长按，CustomFingering.From 抛 FormatException，这一关「编辑本关手序」打不开（2026-11-19 评审）。
-                    // 取砖规则冻结（docs/专属手序.md）：只有这种 1.3.1 会得出负数的输入结果不一样
-                    hold = Math.Max(0, floors[end - 1].Time - f.Time);
-                }
-            }
+            // 长按的结束早于开始：后面紧跟一块已销毁的砖（GameReader 把它的时间记成 0），或者时间倒退，当普通砖。
+            // 原来得出负长按，CustomFingering.From 抛 FormatException，这一关「编辑本关手序」打不开（2026-11-19 评审）。
+            // 取砖规则冻结（docs/专属手序.md）：和 1.3.1 只差这种会得出负数的输入、连续的长按砖两处
+            var hold = f.IsHold && i + 1 < floors.Count ? Math.Max(0, floors[i + 1].Time - f.Time) : 0;
 
             hits.Add(new TileHit(f.SeqId, f.Time, hold, angle));
             angle = 0;

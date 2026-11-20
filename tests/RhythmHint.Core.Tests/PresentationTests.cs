@@ -116,7 +116,8 @@ public class PresentationTests
     [Fact]
     public void FloorHits_HoldEndIsNotAPress()
     {
-        // 第 2、3 块是连着的长按，第 4 块是长按结束（自动落上），第 5 块要按；第 6 块是中旋
+        // 第 2、3 块是连着的长按：第 3 块要重新按一下，各自按住到下一块（2026-11-20 用户录屏：原来合成一条，照提示按住会死）；
+        // 第 4 块是长按结束（松开时落上），第 5 块要按；第 6 块是中旋
         var floors = new[]
         {
             new FloorInfo(0, 0.0, false, false),
@@ -130,9 +131,10 @@ public class PresentationTests
 
         var hits = FloorHits.From(floors);
 
-        Assert.Equal(new[] { 1, 2, 5 }, hits.Select(h => h.TileIndex));
-        Assert.Equal(1.0, hits[1].HoldSeconds, 6); // 从第 2 块按住到第 4 块
-        Assert.Equal(0, hits[2].HoldSeconds);
+        Assert.Equal(new[] { 1, 2, 3, 5 }, hits.Select(h => h.TileIndex));
+        Assert.Equal(0.5, hits[1].HoldSeconds, 6); // 第 2 块按住到第 3 块
+        Assert.Equal(0.5, hits[2].HoldSeconds, 6); // 第 3 块重新按下，按住到第 4 块
+        Assert.Equal(0, hits[3].HoldSeconds);
     }
 
     [Theory]

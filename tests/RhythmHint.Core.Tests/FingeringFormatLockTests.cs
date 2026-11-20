@@ -102,6 +102,7 @@ public class FingeringFormatLockTests
     /// 取砖规则（FloorHits.From）是格式的一部分：hits 收哪些砖、转角怎么累加。改了就是破坏性更新——
     /// 每 4 块多认一块砖、转角记错一块，老文件整份对不上（评审 A 实测 0%）。样例有起点、自动砖、中旋、假砖、
     /// 连续两块长按砖和长按的尾巴、伪双押、已销毁的砖；三种写法（不核对转角、核对后按离开、核对后按到达）结果一样。
+    /// 2026-11-20 用户同意改了一处：连续两块长按砖不再合成一条，第二块也是一次按键（游戏里要重新按，见 AdjacentHoldTilesArePressedOneByOne）。
     /// </summary>
     [Fact]
     public void FloorHitsRulesAreFrozen()
@@ -115,9 +116,9 @@ public class FingeringFormatLockTests
             new(4, 2.0, false, true, 0),         // 中旋：不按、不花时间
             new(5, 2.0, false, false, 180),
             new(6, 2.5, false, true, 45),        // 假砖
-            new(7, 2.625, true, false, 90),      // 连续两块长按砖合成一条长按
+            new(7, 2.625, true, false, 90),      // 连续两块长按砖：各自是一次按键，按住到下一块
             new(8, 2.875, true, false, 90),
-            new(9, 3.125, false, false, 180),    // 长按的尾巴：自动落上，不算一次按键
+            new(9, 3.125, false, false, 180),    // 长按的尾巴：松开时落上，不算一次按键
             new(10, 3.625, false, false, 11.25),
             new(11, 3.65625, false, false, 180), // 伪双押：和上一块隔 31.25 毫秒、转角 11.25°，照样是两块砖（合成一个提示是排键的事）
             new(-1, 0, false, true),             // 已销毁的砖（游戏里 scrFloor 为 null）：读不到转角，下一块的转角是 NaN
@@ -125,7 +126,7 @@ public class FingeringFormatLockTests
             new(14, 4.65625, false, false, 180),
         };
         var arrival = floors.Select((f, i) => f with { Angle = i == 0 ? double.NaN : floors[i - 1].Angle }).ToList();
-        const string expected = "1,1,0,180; 3,1.75,0,270; 5,2,0,90; 7,2.625,0.5,225; 10,3.625,0,360; 11,3.65625,0,11.25; 13,4.15625,0,NaN; 14,4.65625,0,180";
+        const string expected = "1,1,0,180; 3,1.75,0,270; 5,2,0,90; 7,2.625,0.25,225; 8,2.875,0.25,90; 10,3.625,0,270; 11,3.65625,0,11.25; 13,4.15625,0,NaN; 14,4.65625,0,180";
 
         // 改了就是破坏性更新
         Assert.Equal(expected, Show(FloorHits.From(floors)));
@@ -228,8 +229,8 @@ public class FingeringFormatLockTests
     /// <summary>
     /// 长按链后面紧跟一块已销毁的砖（游戏里 scrFloor 为 null，GameReader 把它的时间记成 0）。复现（2026-11-19 评审）：
     /// 长按 = 0 − 这块砖的时间，是负数，CustomFingering.From 抛 FormatException，这一关「编辑本关手序」打不开。
-    /// 现在长按链遇到读不到的砖就停：长按算到链里最后一块读得到的长按砖（只有一块长按砖时是 0，当普通砖）。
-    /// 这是取砖规则里唯一改过的地方：1.3.1 会得出负长按的输入才不一样（Compat131Tests 拿 1.3.1 原样的 FloorHits 逐项比）。
+    /// 现在长按按到下一块砖为止，下一块读不到时间就是 0（当普通砖）。
+    /// 取砖规则只改过这里和连续长按砖（AdjacentHoldTilesArePressedOneByOne）两处，Compat131Tests 拿 1.3.1 原样的 FloorHits 逐项比其余的。
     /// </summary>
     [Fact]
     public void HoldBeforeADestroyedTileIsNeverNegative()
@@ -240,7 +241,7 @@ public class FingeringFormatLockTests
             new(1, 1.0, true, false, 180),       // 长按砖，后面紧跟已销毁的砖
             new(-1, 0, false, true),
             new(3, 2.0, false, false, 180),
-            new(4, 2.5, true, false, 90),        // 两块长按砖连着，后面是已销毁的砖
+            new(4, 2.5, true, false, 90),        // 两块长按砖连着（各按一下），后面是已销毁的砖
             new(5, 2.75, true, false, 90),
             new(-1, 0, false, true),
             new(7, 3.5, false, false, 180),
@@ -248,8 +249,38 @@ public class FingeringFormatLockTests
 
         var hits = FloorHits.From(floors);
 
-        Assert.Equal("1,1,0,180; 3,2,0,NaN; 4,2.5,0.25,180; 7,3.5,0,NaN", Show(hits));
+        Assert.Equal("1,1,0,180; 3,2,0,NaN; 4,2.5,0.25,180; 5,2.75,0,90; 7,3.5,0,NaN", Show(hits));
         Assert.Equal(hits.Count, CustomFingering.From(hits, NotePlanner.Plan(hits, new FingeringOptions()), leftHanded: false).Hits.Count);
+    }
+
+    /// <summary>
+    /// 连续的长按砖每块都是一次按键，各自按住到下一块砖。复现（2026-11-20 用户录屏，工坊 3007550380 DoG Nonstop Mix 的 1474、1475 两块）：
+    /// 原来合成一条长按，玩家照提示一直按住，过了第二块一拍左右就死了。游戏里（scrPlayer.UpdateHoldBehavior、UpdateHoldKeys）
+    /// 下一块是长按时松开不打下一块，要新按一下才进第二块；下一块不是长按时才靠松开落上（尾巴不算按键）。
+    /// 自动的长按砖照旧：自己不按，后面那块也自动落上（scrPlayer.OttoHoldHit）。
+    /// </summary>
+    [Fact]
+    public void AdjacentHoldTilesArePressedOneByOne()
+    {
+        var floors = new List<FloorInfo>
+        {
+            new(0, 0.5, false, false, 180),      // 起点
+            new(1, 1.0, true, false, 180),       // 单块长按：按住到第 2 块
+            new(2, 1.5, false, false, 180),      // 尾巴：松开时落上，不算按键
+            new(3, 2.0, true, false, 270),       // 三块连着的长按：每块按一下，按住到下一块
+            new(4, 2.75, true, false, 270),
+            new(5, 3.5, true, false, 180),
+            new(6, 4.0, false, false, 180),      // 尾巴
+            new(7, 4.5, true, false, 90),        // 长按后面是自动的长按砖：自动砖不按，它后面那块也自动落上
+            new(8, 4.75, true, true, 90),
+            new(9, 5.0, false, false, 180),
+            new(10, 5.5, false, false, 180),
+        };
+
+        var hits = FloorHits.From(floors);
+
+        Assert.Equal("1,1,0.5,180; 3,2,0.75,360; 4,2.75,0.75,270; 5,3.5,0.5,270; 7,4.5,0.25,360; 10,5.5,0,360", Show(hits));
+        Assert.Equal(hits.Count, NotePlanner.Plan(hits, new FingeringOptions()).Count);
     }
 
     internal static string Show(IEnumerable<TileHit> hits) => string.Join("; ", hits.Select(h => string.Join(",",

@@ -157,14 +157,15 @@ public class Compat131Tests
     }
 
     /// <summary>
-    /// 取砖规则和 1.3.1 逐项一样，只有 1.3.1 会算出负长按的那几块不一样（长按链后面紧跟已销毁的砖、时间倒退）：现在不是负数。
-    /// 其余的砖号、时间、长按、转角、顺序，以及转角核对的结果，一点不差。
+    /// 取砖规则和 1.3.1 逐项一样，只有两种输入不一样：1.3.1 会算出负长按的那几块（长按后面紧跟已销毁的砖、时间倒退），现在不是负数；
+    /// 要按的长按砖后面紧跟一块长按砖（2026-11-20 用户同意：1.3.1 合成一条，游戏里要重新按，见 FingeringFormatLockTests.AdjacentHoldTilesArePressedOneByOne），
+    /// 这种输入整组不比。其余的砖号、时间、长按、转角、顺序，以及转角核对的结果，一点不差。
     /// </summary>
     [Fact]
-    public void FloorHitsMatch131ExceptNegativeHolds()
+    public void FloorHitsMatch131ExceptNegativeAndAdjacentHolds()
     {
         var rng = new Random(20261119);
-        int compared = 0, negative = 0;
+        int compared = 0, negative = 0, adjacent = 0;
         for (var round = 0; round < 4000; round++)
         {
             var floors = RandomFloors(rng);
@@ -172,6 +173,12 @@ public class Compat131Tests
             var oc = V131.FloorHits.CheckAngles(old, 0.5);
             var nc = FloorHits.CheckAngles(floors, 0.5);
             Assert.Equal((oc.Source.ToString(), oc.ExitMatch, oc.ArrivalMatch), (nc.Source.ToString(), nc.ExitMatch, nc.ArrivalMatch));
+            if (floors.Zip(floors.Skip(1)).Any(p => p.First.IsHold && !p.First.NoPress && p.Second.IsHold))
+            {
+                adjacent++;
+                continue;
+            }
+
             foreach (var crotchet in new[] { double.NaN, 0.5 })
             {
                 var expected = V131.FloorHits.From(old, crotchet);
@@ -202,7 +209,7 @@ public class Compat131Tests
             }
         }
 
-        Assert.True(compared > 50000 && negative > 100, $"比了 {compared} 块，负长按 {negative} 块");
+        Assert.True(compared > 20000 && negative > 50 && adjacent < 2000, $"比了 {compared} 块，负长按 {negative} 块，跳过连续长按 {adjacent} 组");
     }
 
     /// <summary>谱面指纹和 1.3.1 逐项一样：随机的间隔（很多落在 x.5 毫秒附近）、转角（x.5°、从弧度换回来的）、长按。</summary>
