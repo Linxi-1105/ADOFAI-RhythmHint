@@ -153,6 +153,19 @@ public sealed class SettingsFileTests : IDisposable
     }
 
     [Fact]
+    public void ChordCountIsOnForFilesWrittenBeforeItExisted()
+    {
+        // 多押数字开关是 1.3.1 之后加的：老文件里没有这一项，读进来是默认的开着；关掉后写出的文件 1.3.1 照样整份读得进去
+        var load = SettingsFile.Load<Settings>(Copy("v1.3.1/custom.xml"), Now);
+        Assert.Equal(SettingsReadResult.Read, load.Result);
+        Assert.True(load.Value.ShowChordCount);
+
+        var off = Serialize(new Settings { ShowChordCount = false });
+        Assert.Contains("<ShowChordCount>false</ShowChordCount>", off, StringComparison.Ordinal);
+        Assert.NotNull(new XmlSerializer(typeof(Settings131)).Deserialize(new StringReader(off)));
+    }
+
+    [Fact]
     public void ElementNamesAndOrderOnlyGrow()
     {
         // 现在写出的元素 = 1.3.1 的元素按原顺序在前，新加的只能接在后面或插在中间，不能少、不能改名

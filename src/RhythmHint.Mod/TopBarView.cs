@@ -110,8 +110,8 @@ internal static class TopBarView
         }
 
         DrawJudgeCircle(f, l, new Vector2(judgeX, cy));
-        DrawActiveHolds(f, l, judgeX, cy, speed);
-        DrawNotes(f, l, judgeX, cy, speed, lookAhead);
+        DrawActiveHolds(f, l, judgeX, cy, speed, s.ShowChordCount);
+        DrawNotes(f, l, judgeX, cy, speed, lookAhead, s.ShowChordCount);
 
         Painter.Text(new Rect(judgeX - (40 * l.Scale), area.height - (24 * l.Scale), 80 * l.Scale, 20 * l.Scale),
             f.NextNote.ToString(), Mathf.RoundToInt(15 * l.Scale), new Color(0.75f, 0.75f, 0.8f));
@@ -124,7 +124,7 @@ internal static class TopBarView
     }
 
     /// <summary>按住中的长按：圆停在判定圈上脉动，尾巴从右往左缩短，松开时消失。</summary>
-    private static void DrawActiveHolds(OverlayFrame f, OverlayLayout l, float judgeX, float cy, float speed)
+    private static void DrawActiveHolds(OverlayFrame f, OverlayLayout l, float judgeX, float cy, float speed, bool chordCount)
     {
         PlannedNote? drawn = null;
         var pulse = 0.5f + (0.5f * Mathf.Sin(Time.unscaledTime * 18f));
@@ -141,10 +141,14 @@ internal static class TopBarView
             var len = (float)(h.Remaining * speed);
             BallSkin.Tail(new Rect(judgeX, cy - (r * 0.55f), len, r * 1.1f), color.WithAlpha(0.8f));
             BallSkin.HoldHead(new Vector2(judgeX, cy), r, color, 4 * l.Scale, pulse);
+            if (chordCount)
+            {
+                BallSkin.ChordCount(new Vector2(judgeX, cy), r, h.Note.Lanes.Count);
+            }
         }
     }
 
-    private static void DrawNotes(OverlayFrame f, OverlayLayout l, float judgeX, float cy, float speed, double lookAhead)
+    private static void DrawNotes(OverlayFrame f, OverlayLayout l, float judgeX, float cy, float speed, double lookAhead, bool chordCount)
     {
         // 从近到远画，后面的音符压在前面的上面（用户要求；原来近的压在上面）
         for (var i = f.NextNote; i < f.VisibleEnd(lookAhead); i++)
@@ -172,6 +176,10 @@ internal static class TopBarView
             }
 
             BallSkin.Note(new Vector2(x, cy), r, color, 4 * l.Scale);
+            if (chordCount)
+            {
+                BallSkin.ChordCount(new Vector2(x, cy), r, note.Lanes.Count);
+            }
         }
     }
 }

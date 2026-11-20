@@ -307,7 +307,7 @@ internal static class SettingsArt
     // ---------- 太鼓条、BPM 框 ----------
 
     /// <summary>缩小的太鼓条节奏区（BPM 框以外那一段），画法和 TopBarView 一样：圆球从右往左滚到判定圈，长按带尾巴。</summary>
-    public static void TaikoTrack(Rect r, float s, float speed)
+    public static void TaikoTrack(Rect r, float s, float speed, bool chordCount)
     {
         if (!Repaint || r.width <= 0 || r.height <= 0)
         {
@@ -319,7 +319,7 @@ internal static class SettingsArt
         GUI.BeginGroup(r);
         try
         {
-            DrawTrack(r.width, r.height, s, speed, Time.unscaledTime);
+            DrawTrack(r.width, r.height, s, speed, Time.unscaledTime, chordCount);
         }
         finally
         {
@@ -328,7 +328,7 @@ internal static class SettingsArt
         }
     }
 
-    private static void DrawTrack(float w, float h, float s, float speed, float now)
+    private static void DrawTrack(float w, float h, float s, float speed, float now, bool chordCount)
     {
         var cy = h / 2;
         var judgeX = 84 * s;
@@ -366,6 +366,10 @@ internal static class SettingsArt
                 var color = ColorOf(lanes.Length);
                 BallSkin.Tail(new Rect(judgeX, cy - (r * 0.55f), (hold - since) * speed, r * 1.1f), color.WithAlpha(0.8f));
                 BallSkin.HoldHead(new Vector2(judgeX, cy), r, color, Mathf.Max(1, 4 * s), pulse);
+                if (chordCount)
+                {
+                    BallSkin.ChordCount(new Vector2(judgeX, cy), r, lanes.Length);
+                }
             }
         }
 
@@ -397,6 +401,10 @@ internal static class SettingsArt
             }
 
             BallSkin.Note(new Vector2(x, cy), r, color, Mathf.Max(1, 4 * s));
+            if (chordCount)
+            {
+                BallSkin.ChordCount(new Vector2(x, cy), r, lanes.Length);
+            }
         }
     }
 
@@ -471,7 +479,7 @@ internal static class SettingsArt
                         Fill(new Rect(0, by, r.width, stripH), Painter.PanelColor);
                         var trackX = s.ShowBpm && lx < (r.width - panelW) / 2 ? lx + panelW : 0;
                         var trackW = s.ShowBpm ? r.width - panelW : r.width;
-                        TaikoTrack(new Rect(trackX, by, trackW, stripH), k, 650 * k);
+                        TaikoTrack(new Rect(trackX, by, trackW, stripH), k, 650 * k, s.ShowChordCount);
                     }
 
                     if (s.ShowBpm)

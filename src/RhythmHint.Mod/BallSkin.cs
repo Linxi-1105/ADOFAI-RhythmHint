@@ -11,6 +11,9 @@ internal static class BallSkin
     private static readonly Color JudgeRim = new(0.5f, 0.5f, 0.55f);
     private static readonly Color JudgeInnerRim = new(0.32f, 0.32f, 0.36f);
 
+    /// <summary>几押的数字，每帧画时不用重新生成字符串。</summary>
+    private static readonly string[] Digits = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9" };
+
     /// <summary>一个音符：外面一圈黑色阴影，实心，白边。</summary>
     /// <param name="rim">白边粗细；阴影比球大半个白边。</param>
     public static void Note(Vector2 center, float r, Color color, float rim)
@@ -18,6 +21,26 @@ internal static class BallSkin
         Painter.Circle(center, r + (rim / 2), Shadow);
         Painter.Circle(center, r, color);
         Painter.Ring(center, r, Color.white, rim);
+    }
+
+    /// <summary>
+    /// 太鼓条上三押、四押的球中间写几押（3、4）：太鼓条只有一条轨道，光看紫色分不出三押还是四押
+    /// （2026-11-19 用户：只开太鼓条的玩家看不懂紫色）。白色粗体加一层深色阴影，长按头脉动变亮时也看得清；
+    /// 单押、双押不写。球太小（设置窗口里的缩小插图）、字小到看不清时不写。
+    /// </summary>
+    public static void ChordCount(Vector2 center, float r, int lanes)
+    {
+        var size = Mathf.RoundToInt(r * 1.15f);
+        if (lanes < 3 || size < 6)
+        {
+            return;
+        }
+
+        var text = lanes < Digits.Length ? Digits[lanes] : lanes.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var box = new Rect(center.x - r, center.y - r, r * 2, r * 2);
+        var offset = Mathf.Max(1f, r / 20f);
+        Painter.Text(new Rect(box.x + offset, box.y + offset, box.width, box.height), text, size, Shadow, TextAnchor.MiddleCenter, true);
+        Painter.Text(box, text, size, Color.white, TextAnchor.MiddleCenter, true);
     }
 
     /// <summary>按住中的长按头：停在判定圈上，随 pulse（0–1）脉动变亮。</summary>

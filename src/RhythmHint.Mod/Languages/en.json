@@ -56,6 +56,8 @@
   "BPM 与剩余时间": "BPM and time left",
   "估算难度": "Estimated difficulty",
   "在 BPM 框左侧显示按本关砖块估算的 TUF 难度档位，仅供参考，并非 TUF 官方评级。": "Shows a TUF-style difficulty tier estimated from this level's tiles on the left of the BPM box. For reference only; it is not an official TUF rating.",
+  "多押数字": "Chord numbers",
+  "太鼓条上的三押、四押音符中间显示 3、4。": "Shows 3 or 4 in the middle of triples and quads on the taiko bar.",
   "估算": "Estimated",
   "四轨面板": "4-lane panel",
   "音符样式": "Note style",

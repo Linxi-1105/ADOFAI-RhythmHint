@@ -274,6 +274,7 @@ internal sealed partial class SettingsWindow
         _ui.BeginCard("show", "sliders", Lang.T("显示内容"));
         s.ShowLanes = _ui.Switch("lanes", "lanes", Lang.T("四轨下落面板"), null, s.ShowLanes);
         s.ShowTaiko = _ui.Switch("taiko", "drum", Lang.T("太鼓条"), null, s.ShowTaiko);
+        s.ShowChordCount = _ui.Switch("chordCount", "chord", Lang.T("多押数字"), Lang.T("太鼓条上的三押、四押音符中间显示 3、4。"), s.ShowChordCount);
         s.ShowBpm = _ui.Switch("bpm", "gauge", Lang.T("BPM 与剩余时间"), null, s.ShowBpm);
         // 估算难度是试验性功能（2026-11-19 用户：试验阶段的功能统一标「试验性」），名字后面标出来
         s.ShowDifficulty = _ui.Switch("difficulty", "medal", Lang.T("估算难度"),

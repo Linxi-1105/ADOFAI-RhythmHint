@@ -26,7 +26,7 @@ So I made this mod: it turns every level's tiles into falling notes, so you can 
 
 - **Four lanes**: one note for every tile you need to press. Orange for single notes, blue for doubles, purple for triples and quads, and holds get a tail. Notes can be bars or round notes like the ones on the taiko bar
 - **Key boxes at the bottom**: light up when you press D F J K; the keys can be changed
-- **Taiko bar**: a long stretch of the upcoming rhythm at a glance
+- **Taiko bar**: a long stretch of the upcoming rhythm at a glance; purple triples and quads are marked 3 and 4
 - **Lane side of the taiko bar**: current BPM, time left, and a difficulty estimated from the level's tiles (experimental)
 - **Fit game view beside panel**: the game view and its UI text (combo, judgments, pause menu) shrink into the space next to the panel, so nothing is covered
 
