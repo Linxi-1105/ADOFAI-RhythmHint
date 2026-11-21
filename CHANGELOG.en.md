@@ -4,7 +4,7 @@
 
 What changed in each version, newest first.
 
-## Unreleased
+## 1.3.5 · 2026-11-20
 
 - Fixed: the purple tiles in RJ-X that need two keystrokes at once (multitap tiles) showed a single note, so pressing once as hinted didn't get you through. They now show a double on one hand (tiles needing three or four taps show a triple or quad); if Multitap Tile Behavior is set to Hit Once in the game's settings they still show a single, and changing the setting updates the hints right away. Custom fingerings made earlier get keys added or removed on multitap tiles to match the current setting
 
