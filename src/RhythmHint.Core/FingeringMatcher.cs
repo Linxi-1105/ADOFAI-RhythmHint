@@ -449,7 +449,9 @@ public static class FingeringMatcher
             if (claimedBy[i] >= 0)
             {
                 var (first, last, source, fileFirst) = customs[claimedBy[i]];
-                notes.Add(Place(source, file, fileFirst, hits, first, last, mirror));
+                var note = Place(source, file, fileFirst, hits, first, last, mirror);
+                FitTaps(note, hits, first, last, leftHanded);
+                notes.Add(note);
                 fromAuto.Add(false);
                 matched += last - first + 1;
                 i = last + 1;
@@ -731,6 +733,42 @@ public static class FingeringMatcher
         }
 
         return note;
+    }
+
+    /// <summary>
+    /// 盖着双押砖的专属音符：键数补到 / 减到这几块砖现在一共要按几下（最多 4）。手序可能是在另一种游戏设置下做的
+    /// （设成「双押砖只按一下」时双押砖上是单押）：少了游戏不前进；多了多按的那下打到下一块砖。
+    /// 补键先补已有键同一只手的另一根手指（双押同手），还不够再按「惯用手食指、另一只手食指、外侧」的顺序补；
+    /// 减键先去外侧手指，最后留惯用手食指。不盖双押砖的音符不动（第三方工具在普通砖上写的多个键照旧）。
+    /// </summary>
+    private static void FitTaps(PlannedNote note, IReadOnlyList<TileHit> hits, int first, int last, bool leftHanded)
+    {
+        var multitap = false;
+        var need = 0;
+        for (var i = first; i <= last; i++)
+        {
+            multitap |= hits[i].Multitap;
+            need += Math.Max(1, hits[i].Taps);
+        }
+
+        if (!multitap)
+        {
+            return;
+        }
+
+        need = Math.Min(need, Lanes.Count);
+        var order = leftHanded ? new[] { 1, 2, 0, 3 } : new[] { 2, 1, 3, 0 };
+        for (var k = order.Length - 1; k >= 0 && note.Lanes.Count > need; k--)
+        {
+            note.Lanes.Remove(order[k]);
+        }
+
+        var hold = note.Lanes.Values.DefaultIfEmpty(0).Max();
+        while (note.Lanes.Count < need)
+        {
+            var partner = order.Where(note.Lanes.ContainsKey).Select(Lanes.Partner).Where(l => !note.Lanes.ContainsKey(l));
+            note.Lanes[partner.Concat(order.Where(l => !note.Lanes.ContainsKey(l))).First()] = hold;
+        }
     }
 
     private static Dictionary<int, int> IndexByTile(IReadOnlyList<TileHit> hits)

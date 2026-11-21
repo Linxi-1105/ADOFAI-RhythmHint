@@ -43,8 +43,8 @@
   function plan(hits, options = defaults) {
     const o = { ...defaults, ...options };
     validateInput(hits, o);
-    // C# TileHit has a default HoldSeconds of zero; accept the same omission.
-    const tiles = hits.map(hit => ({ tileIndex: hit.tileIndex, time: hit.time, holdSeconds: hit.holdSeconds ?? 0, angle: hit.angle ?? NaN }));
+    // C# TileHit has a default HoldSeconds of zero and Taps of one; accept the same omissions.
+    const tiles = hits.map(hit => ({ tileIndex: hit.tileIndex, time: hit.time, holdSeconds: hit.holdSeconds ?? 0, angle: hit.angle ?? NaN, taps: hit.taps ?? 1 }));
     const moments = Moments(tiles, o);
     const reviewPreference = o.Style === 'ReviewPreferenceV1' && !tiles.some(hit => hit.holdSeconds > 0);
     const notes = [], rolled = [], hands = new HandState(), focus = FocusChords(moments, o, reviewPreference);
@@ -139,7 +139,14 @@
       if (samePress) group.push(tile);
       else moments.push([tile]);
     }
-    return moments.flatMap(group => group.length > 4 ? group.map(tile => [tile]) : [group]);
+    // A multitap tile takes one slot per press (C# Expand); more than four presses split by tile.
+    const presses = tile => Math.max(1, tile.taps);
+    const expand = group => {
+      const out = [];
+      for (const tile of group) for (let k = 0; k < presses(tile) && out.length < 4; k++) out.push(tile);
+      return out;
+    };
+    return moments.flatMap(group => group.reduce((sum, tile) => sum + presses(tile), 0) > 4 ? group.map(tile => expand([tile])) : [expand(group)]);
   }
 
   function ChordHand(preferred, time, last, o) {
@@ -261,6 +268,7 @@
       if (!hit || !Number.isInteger(hit.tileIndex) || hit.tileIndex < 0
         || typeof hit.time !== 'number' || !Number.isFinite(hit.time) || hit.time < previous
         || (hit.holdSeconds !== undefined && (typeof hit.holdSeconds !== 'number' || !Number.isFinite(hit.holdSeconds) || hit.holdSeconds < 0))
+        || (hit.taps !== undefined && !Number.isInteger(hit.taps))
         || (hit.angle != null && (typeof hit.angle !== 'number' || (!Number.isNaN(hit.angle) && (!Number.isFinite(hit.angle) || hit.angle < 0))))) {
         throw new Error('击打必须按时间排序，并包含有效砖号、时间和长按时长');
       }

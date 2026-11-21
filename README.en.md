@@ -74,7 +74,7 @@ No external charts are read. Each level only looks at the gaps between its own t
 
 These thresholds follow how a strong player actually plays: we went through a perfect clear of Avantgarde frame by frame. Fast sections at 75 ms per note alternate both index fingers, while bursts around 50 ms still roll.
 
-Triples and quads are recognized too (purple): for a triple, the chord hand presses two keys and the other hand's index finger adds one; a quad uses all four keys. Which tiles count as pressed together depends on how far the path turns between them: tiles the creator drew bunched together form a chord, while fast streams that just have a very high BPM are not mistaken for doubles.
+Triples and quads are recognized too (purple): for a triple, the chord hand presses two keys and the other hand's index finger adds one; a quad uses all four keys. Which tiles count as pressed together depends on how far the path turns between them: tiles the creator drew bunched together form a chord, while fast streams that just have a very high BPM are not mistaken for doubles. The purple tiles in the game's own RJ-X that need two keystrokes at once are shown as doubles too; if you set Multitap Tile Behavior to Hit Once in the game's settings, they're shown as singles.
 
 On the Fingering page you can also:
 

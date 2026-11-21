@@ -31,7 +31,12 @@ public static class Lanes
 /// 从上一块要按的砖到这块，星球转过的角度（度，180° 是一拍）。谱师把要同时按的砖画成很小的转角，
 /// 用它分辨多押和极快的连打。NaN 表示不知道（这时只看时间）。
 /// </param>
-public readonly record struct TileHit(int TileIndex, double Time, double HoldSeconds = 0, double Angle = double.NaN);
+/// <param name="Taps">
+/// 这块砖要按几下（按游戏现在的设置算，至少 1）。双押砖（关卡事件 Multitap）要同时按好几下，游戏设置成只按一下时是 1。
+/// 不写进手序文件、不算进谱面指纹。
+/// </param>
+/// <param name="Multitap">是双押砖（关卡里要按两下及以上，不管游戏设置）：套用专属手序时按 Taps 补键、减键只动这种砖。</param>
+public readonly record struct TileHit(int TileIndex, double Time, double HoldSeconds = 0, double Angle = double.NaN, int Taps = 1, bool Multitap = false);
 
 /// <summary>最终画到屏幕上的一个音符。</summary>
 public sealed class PlannedNote

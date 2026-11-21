@@ -49,7 +49,7 @@ test('current C# planner, browser planner and layout-lab agree per note across s
         layout.parameters[fields[key]] = value;
       }
       assert.deepEqual(normalize(layout.plannerOptions()), chart.options);
-      const tiles = chart.sourceHits.map(h => ({ i: h.tileIndex, t: h.time, hold: h.holdSeconds, ang: h.angle ?? NaN }));
+      const tiles = chart.sourceHits.map(h => ({ i: h.tileIndex, t: h.time, hold: h.holdSeconds, ang: h.angle ?? NaN, taps: h.taps }));
       assert.deepEqual(normalize(layout.planMod(layout.toMoments(tiles))), chart.notes.map(n => n.lanes.map(l => l.lane)), chart.name + ' layout-lab');
       count += chart.notes.length;
       three += chart.notes.filter(n => n.lanes.length === 3).length;

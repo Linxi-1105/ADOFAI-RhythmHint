@@ -4,6 +4,10 @@
 
 What changed in each version, newest first.
 
+## Unreleased
+
+- Fixed: the purple tiles in RJ-X that need two keystrokes at once (multitap tiles) showed a single note, so pressing once as hinted didn't get you through. They now show a double on one hand (tiles needing three or four taps show a triple or quad); if Multitap Tile Behavior is set to Hit Once in the game's settings they still show a single, and changing the setting updates the hints right away. Custom fingerings made earlier get keys added or removed on multitap tiles to match the current setting
+
 ## 1.3.4 · 2026-11-20
 
 - Fixed: when two hold tiles were next to each other (for example the workshop level DoG Nonstop Mix), the hints merged them into one long hold, but the game needs a new press on the second one, so following the hints got you killed. Each hold tile now has its own hint, held until the next tile. On levels with such holds, custom fingerings made earlier fall back to automatic fingering around those holds

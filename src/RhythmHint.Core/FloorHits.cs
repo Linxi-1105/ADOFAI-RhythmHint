@@ -10,7 +10,8 @@ namespace RhythmHint.Core;
 /// <param name="NoPress">不需要按键：自动砖、中旋砖、装饰用的假砖。</param>
 /// <param name="Angle">星球在这块砖上转过的角度（度，到下一块砖为止）；NaN 表示不知道。</param>
 /// <param name="Speed">这块砖的速度倍率（相对关卡起始 BPM），用来核对转角和时间对不对得上。</param>
-public readonly record struct FloorInfo(int SeqId, double Time, bool IsHold, bool NoPress, double Angle = double.NaN, double Speed = 1);
+/// <param name="Taps">关卡要求这块砖按几下（scrFloor.tapsNeeded，关卡事件 Multitap 的 taps；普通砖 1）。</param>
+public readonly record struct FloorInfo(int SeqId, double Time, bool IsHold, bool NoPress, double Angle = double.NaN, double Speed = 1, int Taps = 1);
 
 /// <summary>每块砖记的转角是哪一段（游戏的 scrFloor.angleLength 没有文档，见 FloorHits.CheckAngles）。</summary>
 public enum AngleSource
@@ -43,8 +44,11 @@ public static class FloorHits
     /// 每块要按的砖记下从上一块要按的砖到它星球转过的角度：中间不用按的砖（中旋、自动、长按尾巴）的转角累加进去。
     /// 给了 crotchet（起始 BPM 一拍的秒数）时先用 CheckAngles 核对转角记在哪一段；对不上就不信转角，排键退回只看时间。
     /// 不给时按 FloorInfo.Angle 的本意（离开这块砖的转角）用。
+    /// 双押砖（FloorInfo.Taps ≥ 2，scrPlanet 里按够 tapsNeeded 下才前进）照样是一块砖、一个提示，TileHit.Taps 记要按几下，
+    /// 排键给它几个键；<paramref name="multitapOnce"/>（游戏设置 multitapTileBehavior = HitOnce，第一下就前进）时只按一下。
+    /// 收哪些砖、时间、长按、转角都和它无关（谱面指纹不变）。
     /// </summary>
-    public static List<TileHit> From(IReadOnlyList<FloorInfo> floors, double crotchet = double.NaN)
+    public static List<TileHit> From(IReadOnlyList<FloorInfo> floors, double crotchet = double.NaN, bool multitapOnce = false)
     {
         var hits = new List<TileHit>(floors.Count);
         var source = double.IsNaN(crotchet) ? AngleSource.Exit : CheckAngles(floors, crotchet).Source;
@@ -69,12 +73,28 @@ public static class FloorHits
             // 取砖规则冻结（docs/专属手序.md）：和 1.3.1 只差这种会得出负数的输入、连续的长按砖两处
             var hold = f.IsHold && i + 1 < floors.Count ? Math.Max(0, floors[i + 1].Time - f.Time) : 0;
 
-            hits.Add(new TileHit(f.SeqId, f.Time, hold, angle));
+            var multitap = f.Taps > 1;
+            hits.Add(new TileHit(f.SeqId, f.Time, hold, angle, multitap && !multitapOnce ? f.Taps : 1, multitap));
             angle = 0;
         }
 
         hits.Sort((a, b) => a.Time.CompareTo(b.Time));
         return hits;
+    }
+
+    /// <summary>双押砖各要按几下（「砖号x下数」，空格隔开；没有双押砖为空）：谱面指纹不含它，缓存套用结果时一起比。</summary>
+    public static string TapsKey(IReadOnlyList<TileHit> hits)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var h in hits)
+        {
+            if (h.Multitap)
+            {
+                sb.Append(h.TileIndex).Append('x').Append(h.Taps).Append(' ');
+            }
+        }
+
+        return sb.ToString();
     }
 
     /// <summary>

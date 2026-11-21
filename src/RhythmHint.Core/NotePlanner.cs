@@ -9,7 +9,8 @@ namespace RhythmHint.Core;
 /// 思路来自 LaneReader 的「时间重置法」，和原版「全节奏提示」作者的实际按法一致（见 docs/开发说明.md）：
 /// <list type="number">
 /// <item>同时到的砖合成一个「时刻」：相邻两块转角不超过 ChordAngle、相隔不超过 ChordMaxGap（读不到转角时和第一块相隔不到 ChordWindow），
-/// 最多四块。双押只在 0+1 或 2+3；三押是双押那只手两个键加另一只手一个键；四押四个键</item>
+/// 最多四块。双押只在 0+1 或 2+3；三押是双押那只手两个键加另一只手一个键；四押四个键。
+/// 双押砖（关卡事件 Multitap）一块砖要按几下就算几块</item>
 /// <item>每个单押只看和前面几下的间隔（R = ResetWindow）：慢（&gt; R）右手食指连点；R/2–R 两只手食指轮流；
 /// R/2 以内同一只手两根手指轮指；停下来（&gt; R）总是回到右手食指</item>
 /// <item>轮指默认外侧手指先落：K J D F（用户习惯的 4312）</item>
@@ -341,7 +342,8 @@ public static class NotePlanner
     /// <summary>
     /// 把同时到的砖合成一个时刻（双押、三押、四押，含伪多押）。有转角时看转角：和上一块之间转得很小（≤ ChordAngle）、
     /// 又挨得近（≤ ChordMaxGap）就是同一下，一块接一块串起来；读不到转角时和这一组第一块相隔不到 ChordWindow 算同一下。
-    /// 连成 5 块以上：4K 只有四个键，是连打不是多押，全部拆开。
+    /// 双押砖（TileHit.Taps ≥ 2）要按几下就在时刻里占几个位置，BuildChord 一个位置给一个键，所以它和挨着的砖合成的伪多押一样排（双押同手）。
+    /// 一共超过 4 下：4K 只有四个键，是连打不是多押，按砖全部拆开，每块砖自己最多 4 个键。
     /// </summary>
     private static List<List<TileHit>> Moments(IReadOnlyList<TileHit> tiles, FingeringOptions o)
     {
@@ -358,7 +360,25 @@ public static class NotePlanner
             }
         }
 
-        return moments.SelectMany(m => m.Count > Lanes.Count ? m.Select(t => new List<TileHit> { t }) : new[] { m }).ToList();
+        return moments.SelectMany(m => m.Sum(Presses) > Lanes.Count ? m.Select(t => Expand(new[] { t })) : new[] { Expand(m) }).ToList();
+    }
+
+    /// <summary>这块砖要按几下（至少 1）。</summary>
+    private static int Presses(TileHit tile) => Math.Max(1, tile.Taps);
+
+    /// <summary>每块砖按几下就放几份，最多 4 份（四个键）。</summary>
+    private static List<TileHit> Expand(IEnumerable<TileHit> tiles)
+    {
+        var presses = new List<TileHit>();
+        foreach (var tile in tiles)
+        {
+            for (var k = 0; k < Presses(tile) && presses.Count < Lanes.Count; k++)
+            {
+                presses.Add(tile);
+            }
+        }
+
+        return presses;
     }
 
     /// <summary>tile 和 group 是不是同一下。玩家反馈旧版只看时间，把快速轮指段识别成双押：极快的连打转角正常、只是 BPM 高。</summary>

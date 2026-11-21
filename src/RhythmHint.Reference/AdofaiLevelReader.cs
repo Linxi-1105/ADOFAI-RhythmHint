@@ -21,7 +21,7 @@ public sealed record AdofaiLevel(List<FloorInfo> Floors, double Crotchet, double
 
 /// <summary>
 /// 宽松地读 .adofai，给难度校准这类「大量外部谱面、允许个别不准」的用途：
-/// 算 SetSpeed、Twirl、Pause（含游戏对 9–16 版暂停的迁移）、Hold、AutoPlayTiles 和中旋，其余事件不影响时间的忽略，
+/// 算 SetSpeed、Twirl、Pause（含游戏对 9–16 版暂停的迁移）、Hold、AutoPlayTiles 和中旋，记下双押砖（Multitap），其余事件不影响时间的忽略，
 /// 影响时间但没算的（多星球、自由区、带 angleOffset 的变速等）记进 Unsupported，由调用方决定要不要这一关。
 /// 游戏里以游戏算出的砖块时间为准，这里只做离线近似。
 /// </summary>
@@ -126,6 +126,7 @@ public static class AdofaiLevelReader
         {
             var extraBeats = 0.0;
             var hold = false;
+            var taps = 1;
             foreach (var e in Events(events, k))
             {
                 var kind = (string?)e["eventType"] ?? "";
@@ -165,6 +166,10 @@ public static class AdofaiLevelReader
                     case "AutoPlayTiles":
                         auto = Flag(e["enabled"]);
                         break;
+                    case "Multitap":
+                        // 双押砖：落到这块砖要按 taps 下（游戏 scnGame 读成 scrFloor.tapsNeeded），不影响时间
+                        taps = (int?)e["taps"] ?? 1;
+                        break;
                     default:
                         if (TimingEvents.Contains(kind))
                         {
@@ -190,13 +195,14 @@ public static class AdofaiLevelReader
                 swept = 360;
             }
 
-            floors.Add(new FloorInfo(k, time, hold, k > 0 && auto, swept + (extraBeats * 180), current / bpm));
+            floors.Add(new FloorInfo(k, time, hold, k > 0 && auto, swept + (extraBeats * 180), current / bpm, taps));
             time += ((swept / 180) + extraBeats) * 60 / current;
             lastDir = angles[k];
         }
 
         // angleData 有 N 项就有 N+1 块砖，最后一块（第 N 块）的到达也要按一下
-        floors.Add(new FloorInfo(angles.Length, time, false, auto));
+        var lastTaps = Events(events, angles.Length).LastOrDefault(e => (string?)e["eventType"] == "Multitap")?["taps"];
+        floors.Add(new FloorInfo(angles.Length, time, false, auto, Taps: (int?)lastTaps ?? 1));
         return new AdofaiLevel(floors, 60 / bpm, pitch > 0 ? pitch / 100 : 1, unsupported);
     }
 

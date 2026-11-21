@@ -26,7 +26,7 @@ internal sealed class Overlay : MonoBehaviour
     private bool _hotkeyBroken;
     private DemoPlayer _demo = null!;
     private InputShield _shield = null!;
-    private (int, int, int, double)? _fingerprint;
+    private (int, int, int, double, bool)? _fingerprint;
     private int _hitCount;
     private bool _rebuildRequested;
     private bool _demoShowing;
@@ -43,7 +43,7 @@ internal sealed class Overlay : MonoBehaviour
     private bool _playing; // 上一帧在打歌（关卡显示中、没暂停、没开设置窗口）：手序文件夹少看几次
     private LevelSnapshot? _snapshot;
     private bool _levelActive;
-    private (int, int, int, double)? _waitingPrint; // 还没开始的那一关：读过的指纹、排键设置和快照
+    private (int, int, int, double, bool)? _waitingPrint; // 还没开始的那一关：读过的指纹、排键设置和快照
     private string _waitingKey = string.Empty;
     private LevelSnapshot? _waitingSnapshot;
     private Message _caption = Message.Empty;

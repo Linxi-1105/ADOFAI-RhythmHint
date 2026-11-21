@@ -126,12 +126,18 @@ internal static class GameReader
         return fromGame;
     }
 
-    /// <summary>关卡的「指纹」：换关、重开、编辑器改图、换了一份砖块列表后会变，用来决定要不要重新排键。</summary>
-    public static (int, int, int, double) Fingerprint(LevelState level)
+    /// <summary>
+    /// 关卡的「指纹」：换关、重开、编辑器改图、换了一份砖块列表后会变，用来决定要不要重新排键。
+    /// 游戏设置里双押砖改成只按一下（或改回来）也算：双押砖要按几下变了。
+    /// </summary>
+    public static (int, int, int, double, bool) Fingerprint(LevelState level)
     {
         var floors = level.Floors;
-        return (RuntimeHelpers.GetHashCode(floors), floors[0].GetInstanceID(), floors.Count, floors[floors.Count - 1].entryTime);
+        return (RuntimeHelpers.GetHashCode(floors), floors[0].GetInstanceID(), floors.Count, floors[floors.Count - 1].entryTime, MultitapOnce);
     }
+
+    /// <summary>游戏设置：双押砖（关卡事件 Multitap）只按一下就过（scrPlanet 里 multitapTileBehavior = HitOnce 时第一下就前进）。</summary>
+    public static bool MultitapOnce => Persistence.multiTapTileBehavior == MultitapTileBehavior.HitOnce;
 
     /// <summary>一块要按的砖都没有时，说明各类砖各有几块，写进日志查原因。</summary>
     public static Message DescribeFloors(LevelState level)
@@ -159,17 +165,25 @@ internal static class GameReader
     /// <summary>
     /// 需要按键的砖块（规则见 FloorHits.From）。转角读 scrFloor.angleLength（星球在这块砖上转过的角度，按弧度换算成度），
     /// 用来分辨多押和极快的连打。它记在哪一段（离开还是到达这块砖）没有文档，先和砖块时间核对、用对得上的那种，
-    /// 都对不上就退回只看时间；核对结果写进日志。
+    /// 都对不上就退回只看时间；核对结果写进日志。双押砖读 scrFloor.tapsNeeded，按游戏设置（MultitapOnce）算要按几下。
     /// </summary>
     public static List<TileHit> ReadHits(LevelState level)
     {
         var floors = new List<FloorInfo>(level.Floors.Count);
+        var multitaps = 0;
         foreach (var f in level.Floors)
         {
             floors.Add(f == null
                 ? new FloorInfo(-1, 0, false, true)
                 : new FloorInfo(f.seqID, f.entryTime, f.holdLength > -1, f.auto || f.midSpin || f.isFake,
-                    f.angleLength * (180 / System.Math.PI), f.speed));
+                    f.angleLength * (180 / System.Math.PI), f.speed, f.tapsNeeded));
+            multitaps += f != null && f.tapsNeeded > 1 ? 1 : 0;
+        }
+
+        var once = MultitapOnce;
+        if (multitaps > 0)
+        {
+            Main.Mod.Logger.Log($"双押砖：{multitaps} 块，{(once ? "游戏设置为只按一下，按单押提示" : "按要按的下数提示多押")}");
         }
 
         var crotchet = Crotchet(level);
@@ -181,7 +195,7 @@ internal static class GameReader
                 AngleSource.Arrival => "按到达对，多押按转角判断",
                 _ => "都对不上，多押改按时间判断",
             });
-        return FloorHits.From(floors, crotchet);
+        return FloorHits.From(floors, crotchet, once);
     }
 
     /// <summary>

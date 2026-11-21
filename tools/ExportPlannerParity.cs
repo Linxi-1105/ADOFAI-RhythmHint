@@ -41,6 +41,7 @@ void Add(string name, List<TileHit> hits, FingeringOptions options)
             time = h.Time,
             holdSeconds = h.HoldSeconds,
             angle = double.IsNaN(h.Angle) ? (double?)null : h.Angle,
+            taps = h.Taps,
         }),
     });
 }
@@ -97,6 +98,16 @@ foreach (var style in Enum.GetValues<FingeringStyle>())
             c += 1.5;
         }
         Add($"hold-chains-{mask}-{style}", chain, options);
+        // 双押砖（关卡事件 Multitap）：一块砖按好几下；和挨着的砖合成伪多押；一共超过 4 下按砖拆开；按着长按时来双押砖
+        var taps = new List<TileHit>(); var m = 1.0;
+        foreach (var (count, tapsOf) in new[] { (1, 2), (1, 3), (1, 4), (1, 6), (2, 2), (3, 2), (4, 2), (2, 3), (1, 2) })
+        {
+            for (var j = 0; j < count; j++)
+                taps.Add(new TileHit(taps.Count + 1, m + j * .02, count == 1 && tapsOf == 2 && taps.Count % 2 == 0 ? .3 : 0, j == 0 ? 180 : 15,
+                    j == 0 ? tapsOf : 1, j == 0));
+            m += .16 + (mask % 3) * .1;
+        }
+        Add($"multitap-{mask}-{style}", taps, options);
         // 外轮换手不能换到接力长按的那只手上（TUF 3303 的 3253–3263）
         Add($"hold-after-roll-{mask}-{style}", new List<TileHit>
         {

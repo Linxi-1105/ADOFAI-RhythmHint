@@ -243,7 +243,8 @@ internal sealed class FingeringSource
 
         var chart = CustomFingering.ChartPrint(hits);
         var chosen = ChosenFor(settings, chart);
-        var key = $"{Signature()}/{settings.FingeringKey}/{chart}/{chosen ?? "-"}";
+        // 谱面指纹不看双押砖要按几下，游戏设置改了（只按一下 / 照常）也要重新套用：补键、减键跟着变
+        var key = $"{Signature()}/{settings.FingeringKey}/{chart}/{chosen ?? "-"}/{FloorHits.TapsKey(hits)}";
         if (key == _lastKey && _last != null)
         {
             return _last;

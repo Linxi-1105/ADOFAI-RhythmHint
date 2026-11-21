@@ -348,7 +348,7 @@ internal static class EditorLauncher
     private static float _nextHitSoundTry;
 
     /// <summary>读失败过的打击声和那一关的指纹：同一关、同一种打击声不再重试（每次重试都要新分配约 350 KB 的采样数组）。</summary>
-    private static (string Name, (int, int, int, double) Level)? _hitSoundFailed;
+    private static (string Name, (int, int, int, double, bool) Level)? _hitSoundFailed;
 
     /// <summary>
     /// 打歌时调用（每秒最多真做一次）：游戏已经载入这一关的打击声、还没存过时，写成 Editor/hitsound-名字.wav。
