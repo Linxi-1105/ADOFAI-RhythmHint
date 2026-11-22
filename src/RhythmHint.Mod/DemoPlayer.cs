@@ -148,11 +148,12 @@ internal sealed class DemoPlayer
 
         _builtBpm = rounded;
         _builtKey = key;
-        _demo = DemoChart.BuildForSettings(bpm, settings.Style);
+        _demo = DemoChart.BuildForSettings(bpm, settings.ActiveStyle);
         var tiles = DemoChart.Repeat(_demo, Loops);
         _tileTimes = tiles.ConvertAll(t => t.Time).ToArray();
-        var beats = BeatGrid.Build(new[] { (0.0, _demo.SecondsPerBeat) }, 0, _demo.LoopSeconds * Loops);
-        var notes = NotePlanner.Plan(tiles, settings.ToFingering());
+        var tempo = new[] { (0.0, _demo.SecondsPerBeat) };
+        var beats = BeatGrid.Build(tempo, 0, _demo.LoopSeconds * Loops);
+        var notes = NotePlanner.Plan(tiles, settings.ToFingering(), new FingeringRhythm(0, tempo, Beats: beats));
         frame.Load(notes, beats, _demo.LoopSeconds * Loops);
         frame.DifficultyTier = DifficultyEstimator.Estimate(tiles).Tier; // 设置窗口里预览徽章的样子
         frame.Bpm = (float)bpm;

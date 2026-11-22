@@ -83,6 +83,23 @@ internal static class EditorLauncher
 
         var labels = settings.KeyLabels.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
         var id = SessionLibrary.IdOf(fingering);
+        var path = GameReader.ReadPath(level, snapshot.Hits);
+        var start = level.Floors[0].entryTime;
+        var tempo = snapshot.Tempo.ConvertAll(t => (t.Time, 60 / t.Bpm));
+        var steadyBeats = snapshot.Beats;
+        if (settings.ActiveStyle != FingeringStyle.SteadyHands && snapshot.Hits.Count > 0)
+        {
+            try
+            {
+                steadyBeats = BeatGrid.InferForSteadyHands(snapshot.Hits, GameReader.ReadSpeeds(level),
+                    GameReader.Crotchet(level), start, snapshot.Hits[snapshot.Hits.Count - 1].Time + 2).Lines;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or ArithmeticException or IndexOutOfRangeException)
+            {
+                Main.Mod.Logger.Warning("编辑器：双手稳拍推算拍线失败，沿用当前拍线。" + ex.Message);
+            }
+        }
+        var rhythm = new FingeringRhythm(start, tempo, FingeringRhythm.IncomingDirections(path), steadyBeats);
         var session = new EditorSession
         {
             Id = id,
@@ -98,9 +115,10 @@ internal static class EditorLauncher
             KeyLabels = labels.Length == Lanes.Count ? labels : new[] { "D", "F", "J", "K" },
             Standard = NotePlanner.Plan(snapshot.Hits, WithStyle(FingeringStyle.TimeReset)),
             Alternate = NotePlanner.Plan(snapshot.Hits, WithStyle(FingeringStyle.ReviewPreferenceV1)),
+            Steady = NotePlanner.Plan(snapshot.Hits, WithStyle(FingeringStyle.SteadyHands), rhythm),
             Beats = snapshot.Beats,
             Tempo = snapshot.Tempo,
-            Path = GameReader.ReadPath(level, snapshot.Hits),
+            Path = path,
             Audio = ExportAudio(level, info, id),
             HitSound = ExportHitSound(level),
             Effects = ReadEffects(level),

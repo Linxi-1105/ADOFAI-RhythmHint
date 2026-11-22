@@ -403,14 +403,20 @@ internal sealed class Overlay : MonoBehaviour
         var hits = GameReader.ReadHits(level);
         var end = hits.Count > 0 ? hits[hits.Count - 1].Time : 0;
 
-        // 节拍线从起点砖（第 0 块）开始算，只用来画；排键只看砖块之间的间隔。
+        // 节拍线从起点砖（第 0 块）开始算，双手稳拍也用这份拍线。
         // 拍子和小节从关卡变速和砖块推（BeatGrid.Infer）；交给编辑器的 tempo 仍是关卡的速度（编辑器按它算轨道预览的星球转向）
         var speeds = GameReader.ReadSpeeds(level);
         var crotchet = GameReader.Crotchet(level);
         var tempo = BeatGrid.MusicalTempo(speeds, crotchet);
-        var beats = InferBeats(hits, speeds, crotchet, tempo, level.Floors[0].entryTime, end + 2);
         var settings = Main.Settings;
-        var auto = NotePlanner.Plan(hits, settings.ToFingering());
+        var options = settings.ToFingering();
+        var start = level.Floors[0].entryTime;
+        var steady = options.Style == FingeringStyle.SteadyHands;
+        var beats = InferBeats(hits, speeds, crotchet, tempo, start, end + 2, steady);
+        var rhythm = steady
+            ? new FingeringRhythm(start, tempo, FingeringRhythm.IncomingDirections(GameReader.ReadPath(level, hits)), beats)
+            : null;
+        var auto = NotePlanner.Plan(hits, options, rhythm);
         var info = GameReader.ReadInfo(level);
         var chosen = hits.Count > 0
             ? _fingerings.Choose(hits, auto, settings, info)
@@ -424,11 +430,12 @@ internal sealed class Overlay : MonoBehaviour
     /// 不让它停用整个 Mod；只在第一次出错时记日志，免得每次重排都刷一遍。
     /// </summary>
     private List<BeatLine> InferBeats(List<TileHit> hits, List<(double Time, double Speed)> speeds, double crotchet,
-        List<(double Time, double SecondsPerBeat)> tempo, double start, double end)
+        List<(double Time, double SecondsPerBeat)> tempo, double start, double end, bool steady)
     {
         try
         {
-            var grid = BeatGrid.Infer(hits, speeds, crotchet, start, end);
+            var grid = steady ? BeatGrid.InferForSteadyHands(hits, speeds, crotchet, start, end)
+                : BeatGrid.Infer(hits, speeds, crotchet, start, end);
             Main.Mod.Logger.Log($"节拍线：{grid.Summary()}");
             return grid.Lines;
         }

@@ -175,6 +175,7 @@
 
     'col.current': ['当前手序', '目前手序', 'Current', '현재 운지', '現在の運指'],
     'col.standard': ['标准', '標準', 'Standard', '표준', '標準'],
+    'col.steady': ['双手稳拍', '雙手穩拍', 'Steady hands', '양손 박자 안정', '両手のリズム安定'],
     'col.alternate': ['交替优先', '交替優先', 'Alternate first', '교대 우선', '交互優先'],
     'col.left': ['左手', '左手', 'Left', '왼손', '左手'],
     'col.right': ['右手', '右手', 'Right', '오른손', '右手'],

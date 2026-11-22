@@ -20,7 +20,7 @@ internal sealed partial class SettingsWindow
 
     private void RulesPage(Settings s, Overlay overlay)
     {
-        PageHeader(Page.Rules, Lang.T("自动排键只看本关的砖块间隔，不针对任何谱面特化；修改后立即重新排键。"));
+        PageHeader(Page.Rules, Lang.T("修改后立即重新排键。"));
         StyleCard(s);
 
         // 惯用手与多押：两个选择 + 键位图（主手橙框、多押用的键蓝光），说明里的手和键跟着换（左撇子是整套左右镜像）
@@ -87,19 +87,29 @@ internal sealed partial class SettingsWindow
         var w = (_ui.Width - (Ui.Pad * 2) - 12) / 2;
         var h = Mathf.Max(Ui.OptionHeight(w, standard.Desc, 0), Ui.OptionHeight(w, alternate.Desc, 0));
         var row = _ui.Take(h + 8);
-        var isAlternate = s.Style == FingeringStyle.ReviewPreferenceV1;
-        if (_ui.Option("standard", new Rect(row.x + Ui.Pad, row.y + 4, w, h), !isAlternate, standard.Title, standard.Tag, Accent2, standard.Desc, 0, null))
+        var isAlternate = s.ActiveStyle == FingeringStyle.ReviewPreferenceV1;
+        if (_ui.Option("standard", new Rect(row.x + Ui.Pad, row.y + 4, w, h), s.ActiveStyle == FingeringStyle.TimeReset, standard.Title, standard.Tag, Accent2, standard.Desc, 0, null))
         {
-            s.Style = FingeringStyle.TimeReset;
+            s.ActiveStyle = FingeringStyle.TimeReset;
         }
 
         if (_ui.Option("alternate", new Rect(row.x + Ui.Pad + w + 12, row.y + 4, w, h), isAlternate, alternate.Title, alternate.Tag, Warn, alternate.Desc, 0, null))
         {
-            s.Style = FingeringStyle.ReviewPreferenceV1;
+            s.ActiveStyle = FingeringStyle.ReviewPreferenceV1;
+        }
+
+        var steady = Lang.T("参考拍线与轨道方向，优先保持双手各自的节奏。");
+        var fullWidth = _ui.Width - (Ui.Pad * 2);
+        var height = Ui.OptionHeight(fullWidth, steady, 0);
+        var steadyRow = _ui.Take(height + 8);
+        if (_ui.Option("steady", new Rect(steadyRow.x + Ui.Pad, steadyRow.y + 4, fullWidth, height),
+            s.ActiveStyle == FingeringStyle.SteadyHands, Lang.T("双手稳拍"), Lang.T("试验性"), Warn, steady, 0, null))
+        {
+            s.ActiveStyle = FingeringStyle.SteadyHands;
         }
 
         _ui.Gap(12);
-        if (_ui.BeginFold("alternate", s.Style == FingeringStyle.ReviewPreferenceV1))
+        if (_ui.BeginFold("alternate", s.ActiveStyle == FingeringStyle.ReviewPreferenceV1))
         {
             var (x, width) = (_ui.X, _ui.Width);
             _ui.X += Ui.Pad;
@@ -189,7 +199,7 @@ internal sealed partial class SettingsWindow
 
         if (_ui.BeginFold("advanced", _advanced))
         {
-            s.ChordFocusMs = _ui.SliderInt("focus", "chord", Lang.T("多押换手范围"), s.Style == FingeringStyle.ReviewPreferenceV1
+            s.ChordFocusMs = _ui.SliderInt("focus", "chord", Lang.T("多押换手范围"), s.ActiveStyle == FingeringStyle.ReviewPreferenceV1
                     ? Lang.T("与多押相隔在此范围内的单押改用另一只手；交替优先排法下超出主手重置间隔的部分不起作用；0 为不换手。")
                     : Lang.T("与多押相隔在此范围内的单押改用另一只手；0 为不换手。"),
                 s.ChordFocusMs, 0, 800, 10, v => Ms(v));

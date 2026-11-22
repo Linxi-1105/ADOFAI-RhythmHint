@@ -92,6 +92,8 @@ public sealed class EditorSession
 
     public IReadOnlyList<PlannedNote> Alternate { get; set; } = Array.Empty<PlannedNote>();
 
+    public IReadOnlyList<PlannedNote> Steady { get; set; } = Array.Empty<PlannedNote>();
+
     public IReadOnlyList<BeatLine> Beats { get; set; } = Array.Empty<BeatLine>();
 
     /// <summary>BPM 变化点：时间、BPM。</summary>
@@ -152,6 +154,7 @@ public sealed class EditorSession
             w.WriteStartObject();
             CustomFingering.WriteNotes(w, "standard", Standard);
             CustomFingering.WriteNotes(w, "alternate", Alternate);
+            if (Steady.Count > 0) CustomFingering.WriteNotes(w, "steady", Steady);
             w.WriteEndObject();
 
             w.WritePropertyName("beats");
