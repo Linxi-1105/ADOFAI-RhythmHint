@@ -108,6 +108,15 @@ internal sealed partial class SettingsWindow
             s.ActiveStyle = FingeringStyle.SteadyHands;
         }
 
+        var timing = Lang.T("按击打间隔分手，沿用均匀脉冲，并根据接拍选择轮指。");
+        var timeHeight = Ui.OptionHeight(fullWidth, timing, 0);
+        var timeRow = _ui.Take(timeHeight + 8);
+        if (_ui.Option("reviewedTime", new Rect(timeRow.x + Ui.Pad, timeRow.y + 4, fullWidth, timeHeight),
+            s.ActiveStyle == FingeringStyle.ReviewedTime, Lang.T("时间稳拍（强弱拍）"), Lang.T("试验性"), Warn, timing, 0, null))
+        {
+            s.ActiveStyle = FingeringStyle.ReviewedTime;
+        }
+
         _ui.Gap(12);
         if (_ui.BeginFold("alternate", s.ActiveStyle == FingeringStyle.ReviewPreferenceV1))
         {

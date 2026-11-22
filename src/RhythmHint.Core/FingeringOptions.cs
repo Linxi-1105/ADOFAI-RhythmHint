@@ -6,6 +6,7 @@ public enum FingeringStyle
     TimeReset,
     ReviewPreferenceV1,
     SteadyHands,
+    ReviewedTime,
 }
 
 /// <summary>排键参数（单位：秒）。对所有关卡一视同仁。</summary>

@@ -103,6 +103,7 @@ internal sealed partial class SettingsWindow
         var style = s.ActiveStyle switch
         {
             FingeringStyle.SteadyHands => Lang.T("双手稳拍"),
+            FingeringStyle.ReviewedTime => Lang.T("时间稳拍（强弱拍）"),
             FingeringStyle.ReviewPreferenceV1 => Lang.T("交替优先"),
             _ => Lang.T("标准"),
         };

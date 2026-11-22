@@ -5,9 +5,9 @@ namespace RhythmHint.Core.Tests;
 public sealed class ReviewedTripletCadenceTests
 {
     [Theory]
-    [InlineData(false, "KJFJ")]
-    [InlineData(true, "DFJF")]
-    public void SubdividedMainPulseRollsIntoItsNextIndexTap(bool leftHanded, string keys)
+    [InlineData(false, "DJFJ")]
+    [InlineData(true, "KFJF")]
+    public void SubdividedMainPulseSwitchesItsOpeningHandAndKeepsTheExit(bool leftHanded, string keys)
     {
         Assert.Equal(keys, Phrase(.067, 2, leftHanded: leftHanded));
     }

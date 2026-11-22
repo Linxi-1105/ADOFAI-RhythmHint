@@ -8,6 +8,7 @@ internal static partial class SteadyHands
 {
     private const int Left = 0, Main = 1, Unassigned = -1;
     private const double Epsilon = 1e-6;
+    private const double SingleFingerRecovery = .15;
 
     private readonly record struct Attack(TileHit Hit, int Presses, double Beat, TrackAxis Axis, double DoubleTurn, bool DuringHold)
     {
@@ -25,11 +26,14 @@ internal static partial class SteadyHands
         var alternate = options.ChordsOnOtherHand ? new bool[attacks.Length] : FindAlternatingChordRuns(attacks, lanes);
         var freeTap = UnreservedTaps(attacks, lanes, alternate);
         AssignHands(attacks, lanes, options.ChordsOnOtherHand, alternate);
+        if (options.UseRoll) FinishChordRuns(attacks, lanes, alternate, options.OuterRoll);
         ApplyCornerTransitions(attacks, lanes, freeTap);
         FinishAlternatingTriplets(attacks, lanes, freeTap);
         ConnectAccelerations(attacks, lanes, freeTap);
         KeepSlowRepeatingFigures(attacks, lanes, freeTap);
-        return WriteNotes(moments, lanes);
+        var notes = WriteNotes(moments, lanes);
+        EnforceHandRecovery(notes);
+        return notes;
     }
 
     private static Attack[] ReadAttacks(List<List<TileHit>> moments, FingeringRhythm? rhythm)
@@ -249,8 +253,8 @@ internal static partial class SteadyHands
         return phase;
     }
 
-    // A double takes one rhythmic slot in a fast single/double stream. Keep the
-    // two possible starting hands in the search; every later slot switches hands.
+    // Each dense double takes one rhythmic slot, including streams made entirely
+    // of doubles. Keep both phases unless an entry determines the opening hand.
     private static bool[] FindAlternatingChordRuns(Attack[] attacks, int[] lanes)
     {
         var alternate = new bool[attacks.Length];
@@ -262,27 +266,55 @@ internal static partial class SteadyHands
                 start++;
                 continue;
             }
+            var entry = Gap(attacks, start);
+            var entersFromRoll = attacks[start].Double && start > 1 && !attacks[start - 1].IsChord
+                && !attacks[start - 1].DuringHold && lanes[start - 1] != Unassigned && entry <= .071;
+            var slowing = false;
             var end = start;
             var doubles = attacks[start].Double ? 1 : 0;
-            while (end + 1 < attacks.Length && Similar(step, Gap(attacks, end + 1))
-                && attacks[end + 1].Presses <= 2 && !attacks[end + 1].DuringHold && lanes[end + 1] == Unassigned)
+            while (end + 1 < attacks.Length && attacks[end + 1].Presses <= 2
+                && !attacks[end + 1].DuringHold && lanes[end + 1] == Unassigned)
             {
+                var gap = Gap(attacks, end + 1);
+                if (!Similar(step, gap))
+                {
+                    // A straight slowdown can keep the same rhythmic subdivision
+                    // even though the interval in seconds increases on every tile.
+                    if (!entersFromRoll || gap >= SingleFingerRecovery || !ContinuesSlowdown(end + 1)) break;
+                    slowing = true;
+                }
                 end++;
                 if (attacks[end].Double) doubles++;
             }
             var count = end - start + 1;
-            if (count >= 6 && doubles >= 2 && doubles < count)
+            if (count >= 6 && (doubles >= 2 || slowing))
             {
-                // A lead-in with a whole attack slot free lets the preferred
-                // hand take the opening double. A continuous entry keeps both phases.
-                if (attacks[start].Double && !alternate[start] &&
-                    Gap(attacks, start) >= 2 * step - Math.Max(.001, step * .035))
-                    lanes[start] = Lanes.IndexLane(Main);
+                if (attacks[start].Double && !alternate[start])
+                {
+                    if (entersFromRoll)
+                        alternate[start] = true;
+                    else if (entry >= 2 * step - Math.Max(.001, step * .035))
+                        lanes[start] = Lanes.IndexLane(Main);
+                }
                 for (var i = start + 1; i <= end; i++) alternate[i] = true;
+                // Once the same subdivision is slow enough for one finger,
+                // let the main hand start the slower pulse immediately.
+                if (slowing && end + 1 < attacks.Length && lanes[end + 1] == Unassigned
+                    && Gap(attacks, end + 1) >= SingleFingerRecovery && ContinuesSlowdown(end + 1))
+                    lanes[end + 1] = Lanes.IndexLane(Main);
             }
             start = Math.Max(start + 1, end);
         }
         return alternate;
+
+        bool ContinuesSlowdown(int i)
+        {
+            var gap = Gap(attacks, i);
+            var previous = Gap(attacks, i - 1);
+            return !attacks[i].IsChord && !attacks[i].DuringHold && Near(Turn(attacks[i]), 180, .5)
+                && Near(attacks[i].Beat - attacks[i - 1].Beat, .25, .05)
+                && gap > previous && gap <= 1.08 * previous;
+        }
     }
 
     private static bool[] FindPickupPulses(Attack[] attacks)
@@ -309,7 +341,7 @@ internal static partial class SteadyHands
         return pulse;
     }
 
-    private static void AssignRolls(Attack[] attacks, int[] lanes, bool outerFirst)
+    private static void AssignRolls(Attack[] attacks, int[] lanes, bool outerFirst, bool timingOnly = false)
     {
         var cycle = outerFirst ? new[] { 3, 2, 0, 1 } : new[] { 2, 3, 1, 0 };
         for (var start = 0; start + 1 < attacks.Length;)
@@ -346,7 +378,8 @@ internal static partial class SteadyHands
                 // back onto the main pulse or finish before a rest. Read its exit.
                 var pulse = 4 * interval;
                 var onMainPulse = !veryDense && start > 0 && end + 1 < attacks.Length
-                    && Quarter(attacks[start].Beat, .04) == 0 && Similar(pulse, Gap(attacks, start))
+                    && (timingOnly ? Similar(pulse, Gap(attacks, start - 1)) : Quarter(attacks[start].Beat, .04) == 0)
+                    && Similar(pulse, Gap(attacks, start))
                     && !attacks[start - 1].IsChord && !attacks[start].DuringHold
                     && !attacks[end + 1].IsChord && !attacks[end + 1].DuringHold;
                 var exitGap = Gap(attacks, end + 1);

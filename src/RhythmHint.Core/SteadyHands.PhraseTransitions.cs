@@ -4,6 +4,29 @@ namespace RhythmHint.Core;
 
 internal static partial class SteadyHands
 {
+    private static void FinishChordRuns(Attack[] attacks, int[] lanes, bool[] alternate, bool outerFirst)
+    {
+        for (var i = 1; i + 1 < attacks.Length; i++)
+        {
+            if (!alternate[i] || alternate[i + 1] || !attacks[i - 1].Double
+                || attacks[i].IsChord || attacks[i + 1].IsChord || attacks[i].DuringHold || attacks[i + 1].DuringHold)
+                continue;
+
+            // Keep a short downbeat fill on the assigned hand before a rest.
+            // Away from the downbeat leave both notes in the ordinary sequence.
+            var step = Gap(attacks, i);
+            var fill = Gap(attacks, i + 1);
+            if (Quarter(attacks[i].Beat, .04) != 0 || fill <= Epsilon || fill > step / 2 + Epsilon
+                || Gap(attacks, i + 2) < 2 * step - Epsilon)
+                continue;
+
+            var index = lanes[i];
+            var outer = Lanes.Partner(index);
+            lanes[i] = outerFirst ? outer : index;
+            lanes[i + 1] = outerFirst ? index : outer;
+        }
+    }
+
     private static void FinishAlternatingTriplets(Attack[] attacks, int[] lanes, bool[] freeTap)
     {
         for (var end = 3; end + 1 < attacks.Length; end++)
@@ -67,7 +90,7 @@ internal static partial class SteadyHands
     {
         var main = Lanes.IndexLane(Main);
         var left = Lanes.IndexLane(Left);
-        for (var length = 2; length <= 4; length++)
+        for (var length = 2; length <= 8; length++)
         {
             for (var start = 1; start + 3 * length <= attacks.Length; start++)
             {
@@ -97,7 +120,7 @@ internal static partial class SteadyHands
             }
         }
 
-        bool Eligible(int i) => freeTap[i] && Gap(attacks, i) >= .18
+        bool Eligible(int i) => freeTap[i] && Gap(attacks, i) >= .175
             && (lanes[i] != left || lanes[i - 1] != left);
     }
 }

@@ -59,7 +59,8 @@ public static class NotePlanner
             ValidateReviewOptions(options);
         }
 
-        var moments = Moments(tiles, options);
+        var timePhrases = options.Style == FingeringStyle.ReviewedTime;
+        var moments = timePhrases ? SteadyMoments(tiles, options) : Moments(tiles, options);
         var notes = new List<PlannedNote>(moments.Count);
         var rolled = new List<bool>(moments.Count);
         var hands = new HandState();
@@ -132,6 +133,7 @@ public static class NotePlanner
             ReviewPhrases(notes, options);
         }
 
+        if (timePhrases) SteadyHands.ApplyTimePhrases(moments, notes, options);
         return options.LeftHanded ? notes.ConvertAll(Mirror) : notes;
     }
 

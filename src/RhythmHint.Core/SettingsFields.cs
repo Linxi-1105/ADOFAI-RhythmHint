@@ -128,15 +128,17 @@ public sealed partial class Settings
 
     // A separate field lets older versions continue reading their Style values.
     public bool UseSteadyHands;
+    public bool UseReviewedTime;
 
     [System.Xml.Serialization.XmlIgnore]
     public FingeringStyle ActiveStyle
     {
-        get => UseSteadyHands ? FingeringStyle.SteadyHands : Style;
+        get => UseReviewedTime ? FingeringStyle.ReviewedTime : UseSteadyHands ? FingeringStyle.SteadyHands : Style;
         set
         {
             UseSteadyHands = value == FingeringStyle.SteadyHands;
-            if (!UseSteadyHands) Style = value;
+            UseReviewedTime = value == FingeringStyle.ReviewedTime;
+            if (!UseSteadyHands && !UseReviewedTime) Style = value;
         }
     }
 
